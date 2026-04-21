@@ -1,0 +1,32 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Smart Battery Optimizer Setup",
+        "description": "Configure the sensors and parameters for the Smart Battery Optimizer.",
+        "data": {
+          "tibber_price_sensor": "Tibber Price Sensor",
+          "tibber_consumption_sensor": "Tibber Pulse Consumption Sensor",
+          "tibber_export_sensor": "Tibber Pulse Export Sensor",
+          "battery_level_sensor": "Battery Level Sensor (%)",
+          "solar_power_sensor": "Total Solar Power Sensor (W)",
+          "opendtu_limit_number": "OpenDTU Inverter Limit Entity",
+          "opendtu_output_sensor": "OpenDTU Inverter Output Sensor (W)",
+          "weather_entity": "Weather Entity (for cloud cover)",
+          "battery_capacity_wh": "Battery Capacity (Wh)",
+          "battery_min_limit_pct": "Minimum Battery Limit (%)",
+          "excluded_power_sensors": "Excluded Power Sensors (e.g., EV Charger)",
+          "prioritized_excess_consumers": "Prioritized Consumers (Switches for excess power)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect",
+      "invalid_auth": "Invalid authentication",
+      "unknown": "Unexpected error"
+    },
+    "abort": {
+      "already_configured": "Device is already configured"
+    }
+  }
+}
