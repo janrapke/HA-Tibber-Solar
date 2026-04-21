@@ -16,7 +16,7 @@ A custom component for Home Assistant that intelligently controls a battery stor
 1. Open HACS in your Home Assistant.
 2. **For newer HACS versions:** Click on the 3 vertical dots (⋮) in the top right corner.
 3. Select **"Custom repositories"** (Benutzerdefinierte Repositories).
-4. Add the URL of this GitHub repository.
+4. Add the URL of this GitHub repository: `https://github.com/janrapke/HA-Tibber-Solar`
 5. Select **"Integration"** as the category.
 6. Click **Add**.
 7. Close the modal, then search for "Smart Battery Optimizer" in the search bar and install it.
