@@ -14,13 +14,14 @@ A custom component for Home Assistant that intelligently controls a battery stor
 ## Installation via HACS (Recommended)
 
 1. Open HACS in your Home Assistant.
-2. Click on the 3 dots in the top right corner and select **Custom repositories**.
-3. Add the URL of this repository.
-4. Select **Integration** as the category.
-5. Click **Add**.
-6. Search for "Smart Battery Optimizer" in HACS and install it.
-7. Restart Home Assistant.
-8. Go to **Settings > Devices & Services > Add Integration** and search for "Smart Battery Optimizer".
+2. **For newer HACS versions:** Click on the 3 vertical dots (⋮) in the top right corner.
+3. Select **"Custom repositories"** (Benutzerdefinierte Repositories).
+4. Add the URL of this GitHub repository.
+5. Select **"Integration"** as the category.
+6. Click **Add**.
+7. Close the modal, then search for "Smart Battery Optimizer" in the search bar and install it.
+8. Restart Home Assistant.
+9. Go to **Settings > Devices & Services > Add Integration** and search for "Smart Battery Optimizer".
 
 ## Configuration
 
