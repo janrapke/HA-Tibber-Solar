@@ -16,7 +16,7 @@ from .const import (
     CONF_TIBBER_EXPORT_SENSOR,
     CONF_BATTERY_LEVEL_SENSOR,
     CONF_SOLAR_POWER_SENSOR,
-    CONF_OPENDTU_LIMIT_NUMBER,
+    CONF_OPENDTU_INVERTER_SWITCH,
     CONF_OPENDTU_OUTPUT_SENSOR,
     CONF_WEATHER_ENTITY,
     CONF_BATTERY_CAPACITY_WH,
@@ -70,7 +70,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         if self.last_tibber_fetch and (now - self.last_tibber_fetch).total_seconds() < 3600:
             return # Only fetch once per hour
 
-        prices = await fetch_tibber_prices(api_token)
+        prices = await fetch_tibber_prices(self.hass, api_token)
         if prices:
             self.tibber_prices = prices
             self.last_tibber_fetch = now
@@ -132,18 +132,23 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         return forecasts
 
     def _get_current_price(self) -> float | None:
-        """Get the current Tibber price from fetched data."""
+        """Get the current live Tibber price from the HA sensor."""
+        # Always use the live HA sensor to support 15-minute price updates
+        price_entity = self.config.get(CONF_TIBBER_PRICE_SENSOR)
+        state = self.hass.states.get(price_entity)
+        if state and state.state not in ("unknown", "unavailable"):
+            try:
+                return float(state.state)
+            except ValueError:
+                pass
+
+        # Fallback to hourly API if sensor failed
         now = dt_util.now()
         for price_data in self.tibber_prices:
             dt = price_data.get("datetime")
             if dt and dt.date() == now.date() and dt.hour == now.hour:
                 return float(price_data.get("total", 0.0))
 
-        # Fallback to sensor if API failed
-        price_entity = self.config.get(CONF_TIBBER_PRICE_SENSOR)
-        state = self.hass.states.get(price_entity)
-        if state:
-            return float(state.state)
         return None
 
     def _is_price_cheap(self, current_price: float) -> bool:
@@ -209,22 +214,24 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         self.predicted_remaining_consumption = self.learning_engine.predict_remaining_consumption(current_hour)
 
         current_price = self._get_current_price()
-        is_cheap = self._is_price_cheap(current_price)
 
-        # 4. Control Logic
+        # 4. Control Logic (Dynamic Threshold Simulation)
         batt_level_pct = self._get_float_state(self.config[CONF_BATTERY_LEVEL_SENSOR])
         batt_cap_wh = self.config.get(CONF_BATTERY_CAPACITY_WH, 5000)
         batt_min_pct = self.config.get(CONF_BATTERY_MIN_LIMIT_PCT, 10)
 
+        # Build hourly plan to determine the dynamic price threshold
+        price_threshold = self._simulate_optimal_threshold(current_hour, hourly_forecasts, batt_level_pct, batt_cap_wh, batt_min_pct)
+        self._build_hourly_plan(current_hour, hourly_forecasts, batt_level_pct, batt_cap_wh, price_threshold)
+
         available_batt_capacity_wh = batt_cap_wh * (1.0 - (batt_level_pct / 100.0))
 
-        # Determine if battery will overfill
-        # If expected solar > expected consumption + available battery space
+        # Determine if battery will overfill today
         battery_will_overfill = self.predicted_remaining_solar > (self.predicted_remaining_consumption + available_batt_capacity_wh)
 
-        target_opendtu_limit = 0.0
+        turn_on_inverter = True # True = Producing (Nulleinspeisung by DTU), False = Off (Grid consumption)
 
-        async def set_switches(turn_on: bool):
+        async def set_excess_switches(turn_on: bool):
             for switch_entity in self.config.get(CONF_PRIORITIZED_EXCESS_CONSUMERS, []):
                 state = self.hass.states.get(switch_entity)
                 is_on = state and state.state == "on"
@@ -236,64 +243,59 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         if self.manual_zero_export:
             # Force zero export mode
             self.current_operating_mode = "Manueller Modus: Nulleinspeisung erzwungen"
-            target_opendtu_limit = self.calculated_house_consumption
-            await set_switches(False)
+            turn_on_inverter = True
+            await set_excess_switches(False)
+
+        elif batt_level_pct <= batt_min_pct:
+            self.current_operating_mode = "Batterie am Minimum: OpenDTU aus (Netzbezug)"
+            turn_on_inverter = False
+            await set_excess_switches(False)
 
         elif battery_will_overfill:
             # We must use the energy now, regardless of price!
-            self.current_operating_mode = "Batterie wird voll: Einspeisung zur Vermeidung von Überschuss"
-            target_opendtu_limit = self.calculated_house_consumption
+            self.current_operating_mode = "Batterie wird voll: DTU an zur Vermeidung von Überschuss"
+            turn_on_inverter = True
 
             # Manage excess consumers if battery is very full
             if batt_level_pct >= 95 and (current_solar > self.calculated_house_consumption):
                 self.current_operating_mode = "Batterie voll: Priorisierte Verbraucher aktiviert"
-                await set_switches(True)
+                await set_excess_switches(True)
             else:
-                await set_switches(False)
+                await set_excess_switches(False)
 
-        elif is_cheap:
-            # Price is cheap and battery won't overfill -> turn off inverter, use grid, save solar
-            self.current_operating_mode = "Strompreis günstig: OpenDTU auf 0W, Batterie wird geschont (Netzbezug)"
-            target_opendtu_limit = 0.0
-            await set_switches(False)
+        elif current_price is not None and current_price <= price_threshold:
+            # Price is cheap enough compared to the threshold needed for upcoming expensive hours
+            self.current_operating_mode = f"Strom günstig (<{round(price_threshold,3)}€): DTU aus (Akku wird gespart)"
+            turn_on_inverter = False
+            await set_excess_switches(False)
 
         else:
-            # Normal operation: Price is not cheap, zero export.
-            # Only do this if battery is above minimum limit.
-            if batt_level_pct > batt_min_pct:
-                self.current_operating_mode = "Normalbetrieb: Nulleinspeisung aktiv"
-                target_opendtu_limit = self.calculated_house_consumption
-            else:
-                self.current_operating_mode = "Batterie leer: OpenDTU auf 0W (Netzbezug)"
-                target_opendtu_limit = 0.0
+            # Normal operation: Price is above threshold, use battery.
+            self.current_operating_mode = "Preis hoch: DTU an (Nulleinspeisung aktiv)"
+            turn_on_inverter = True
+            await set_excess_switches(False)
 
-            await set_switches(False)
-
-        # Build hourly plan for the rest of the day
-        self._build_hourly_plan(current_hour, hourly_forecasts, batt_level_pct, batt_cap_wh)
-
-        # Apply limit to OpenDTU
+        # Apply Switch state to OpenDTU Inverter
         try:
-            # We add a small buffer or cap it based on max inverter capability.
-            # Assuming OpenDTU number entity accepts Watts.
-            target_w = round(max(0, target_opendtu_limit))
+            inverter_switch = self.config.get(CONF_OPENDTU_INVERTER_SWITCH)
+            if inverter_switch:
+                switch_state = self.hass.states.get(inverter_switch)
+                is_on = switch_state and switch_state.state == "on"
 
-            await self.hass.services.async_call(
-                "number",
-                "set_value",
-                {"entity_id": self.config[CONF_OPENDTU_LIMIT_NUMBER], "value": target_w},
-                blocking=False
-            )
-            _LOGGER.debug("Set OpenDTU limit to %s W", target_w)
+                if turn_on_inverter and not is_on:
+                    await self.hass.services.async_call("switch", "turn_on", {"entity_id": inverter_switch}, blocking=False)
+                    _LOGGER.debug("Turned OpenDTU ON (Producing)")
+                elif not turn_on_inverter and is_on:
+                    await self.hass.services.async_call("switch", "turn_off", {"entity_id": inverter_switch}, blocking=False)
+                    _LOGGER.debug("Turned OpenDTU OFF (Not Producing)")
         except Exception as e:
-            _LOGGER.error("Failed to set OpenDTU limit: %s", e)
+            _LOGGER.error("Failed to toggle OpenDTU switch: %s", e)
 
         return {
             "calculated_house_consumption": self.calculated_house_consumption,
             "predicted_remaining_solar": self.predicted_remaining_solar,
             "predicted_remaining_consumption": self.predicted_remaining_consumption,
             "battery_will_overfill": battery_will_overfill,
-            "target_limit": target_opendtu_limit,
             "current_operating_mode": self.current_operating_mode,
             "hourly_plan": self.hourly_plan,
             "current_price": current_price,
@@ -302,8 +304,73 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             "current_consumption": tibber_cons,
         }
 
-    def _build_hourly_plan(self, start_hour: int, hourly_forecasts: list[dict], current_batt_pct: float, batt_cap_wh: float):
-        """Generate a forecast plan for the remaining hours of the day."""
+    def _simulate_optimal_threshold(self, start_hour: int, hourly_forecasts: list[dict], current_batt_pct: float, batt_cap_wh: float, batt_min_pct: float) -> float:
+        """Simulates the future to find the optimal price threshold to discharge the battery."""
+        forecast_dict = {f["hour"]: f["cloud_cover"] for f in hourly_forecasts}
+        now = dt_util.now()
+
+        # Gather data for the next 24 hours (today and tomorrow morning)
+        future_hours = []
+        for hr_offset in range(24):
+            eval_time = now + timedelta(hours=hr_offset)
+            hr = eval_time.hour
+            cc = forecast_dict.get(hr, 50.0) if eval_time.date() == now.date() else 50.0 # simplified next day cloud
+
+            pred_solar = self.learning_engine.predict_solar_for_hour(hr, cc)
+            pred_cons = self.learning_engine.predict_consumption_for_hour(hr)
+
+            price = 0.0
+            for p in self.tibber_prices:
+                dt = p.get("datetime")
+                if dt and dt.date() == eval_time.date() and dt.hour == hr:
+                    price = float(p.get("total", 0.0))
+                    break
+
+            future_hours.append({
+                "solar": pred_solar,
+                "cons": pred_cons,
+                "price": price
+            })
+
+        # Binary search for the perfect threshold (between 0.0 and 1.0 EUR)
+        low, high = -0.5, 1.0
+        best_threshold = -0.5
+
+        for _ in range(15): # 15 iterations is plenty for precision
+            mid_threshold = (low + high) / 2.0
+            simulated_batt_wh = batt_cap_wh * (current_batt_pct / 100.0)
+            min_batt_wh = batt_cap_wh * (batt_min_pct / 100.0)
+
+            failed = False
+            for fh in future_hours:
+                # Add solar
+                simulated_batt_wh += fh["solar"]
+
+                # If price is above threshold, we use battery to cover consumption
+                if fh["price"] > mid_threshold:
+                    simulated_batt_wh -= fh["cons"]
+
+                # Clamp battery
+                simulated_batt_wh = min(batt_cap_wh, simulated_batt_wh)
+
+                # Did we run out of battery during an expensive hour?
+                if simulated_batt_wh < min_batt_wh:
+                    failed = True
+                    break
+
+            if failed:
+                # Threshold was too low (we discharged too often and ran out of battery)
+                # We need a higher threshold (discharge less often)
+                low = mid_threshold
+            else:
+                # We survived! This threshold works. Try to find a lower one (use battery more)
+                best_threshold = mid_threshold
+                high = mid_threshold
+
+        return best_threshold
+
+    def _build_hourly_plan(self, start_hour: int, hourly_forecasts: list[dict], current_batt_pct: float, batt_cap_wh: float, price_threshold: float):
+        """Generate a forecast plan for the remaining hours of the day using the dynamic threshold."""
         plan = []
         simulated_batt_wh = batt_cap_wh * (current_batt_pct / 100.0)
 
@@ -325,21 +392,19 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                     price = float(p.get("total", 0.0))
                     break
 
-            is_cheap = self._is_price_cheap(price)
-
-            # Simulate logic
+            # Simulate logic with dynamic threshold
             action = "Nulleinspeisung"
             available_cap = batt_cap_wh - simulated_batt_wh
-            will_overfill = (pred_solar * (24 - hr)) > (pred_cons * (24 - hr) + available_cap) # simplified lookahead
+            will_overfill = (pred_solar * (24 - hr)) > (pred_cons * (24 - hr) + available_cap)
 
             if will_overfill:
-                action = "Überschussvermeidung"
+                action = "Überschussvermeidung (DTU An)"
                 simulated_batt_wh += pred_solar - pred_cons
-            elif is_cheap:
-                action = "Netzbezug (Batterie schonen)"
+            elif price <= price_threshold:
+                action = f"Netzbezug (Akku sparen für >{round(price_threshold,3)}€)"
                 simulated_batt_wh += pred_solar # battery only charges, no discharge
             else:
-                action = "Nulleinspeisung"
+                action = "Nulleinspeisung (DTU An)"
                 simulated_batt_wh += pred_solar - pred_cons
 
             # Clamp battery simulation
@@ -347,7 +412,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
             plan.append({
                 "hour": f"{hr:02d}:00",
-                "price": price,
+                "price": round(price, 4),
                 "solar_wh": round(pred_solar),
                 "consumption_wh": round(pred_cons),
                 "battery_pct_end": round((simulated_batt_wh / batt_cap_wh) * 100),

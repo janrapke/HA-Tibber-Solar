@@ -16,7 +16,7 @@ from .const import (
     CONF_TIBBER_EXPORT_SENSOR,
     CONF_BATTERY_LEVEL_SENSOR,
     CONF_SOLAR_POWER_SENSOR,
-    CONF_OPENDTU_LIMIT_NUMBER,
+    CONF_OPENDTU_INVERTER_SWITCH,
     CONF_OPENDTU_OUTPUT_SENSOR,
     CONF_WEATHER_ENTITY,
     CONF_BATTERY_CAPACITY_WH,
@@ -58,8 +58,8 @@ class SmartBatteryOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 vol.Required(CONF_SOLAR_POWER_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor", device_class="power")
                 ),
-                vol.Required(CONF_OPENDTU_LIMIT_NUMBER): selector.EntitySelector(
-                    selector.EntitySelectorConfig(domain="number")
+                vol.Required(CONF_OPENDTU_INVERTER_SWITCH): selector.EntitySelector(
+                    selector.EntitySelectorConfig(domain="switch")
                 ),
                 vol.Required(CONF_OPENDTU_OUTPUT_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor", device_class="power")

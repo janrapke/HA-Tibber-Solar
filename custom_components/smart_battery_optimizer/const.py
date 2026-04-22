@@ -10,7 +10,7 @@ CONF_TIBBER_CONSUMPTION_SENSOR = "tibber_consumption_sensor"
 CONF_TIBBER_EXPORT_SENSOR = "tibber_export_sensor"
 CONF_BATTERY_LEVEL_SENSOR = "battery_level_sensor"
 CONF_SOLAR_POWER_SENSOR = "solar_power_sensor"
-CONF_OPENDTU_LIMIT_NUMBER = "opendtu_limit_number"
+CONF_OPENDTU_INVERTER_SWITCH = "opendtu_inverter_switch"
 CONF_OPENDTU_OUTPUT_SENSOR = "opendtu_output_sensor"
 CONF_WEATHER_ENTITY = "weather_entity"
 

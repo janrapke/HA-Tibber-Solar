@@ -19,7 +19,6 @@ async def async_setup_entry(
         CalculatedConsumptionSensor(coordinator, entry.entry_id),
         PredictedRemainingSolarSensor(coordinator, entry.entry_id),
         PredictedRemainingConsumptionSensor(coordinator, entry.entry_id),
-        TargetLimitSensor(coordinator, entry.entry_id),
         CurrentOperatingModeSensor(coordinator, entry.entry_id),
         ForecastPlanSensor(coordinator, entry.entry_id),
         # Diagnostic Sensors
@@ -85,25 +84,6 @@ class PredictedRemainingConsumptionSensor(CoordinatorEntity, SensorEntity):
     def native_value(self):
         if self.coordinator.data:
             return round(self.coordinator.data.get("predicted_remaining_consumption", 0), 0)
-        return None
-
-class TargetLimitSensor(CoordinatorEntity, SensorEntity):
-    """Sensor showing the current target limit set to OpenDTU."""
-
-    _attr_has_entity_name = True
-    _attr_device_class = SensorDeviceClass.POWER
-    _attr_native_unit_of_measurement = "W"
-    _attr_state_class = SensorStateClass.MEASUREMENT
-
-    def __init__(self, coordinator, entry_id):
-        super().__init__(coordinator)
-        self._attr_unique_id = f"{entry_id}_target_limit"
-        self._attr_name = "Target OpenDTU Limit"
-
-    @property
-    def native_value(self):
-        if self.coordinator.data:
-            return round(self.coordinator.data.get("target_limit", 0), 1)
         return None
 
 class CurrentOperatingModeSensor(CoordinatorEntity, SensorEntity):
