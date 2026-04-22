@@ -23,8 +23,11 @@ from .const import (
     CONF_WEATHER_ENTITY,
     CONF_BATTERY_CAPACITY_WH,
     CONF_BATTERY_MIN_LIMIT_PCT,
+    CONF_SOLAR_CHARGE_STATE_SENSOR,
+    CONF_BATTERY_EFFICIENCY_PCT,
     CONF_EXCLUDED_POWER_SENSORS,
-    CONF_PRIORITIZED_EXCESS_CONSUMERS,
+    CONF_PRIMARY_EXCESS_CONSUMERS,
+    CONF_SECONDARY_EXCESS_CONSUMERS,
     CONF_EXTREME_PRICE_THRESHOLD,
     CONF_MAX_INVERTER_POWER_W,
 )
@@ -55,6 +58,18 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         # Number entity states
         self.extreme_price_threshold = config.get(CONF_EXTREME_PRICE_THRESHOLD, 0.40)
         self.extreme_price_factor = 0.0
+
+        # Number entity states initialized via fallbacks, actual states managed by NumberEntities
+        self.extreme_price_threshold = config.get(CONF_EXTREME_PRICE_THRESHOLD, 0.40)
+        self.extreme_price_factor = 0.0
+        self.primary_excess_on = 95.0
+        self.primary_excess_off = 90.0
+        self.secondary_excess_on = 98.0
+        self.secondary_excess_off = 95.0
+
+        # Switch entity states
+        self.primary_excess_auto = True
+        self.secondary_excess_auto = True
 
         # Output values for sensors
         self.calculated_house_consumption = 0.0
@@ -192,8 +207,15 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         for entity_id in solar_sensors:
             current_solar += self._get_float_state(entity_id)
 
+        charge_state_sensor = self.config.get(CONF_SOLAR_CHARGE_STATE_SENSOR)
+        charge_state = None
+        if charge_state_sensor:
+            charge_state_obj = self.hass.states.get(charge_state_sensor)
+            if charge_state_obj:
+                charge_state = charge_state_obj.state
+
         await self.learning_engine.record_consumption(current_quarter, self.calculated_house_consumption)
-        await self.learning_engine.record_solar(current_quarter, current_solar, cloud_cover)
+        await self.learning_engine.record_solar(current_quarter, current_solar, cloud_cover, charge_state)
 
         if current_quarter != self.learning_engine._last_quarter_processed and self.learning_engine._last_quarter_processed != -1:
             await self.learning_engine.finalize_quarter(self.learning_engine._last_quarter_processed, cloud_cover)
@@ -228,8 +250,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         turn_on_inverter = True
 
-        async def set_excess_switches(turn_on: bool):
-            for switch_entity in self.config.get(CONF_PRIORITIZED_EXCESS_CONSUMERS, []):
+        async def set_switches(entities: list, turn_on: bool):
+            for switch_entity in entities:
                 state = self.hass.states.get(switch_entity)
                 is_on = state and state.state == "on"
                 if turn_on and not is_on:
@@ -237,34 +259,55 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 elif not turn_on and is_on:
                     await self.hass.services.async_call("switch", "turn_off", {"entity_id": switch_entity}, blocking=False)
 
+        is_absorption = charge_state and charge_state.lower() in ("absorption", "float", "ausgleichsladung", "equalization")
+        virtual_batt_pct = 100.0 if is_absorption else batt_level_pct
+        has_excess_power = current_solar > self.calculated_house_consumption
+
+        # Primary Hysteresis Logic
+        if self.primary_excess_auto:
+            turn_on_primary = False
+            if virtual_batt_pct >= getattr(self, "primary_excess_on", 95.0) and has_excess_power and battery_will_overfill:
+                turn_on_primary = True
+            elif virtual_batt_pct <= getattr(self, "primary_excess_off", 90.0):
+                turn_on_primary = False
+            else:
+                # Maintain current state if in hysteresis zone
+                turn_on_primary = any(self.hass.states.get(e) and self.hass.states.get(e).state == "on" for e in self.config.get(CONF_PRIMARY_EXCESS_CONSUMERS, []))
+
+            await set_switches(self.config.get(CONF_PRIMARY_EXCESS_CONSUMERS, []), turn_on_primary)
+
+        # Secondary Hysteresis Logic
+        if self.secondary_excess_auto:
+            turn_on_secondary = False
+            if virtual_batt_pct >= getattr(self, "secondary_excess_on", 98.0) and has_excess_power and battery_will_overfill:
+                turn_on_secondary = True
+            elif virtual_batt_pct <= getattr(self, "secondary_excess_off", 95.0):
+                turn_on_secondary = False
+            else:
+                turn_on_secondary = any(self.hass.states.get(e) and self.hass.states.get(e).state == "on" for e in self.config.get(CONF_SECONDARY_EXCESS_CONSUMERS, []))
+
+            await set_switches(self.config.get(CONF_SECONDARY_EXCESS_CONSUMERS, []), turn_on_secondary)
+
+
         if self.manual_zero_export:
             self.current_operating_mode = "Manueller Modus: Nulleinspeisung erzwungen"
             turn_on_inverter = True
-            await set_excess_switches(False)
 
-        elif batt_level_pct <= batt_min_pct:
+        elif batt_level_pct <= batt_min_pct and not is_absorption:
             self.current_operating_mode = "Batterie am Minimum: OpenDTU aus (Netzbezug)"
             turn_on_inverter = False
-            await set_excess_switches(False)
 
-        elif battery_will_overfill:
-            self.current_operating_mode = "Batterie wird voll: DTU an zur Vermeidung von Überschuss"
+        elif battery_will_overfill or is_absorption:
+            self.current_operating_mode = "Batterie wird voll/Absorption: Überschussvermeidung aktiv"
             turn_on_inverter = True
-            if batt_level_pct >= 95 and (current_solar > self.calculated_house_consumption):
-                self.current_operating_mode = "Batterie voll: Priorisierte Verbraucher aktiviert"
-                await set_excess_switches(True)
-            else:
-                await set_excess_switches(False)
 
         elif current_price is not None and current_price <= price_threshold:
             self.current_operating_mode = f"Strom günstig (<{round(price_threshold,3)}€): DTU aus (Akku wird gespart)"
             turn_on_inverter = False
-            await set_excess_switches(False)
 
         else:
             self.current_operating_mode = "Preis hoch: DTU an (Nulleinspeisung aktiv)"
             turn_on_inverter = True
-            await set_excess_switches(False)
 
         producing_sensor = self.config.get(CONF_OPENDTU_PRODUCING_SENSOR)
         if producing_sensor:
@@ -310,6 +353,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         low, high = -0.5, 1.0
         best_threshold = -0.5
 
+        batt_eff = float(self.config.get(CONF_BATTERY_EFFICIENCY_PCT, 90)) / 100.0
+
         for _ in range(15):
             mid_threshold = (low + high) / 2.0
             simulated_batt_wh = batt_cap_wh * (current_batt_pct / 100.0)
@@ -317,8 +362,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
             failed = False
             for fb in future_blocks:
-                # Add solar
-                simulated_batt_wh += fb["solar"]
+                # Add solar with efficiency loss
+                simulated_batt_wh += fb["solar"] * batt_eff
 
                 # Discharge if price > threshold
                 if fb["price"] > mid_threshold:
@@ -346,11 +391,13 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         simulated_batt_wh = batt_cap_wh * (current_batt_pct / 100.0)
         future_blocks = self._build_future_blocks(now, hourly_forecasts)
 
+        batt_eff = float(self.config.get(CONF_BATTERY_EFFICIENCY_PCT, 90)) / 100.0
+
         max_inverter_power_w = float(self.config.get(CONF_MAX_INVERTER_POWER_W, 800))
         max_discharge_wh_per_15min = max_inverter_power_w / 4.0
 
         for i, fb in enumerate(future_blocks):
-            pred_solar = fb["solar"]
+            pred_solar = fb["solar"] * batt_eff
             pred_cons = fb["cons"]
             price = fb["price"]
 

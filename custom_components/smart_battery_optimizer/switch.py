@@ -17,6 +17,8 @@ async def async_setup_entry(
     entities = [
         OptimizerEnableSwitch(coordinator, entry.entry_id),
         ManualZeroExportSwitch(coordinator, entry.entry_id),
+        PrimaryExcessAutoSwitch(coordinator, entry.entry_id),
+        SecondaryExcessAutoSwitch(coordinator, entry.entry_id),
     ]
     async_add_entities(entities)
 
@@ -68,4 +70,50 @@ class ManualZeroExportSwitch(CoordinatorEntity, SwitchEntity):
     async def async_turn_off(self, **kwargs):
         """Turn the entity off."""
         self.coordinator.manual_zero_export = False
+        await self.coordinator.async_request_refresh()
+
+class PrimaryExcessAutoSwitch(CoordinatorEntity, SwitchEntity):
+    """Switch to enable/disable automatic control of primary excess consumers."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:pool"
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry_id}_primary_excess_auto"
+        self._attr_name = "Primäre Überschuss-Automatik"
+
+    @property
+    def is_on(self):
+        return getattr(self.coordinator, "primary_excess_auto", True)
+
+    async def async_turn_on(self, **kwargs):
+        self.coordinator.primary_excess_auto = True
+        await self.coordinator.async_request_refresh()
+
+    async def async_turn_off(self, **kwargs):
+        self.coordinator.primary_excess_auto = False
+        await self.coordinator.async_request_refresh()
+
+class SecondaryExcessAutoSwitch(CoordinatorEntity, SwitchEntity):
+    """Switch to enable/disable automatic control of secondary excess consumers."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:bitcoin"
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry_id}_secondary_excess_auto"
+        self._attr_name = "Sekundäre Überschuss-Automatik"
+
+    @property
+    def is_on(self):
+        return getattr(self.coordinator, "secondary_excess_auto", True)
+
+    async def async_turn_on(self, **kwargs):
+        self.coordinator.secondary_excess_auto = True
+        await self.coordinator.async_request_refresh()
+
+    async def async_turn_off(self, **kwargs):
+        self.coordinator.secondary_excess_auto = False
         await self.coordinator.async_request_refresh()

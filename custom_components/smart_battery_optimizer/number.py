@@ -21,6 +21,10 @@ async def async_setup_entry(
     async_add_entities([
         ExtremePriceThresholdNumber(coordinator, entry.entry_id),
         ExtremePriceFactorNumber(coordinator, entry.entry_id),
+        PrimaryExcessOnThreshold(coordinator, entry.entry_id),
+        PrimaryExcessOffThreshold(coordinator, entry.entry_id),
+        SecondaryExcessOnThreshold(coordinator, entry.entry_id),
+        SecondaryExcessOffThreshold(coordinator, entry.entry_id),
     ])
 
 
@@ -77,4 +81,100 @@ class ExtremePriceFactorNumber(CoordinatorEntity, NumberEntity):
         """Set new value."""
         self._attr_native_value = value
         self.coordinator.extreme_price_factor = value / 100.0
+        self.async_write_ha_state()
+
+
+class PrimaryExcessOnThreshold(CoordinatorEntity, NumberEntity):
+    _attr_has_entity_name = True
+    _attr_mode = NumberMode.SLIDER
+    _attr_native_min_value = 0
+    _attr_native_max_value = 100
+    _attr_native_step = 1
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry_id}_primary_excess_on"
+        self._attr_name = "Primär Überschuss Ein (%)"
+        self._attr_native_value = getattr(coordinator, "primary_excess_on", 95.0)
+        self.coordinator.primary_excess_on = self._attr_native_value
+
+    @property
+    def native_value(self) -> float | None:
+        return self._attr_native_value
+
+    async def async_set_native_value(self, value: float) -> None:
+        self._attr_native_value = value
+        self.coordinator.primary_excess_on = value
+        self.async_write_ha_state()
+
+
+class PrimaryExcessOffThreshold(CoordinatorEntity, NumberEntity):
+    _attr_has_entity_name = True
+    _attr_mode = NumberMode.SLIDER
+    _attr_native_min_value = 0
+    _attr_native_max_value = 100
+    _attr_native_step = 1
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry_id}_primary_excess_off"
+        self._attr_name = "Primär Überschuss Aus (%)"
+        self._attr_native_value = getattr(coordinator, "primary_excess_off", 90.0)
+        self.coordinator.primary_excess_off = self._attr_native_value
+
+    @property
+    def native_value(self) -> float | None:
+        return self._attr_native_value
+
+    async def async_set_native_value(self, value: float) -> None:
+        self._attr_native_value = value
+        self.coordinator.primary_excess_off = value
+        self.async_write_ha_state()
+
+
+class SecondaryExcessOnThreshold(CoordinatorEntity, NumberEntity):
+    _attr_has_entity_name = True
+    _attr_mode = NumberMode.SLIDER
+    _attr_native_min_value = 0
+    _attr_native_max_value = 100
+    _attr_native_step = 1
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry_id}_secondary_excess_on"
+        self._attr_name = "Sekundär Überschuss Ein (%)"
+        self._attr_native_value = getattr(coordinator, "secondary_excess_on", 98.0)
+        self.coordinator.secondary_excess_on = self._attr_native_value
+
+    @property
+    def native_value(self) -> float | None:
+        return self._attr_native_value
+
+    async def async_set_native_value(self, value: float) -> None:
+        self._attr_native_value = value
+        self.coordinator.secondary_excess_on = value
+        self.async_write_ha_state()
+
+
+class SecondaryExcessOffThreshold(CoordinatorEntity, NumberEntity):
+    _attr_has_entity_name = True
+    _attr_mode = NumberMode.SLIDER
+    _attr_native_min_value = 0
+    _attr_native_max_value = 100
+    _attr_native_step = 1
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry_id}_secondary_excess_off"
+        self._attr_name = "Sekundär Überschuss Aus (%)"
+        self._attr_native_value = getattr(coordinator, "secondary_excess_off", 95.0)
+        self.coordinator.secondary_excess_off = self._attr_native_value
+
+    @property
+    def native_value(self) -> float | None:
+        return self._attr_native_value
+
+    async def async_set_native_value(self, value: float) -> None:
+        self._attr_native_value = value
+        self.coordinator.secondary_excess_off = value
         self.async_write_ha_state()
