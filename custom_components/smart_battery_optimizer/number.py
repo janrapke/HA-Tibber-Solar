@@ -25,6 +25,7 @@ async def async_setup_entry(
         PrimaryExcessOffThreshold(coordinator, entry.entry_id),
         SecondaryExcessOnThreshold(coordinator, entry.entry_id),
         SecondaryExcessOffThreshold(coordinator, entry.entry_id),
+        ExcessCloudToleranceNumber(coordinator, entry.entry_id),
     ])
 
 
@@ -177,4 +178,28 @@ class SecondaryExcessOffThreshold(CoordinatorEntity, NumberEntity):
     async def async_set_native_value(self, value: float) -> None:
         self._attr_native_value = value
         self.coordinator.secondary_excess_off = value
+        self.async_write_ha_state()
+
+
+class ExcessCloudToleranceNumber(CoordinatorEntity, NumberEntity):
+    _attr_has_entity_name = True
+    _attr_mode = NumberMode.BOX
+    _attr_native_min_value = 0
+    _attr_native_max_value = 60
+    _attr_native_step = 1
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry_id}_excess_cloud_tolerance"
+        self._attr_name = "Überschuss Wolken-Toleranz (Minuten)"
+        self._attr_native_value = getattr(coordinator, "excess_cloud_tolerance_mins", 5.0)
+        self.coordinator.excess_cloud_tolerance_mins = self._attr_native_value
+
+    @property
+    def native_value(self) -> float | None:
+        return self._attr_native_value
+
+    async def async_set_native_value(self, value: float) -> None:
+        self._attr_native_value = value
+        self.coordinator.excess_cloud_tolerance_mins = value
         self.async_write_ha_state()
