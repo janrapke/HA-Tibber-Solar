@@ -25,12 +25,15 @@ class LearningEngine:
         self.data: Dict[str, Any] = {
             "consumption": {},  # Format: {"quarter": average_consumption_wh_per_15min}
             "solar": {},        # Format: {"quarter": {"cloud_cover_range": average_solar_wh_per_15min}}
+            "balcony": {},      # Format: {"quarter": {"cloud_cover_range": average_balcony_wh_per_15min}}
         }
 
         self._current_quarter_consumption_acc = 0.0
         self._current_quarter_consumption_count = 0
         self._current_quarter_solar_acc = 0.0
         self._current_quarter_solar_count = 0
+        self._current_quarter_balcony_acc = 0.0
+        self._current_quarter_balcony_count = 0
         self._last_quarter_processed = -1
 
         # Initialize default structures for 96 quarters (24h * 4)
@@ -40,6 +43,11 @@ class LearningEngine:
                 "clear": 0.0,    # 0-33% cloud cover
                 "partly": 0.0,   # 34-66% cloud cover
                 "cloudy": 0.0,   # 67-100% cloud cover
+            }
+            self.data["balcony"][str(q)] = {
+                "clear": 0.0,
+                "partly": 0.0,
+                "cloudy": 0.0,
             }
 
     async def async_load(self):
@@ -57,6 +65,12 @@ class LearningEngine:
                         for condition, val in conditions.items():
                             if condition in self.data["solar"][q]:
                                 self.data["solar"][q][condition] = val
+            if "balcony" in stored_data:
+                for q, conditions in stored_data["balcony"].items():
+                    if q in self.data["balcony"]:
+                        for condition, val in conditions.items():
+                            if condition in self.data["balcony"][q]:
+                                self.data["balcony"][q][condition] = val
             _LOGGER.debug("Loaded learning data: %s", self.data)
         else:
             _LOGGER.info("No learning data found, initializing with priors.")
@@ -71,6 +85,9 @@ class LearningEngine:
         # Base load in Wh per 15 minutes
         base_load_wh_15min = base_load_w / 4.0
 
+        # Assumption for balcony solar peak if not explicitly configured
+        balcony_peak_w = 600.0
+
         for q in range(96):
             self.data["consumption"][str(q)] = base_load_wh_15min
 
@@ -79,15 +96,21 @@ class LearningEngine:
 
             # Simple bell curve for solar between 6am and 6pm (12h duration)
             solar_wh_15min = 0.0
+            balcony_wh_15min = 0.0
             if 6.0 <= hour_of_day <= 18.0:
                 # Map 6..18 to -pi/2 .. pi/2 for cosine curve
                 normalized_time = ((hour_of_day - 6.0) / 12.0) * math.pi - (math.pi / 2)
                 # Cosine curve scaled to peak power, divided by 4 for 15-min Wh
                 solar_wh_15min = math.cos(normalized_time) * (solar_peak_w / 4.0)
+                balcony_wh_15min = math.cos(normalized_time) * (balcony_peak_w / 4.0)
 
             self.data["solar"][str(q)]["clear"] = solar_wh_15min
             self.data["solar"][str(q)]["partly"] = solar_wh_15min * 0.5
             self.data["solar"][str(q)]["cloudy"] = solar_wh_15min * 0.2
+
+            self.data["balcony"][str(q)]["clear"] = balcony_wh_15min
+            self.data["balcony"][str(q)]["partly"] = balcony_wh_15min * 0.5
+            self.data["balcony"][str(q)]["cloudy"] = balcony_wh_15min * 0.2
 
     async def async_save(self):
         """Save historical data to storage."""
@@ -123,6 +146,14 @@ class LearningEngine:
         self._current_quarter_solar_acc += power_w
         self._current_quarter_solar_count += 1
 
+    async def record_balcony(self, current_quarter: int, power_w: float, cloud_cover: float):
+        """Accumulate balcony solar production data for the current 15-min interval."""
+        if power_w < 0:
+            return
+
+        self._current_quarter_balcony_acc += power_w
+        self._current_quarter_balcony_count += 1
+
     async def finalize_quarter(self, quarter: int, cloud_cover: float):
         """Called once at the end of a 15-min interval to calculate the average Wh and apply EMA."""
         q_str = str(quarter)
@@ -151,6 +182,18 @@ class LearningEngine:
             self._current_quarter_solar_acc = 0.0
             self._current_quarter_solar_count = 0
 
+        # Finalize balcony
+        if self._current_quarter_balcony_count > 0:
+            avg_power = self._current_quarter_balcony_acc / self._current_quarter_balcony_count
+            quarter_wh = avg_power / 4.0
+            condition = self._get_cloud_category(cloud_cover)
+            current_avg = self.data["balcony"][q_str][condition]
+
+            self.data["balcony"][q_str][condition] = (alpha * quarter_wh) + ((1 - alpha) * current_avg)
+
+            self._current_quarter_balcony_acc = 0.0
+            self._current_quarter_balcony_count = 0
+
     def predict_consumption_for_quarter(self, quarter: int) -> float:
         """Predict consumption (Wh) for a specific 15-min interval based on learned data."""
         return float(self.data["consumption"].get(str(quarter), 0.0))
@@ -163,3 +206,12 @@ class LearningEngine:
 
         condition = self._get_cloud_category(cloud_cover)
         return float(self.data["solar"][q_str].get(condition, 0.0))
+
+    def predict_balcony_for_quarter(self, quarter: int, cloud_cover: float) -> float:
+        """Predict balcony solar generation (Wh) for a specific 15-min interval and cloud cover based on learned data."""
+        q_str = str(quarter)
+        if q_str not in self.data["balcony"]:
+            return 0.0
+
+        condition = self._get_cloud_category(cloud_cover)
+        return float(self.data["balcony"][q_str].get(condition, 0.0))

@@ -16,6 +16,7 @@ from .const import (
     CONF_TIBBER_EXPORT_SENSOR,
     CONF_BATTERY_LEVEL_SENSOR,
     CONF_SOLAR_POWER_SENSOR,
+    CONF_BALCONY_POWER_SENSOR,
     CONF_OPENDTU_TURN_ON_BUTTON,
     CONF_OPENDTU_TURN_OFF_BUTTON,
     CONF_OPENDTU_PRODUCING_SENSOR,
@@ -56,6 +57,9 @@ def get_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             ),
             vol.Required(CONF_SOLAR_POWER_SENSOR, default=defaults.get(CONF_SOLAR_POWER_SENSOR, vol.UNDEFINED)): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor", device_class="power", multiple=True)
+            ),
+            vol.Optional(CONF_BALCONY_POWER_SENSOR, default=defaults.get(CONF_BALCONY_POWER_SENSOR, vol.UNDEFINED)): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor", device_class="power")
             ),
             vol.Required(CONF_OPENDTU_TURN_ON_BUTTON, default=defaults.get(CONF_OPENDTU_TURN_ON_BUTTON, vol.UNDEFINED)): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="button")
