@@ -14,13 +14,13 @@ async def fetch_tibber_prices(hass, api_token: str) -> list[dict]:
         homes {
           currentSubscription {
             priceInfo {
-              today(resolution: QUARTER_HOURLY) {
+              today {
                 total
                 energy
                 tax
                 startsAt
               }
-              tomorrow(resolution: QUARTER_HOURLY) {
+              tomorrow {
                 total
                 energy
                 tax
@@ -58,14 +58,24 @@ async def fetch_tibber_prices(hass, api_token: str) -> list[dict]:
                 tomorrow = price_info.get("tomorrow", [])
 
                 # Combine today and tomorrow
-                all_prices = today + tomorrow
+                raw_prices = today + tomorrow
+                if not raw_prices:
+                    return []
 
-                # Parse the dates so we can use them easily
-                for price in all_prices:
-                    # Tibber returns ISO 8601 strings like "2023-10-25T00:00:00.000+02:00"
-                    price["datetime"] = datetime.fromisoformat(price["startsAt"])
+                # Convert to 15-minute intervals internally
+                from datetime import timedelta
 
-                return all_prices
+                quarter_prices = []
+                for price in raw_prices:
+                    base_dt = datetime.fromisoformat(price["startsAt"])
+
+                    # Create 4 entries for the hour (00, 15, 30, 45)
+                    for quarter in range(4):
+                        q_price = price.copy()
+                        q_price["datetime"] = base_dt + timedelta(minutes=15 * quarter)
+                        quarter_prices.append(q_price)
+
+                return quarter_prices
             except (KeyError, TypeError) as e:
                 _LOGGER.error("Failed to parse Tibber API response: %s", e)
                 return []
