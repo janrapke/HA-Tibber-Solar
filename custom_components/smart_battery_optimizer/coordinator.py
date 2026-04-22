@@ -16,6 +16,7 @@ from .const import (
     CONF_TIBBER_EXPORT_SENSOR,
     CONF_BATTERY_LEVEL_SENSOR,
     CONF_SOLAR_POWER_SENSOR,
+    CONF_BALCONY_POWER_SENSOR,
     CONF_OPENDTU_TURN_ON_BUTTON,
     CONF_OPENDTU_TURN_OFF_BUTTON,
     CONF_OPENDTU_PRODUCING_SENSOR,
@@ -187,7 +188,12 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         for entity_id in self.config.get(CONF_EXCLUDED_POWER_SENSORS, []):
             excluded_power += self._get_float_state(entity_id)
 
-        self.calculated_house_consumption = max(0, tibber_cons - tibber_exp + opendtu_output - excluded_power)
+        current_balcony = 0.0
+        balcony_sensor = self.config.get(CONF_BALCONY_POWER_SENSOR)
+        if balcony_sensor:
+            current_balcony = self._get_float_state(balcony_sensor)
+
+        self.calculated_house_consumption = max(0, tibber_cons - tibber_exp + opendtu_output - excluded_power + current_balcony)
 
         now = dt_util.now()
         current_quarter = self._get_quarter_index(now)
@@ -217,6 +223,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         await self.learning_engine.record_consumption(current_quarter, self.calculated_house_consumption)
         await self.learning_engine.record_solar(current_quarter, current_solar, cloud_cover, charge_state)
+        await self.learning_engine.record_balcony(current_quarter, current_balcony, cloud_cover)
 
         if current_quarter != self.learning_engine._last_quarter_processed and self.learning_engine._last_quarter_processed != -1:
             await self.learning_engine.finalize_quarter(self.learning_engine._last_quarter_processed, cloud_cover)
@@ -475,6 +482,13 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
             pred_solar = self.learning_engine.predict_solar_for_quarter(q, cc)
             pred_cons = self.learning_engine.predict_consumption_for_quarter(q)
+
+            # Only add predicted balcony if a sensor is configured
+            if self.config.get(CONF_BALCONY_POWER_SENSOR):
+                pred_balcony = self.learning_engine.predict_balcony_for_quarter(q, cc)
+                # Balcony production reduces future consumption from the grid/battery point of view.
+                # We add it to the total predicted solar so the system knows it's available energy.
+                pred_solar += pred_balcony
 
             # Find price for this 15 min block
             price = 0.0
