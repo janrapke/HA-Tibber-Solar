@@ -79,6 +79,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         self.hourly_plan = [] # Renamed visually but keeping attr name for compatibility
 
         self._current_inverter_state = "unknown"
+        self._low_solar_minutes = 0
 
     async def _async_setup(self):
         """Set up the coordinator."""
@@ -263,12 +264,21 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         virtual_batt_pct = 100.0 if is_absorption else batt_level_pct
         has_excess_power = current_solar > self.calculated_house_consumption
 
+        # Timer logic for cloud tolerance
+        if not has_excess_power:
+            self._low_solar_minutes += 1
+        else:
+            self._low_solar_minutes = 0
+
+        cloud_tolerance_mins = getattr(self, "excess_cloud_tolerance_mins", 5.0)
+        cloud_override_off = self._low_solar_minutes >= cloud_tolerance_mins
+
         # Primary Hysteresis Logic
         if self.primary_excess_auto:
             turn_on_primary = False
             if virtual_batt_pct >= getattr(self, "primary_excess_on", 95.0) and has_excess_power and battery_will_overfill:
                 turn_on_primary = True
-            elif virtual_batt_pct <= getattr(self, "primary_excess_off", 90.0):
+            elif virtual_batt_pct <= getattr(self, "primary_excess_off", 90.0) or cloud_override_off:
                 turn_on_primary = False
             else:
                 # Maintain current state if in hysteresis zone
@@ -281,7 +291,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             turn_on_secondary = False
             if virtual_batt_pct >= getattr(self, "secondary_excess_on", 98.0) and has_excess_power and battery_will_overfill:
                 turn_on_secondary = True
-            elif virtual_batt_pct <= getattr(self, "secondary_excess_off", 95.0):
+            elif virtual_batt_pct <= getattr(self, "secondary_excess_off", 95.0) or cloud_override_off:
                 turn_on_secondary = False
             else:
                 turn_on_secondary = any(self.hass.states.get(e) and self.hass.states.get(e).state == "on" for e in self.config.get(CONF_SECONDARY_EXCESS_CONSUMERS, []))
