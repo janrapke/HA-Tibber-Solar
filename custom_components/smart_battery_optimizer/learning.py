@@ -110,9 +110,14 @@ class LearningEngine:
         self._current_quarter_consumption_acc += power_w
         self._current_quarter_consumption_count += 1
 
-    async def record_solar(self, current_quarter: int, power_w: float, cloud_cover: float):
+    async def record_solar(self, current_quarter: int, power_w: float, cloud_cover: float, charge_state: str = None):
         """Accumulate solar production data for the current 15-min interval."""
         if power_w < 0:
+            return
+
+        # Do not record solar if the battery is in a state that throttles solar production
+        if charge_state and charge_state.lower() in ("absorption", "float", "ausgleichsladung", "equalization"):
+            _LOGGER.debug("Skipping solar learning because charge controller is in state: %s", charge_state)
             return
 
         self._current_quarter_solar_acc += power_w

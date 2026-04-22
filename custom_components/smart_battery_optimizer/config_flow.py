@@ -21,14 +21,17 @@ from .const import (
     CONF_OPENDTU_PRODUCING_SENSOR,
     CONF_OPENDTU_OUTPUT_SENSOR,
     CONF_WEATHER_ENTITY,
+    CONF_SOLAR_CHARGE_STATE_SENSOR,
     CONF_BATTERY_CAPACITY_WH,
     CONF_BATTERY_MIN_LIMIT_PCT,
+    CONF_BATTERY_EFFICIENCY_PCT,
     CONF_BASE_LOAD_W,
     CONF_SOLAR_PEAK_W,
     CONF_EXTREME_PRICE_THRESHOLD,
     CONF_MAX_INVERTER_POWER_W,
     CONF_EXCLUDED_POWER_SENSORS,
-    CONF_PRIORITIZED_EXCESS_CONSUMERS,
+    CONF_PRIMARY_EXCESS_CONSUMERS,
+    CONF_SECONDARY_EXCESS_CONSUMERS,
 )
 
 def get_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
@@ -69,8 +72,12 @@ def get_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             vol.Required(CONF_WEATHER_ENTITY, default=defaults.get(CONF_WEATHER_ENTITY, vol.UNDEFINED)): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="weather")
             ),
+            vol.Optional(CONF_SOLAR_CHARGE_STATE_SENSOR, default=defaults.get(CONF_SOLAR_CHARGE_STATE_SENSOR, vol.UNDEFINED)): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
             vol.Required(CONF_BATTERY_CAPACITY_WH, default=defaults.get(CONF_BATTERY_CAPACITY_WH, 5000)): int,
             vol.Required(CONF_BATTERY_MIN_LIMIT_PCT, default=defaults.get(CONF_BATTERY_MIN_LIMIT_PCT, 10)): vol.All(int, vol.Range(min=0, max=100)),
+            vol.Required(CONF_BATTERY_EFFICIENCY_PCT, default=defaults.get(CONF_BATTERY_EFFICIENCY_PCT, 90)): vol.All(int, vol.Range(min=1, max=100)),
             vol.Required(CONF_BASE_LOAD_W, default=defaults.get(CONF_BASE_LOAD_W, 250)): int,
             vol.Required(CONF_SOLAR_PEAK_W, default=defaults.get(CONF_SOLAR_PEAK_W, 6000)): int,
             vol.Required(CONF_MAX_INVERTER_POWER_W, default=defaults.get(CONF_MAX_INVERTER_POWER_W, 800)): int,
@@ -78,7 +85,10 @@ def get_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             vol.Optional(CONF_EXCLUDED_POWER_SENSORS, default=defaults.get(CONF_EXCLUDED_POWER_SENSORS, vol.UNDEFINED)): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor", device_class="power", multiple=True)
             ),
-            vol.Optional(CONF_PRIORITIZED_EXCESS_CONSUMERS, default=defaults.get(CONF_PRIORITIZED_EXCESS_CONSUMERS, vol.UNDEFINED)): selector.EntitySelector(
+            vol.Optional(CONF_PRIMARY_EXCESS_CONSUMERS, default=defaults.get(CONF_PRIMARY_EXCESS_CONSUMERS, vol.UNDEFINED)): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="switch", multiple=True)
+            ),
+            vol.Optional(CONF_SECONDARY_EXCESS_CONSUMERS, default=defaults.get(CONF_SECONDARY_EXCESS_CONSUMERS, vol.UNDEFINED)): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="switch", multiple=True)
             ),
         }
