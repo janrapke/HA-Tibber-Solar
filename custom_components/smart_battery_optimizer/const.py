@@ -19,5 +19,9 @@ CONF_WEATHER_ENTITY = "weather_entity"
 CONF_BATTERY_CAPACITY_WH = "battery_capacity_wh"
 CONF_BATTERY_MIN_LIMIT_PCT = "battery_min_limit_pct"
 
+CONF_BASE_LOAD_W = "base_load_w"
+CONF_SOLAR_PEAK_W = "solar_peak_w"
+CONF_EXTREME_PRICE_THRESHOLD = "extreme_price_threshold"
+
 CONF_EXCLUDED_POWER_SENSORS = "excluded_power_sensors"
 CONF_PRIORITIZED_EXCESS_CONSUMERS = "prioritized_excess_consumers"

@@ -1,0 +1,98 @@
+"""Number entities for Smart Battery Optimizer."""
+import logging
+from homeassistant.components.number import NumberEntity, NumberDeviceClass, NumberMode
+from homeassistant.components.number.const import ATTR_VALUE
+from homeassistant.components.number.restore_number import RestoreNumber
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+from .const import DOMAIN
+
+_LOGGER = logging.getLogger(__name__)
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up the number entities."""
+    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
+
+    async_add_entities([
+        ExtremePriceThresholdNumber(coordinator, entry.entry_id),
+        ExtremePriceFactorNumber(coordinator, entry.entry_id),
+    ])
+
+
+class ExtremePriceThresholdNumber(CoordinatorEntity, RestoreNumber):
+    """Number entity to set the extreme price threshold."""
+
+    _attr_has_entity_name = True
+    _attr_mode = NumberMode.BOX
+    _attr_native_min_value = 0.0
+    _attr_native_max_value = 1.0
+    _attr_native_step = 0.01
+
+    def __init__(self, coordinator, entry_id):
+        """Initialize the number entity."""
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry_id}_extreme_price_threshold"
+        self._attr_name = "Extrem-Preis Schwelle (€)"
+        # Default 40 cents, but we'll try to restore state or use config entry default
+        self._attr_native_value = coordinator.extreme_price_threshold
+
+    async def async_added_to_hass(self) -> None:
+        """Restore previous state."""
+        await super().async_added_to_hass()
+        if (last_state := await self.async_get_last_number_data()) is not None:
+            self._attr_native_value = last_state.native_value
+            self.coordinator.extreme_price_threshold = last_state.native_value
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the native value."""
+        return self._attr_native_value
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Set new value."""
+        self._attr_native_value = value
+        self.coordinator.extreme_price_threshold = value
+        self.async_write_ha_state()
+
+
+class ExtremePriceFactorNumber(CoordinatorEntity, RestoreNumber):
+    """Number entity to set the solar reserve factor for extreme prices."""
+
+    _attr_has_entity_name = True
+    _attr_mode = NumberMode.SLIDER
+    _attr_native_min_value = 0
+    _attr_native_max_value = 100
+    _attr_native_step = 5
+
+    def __init__(self, coordinator, entry_id):
+        """Initialize the number entity."""
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry_id}_extreme_price_factor"
+        self._attr_name = "Extrem-Preis Solar-Reserve Faktor (%)"
+        # Default 0% (full safety), will try to restore
+        self._attr_native_value = coordinator.extreme_price_factor * 100.0
+
+    async def async_added_to_hass(self) -> None:
+        """Restore previous state."""
+        await super().async_added_to_hass()
+        if (last_state := await self.async_get_last_number_data()) is not None:
+            self._attr_native_value = last_state.native_value
+            self.coordinator.extreme_price_factor = last_state.native_value / 100.0
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the native value."""
+        return self._attr_native_value
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Set new value."""
+        self._attr_native_value = value
+        self.coordinator.extreme_price_factor = value / 100.0
+        self.async_write_ha_state()
