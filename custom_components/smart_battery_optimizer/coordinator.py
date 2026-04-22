@@ -26,6 +26,7 @@ from .const import (
     CONF_EXCLUDED_POWER_SENSORS,
     CONF_PRIORITIZED_EXCESS_CONSUMERS,
     CONF_EXTREME_PRICE_THRESHOLD,
+    CONF_MAX_INVERTER_POWER_W,
 )
 from .learning import LearningEngine
 
@@ -303,6 +304,9 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         """Simulates the future to find the optimal price threshold to discharge the battery."""
         future_blocks = self._build_future_blocks(now, hourly_forecasts)
 
+        max_inverter_power_w = float(self.config.get(CONF_MAX_INVERTER_POWER_W, 800))
+        max_discharge_wh_per_15min = max_inverter_power_w / 4.0
+
         low, high = -0.5, 1.0
         best_threshold = -0.5
 
@@ -318,7 +322,9 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
                 # Discharge if price > threshold
                 if fb["price"] > mid_threshold:
-                    simulated_batt_wh -= fb["cons"]
+                    # Battery can only discharge at the max inverter output limit
+                    actual_discharge = min(fb["cons"], max_discharge_wh_per_15min)
+                    simulated_batt_wh -= actual_discharge
 
                 simulated_batt_wh = min(batt_cap_wh, simulated_batt_wh)
 
@@ -340,28 +346,32 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         simulated_batt_wh = batt_cap_wh * (current_batt_pct / 100.0)
         future_blocks = self._build_future_blocks(now, hourly_forecasts)
 
-        total_intervals = len(future_blocks)
+        max_inverter_power_w = float(self.config.get(CONF_MAX_INVERTER_POWER_W, 800))
+        max_discharge_wh_per_15min = max_inverter_power_w / 4.0
 
         for i, fb in enumerate(future_blocks):
             pred_solar = fb["solar"]
             pred_cons = fb["cons"]
             price = fb["price"]
 
-            # Will overfill check (basic lookahead sum)
+            # The actual battery discharge is capped by the inverter
+            actual_discharge = min(pred_cons, max_discharge_wh_per_15min)
+
+            # Will overfill check (basic lookahead sum, capped to inverter limit)
             rem_solar = sum(b["solar"] for b in future_blocks[i:])
-            rem_cons = sum(b["cons"] for b in future_blocks[i:])
+            rem_cons = sum(min(b["cons"], max_discharge_wh_per_15min) for b in future_blocks[i:])
             available_cap = batt_cap_wh - simulated_batt_wh
             will_overfill = rem_solar > (rem_cons + available_cap)
 
             if will_overfill:
                 action = "Überschussvermeidung (DTU An)"
-                simulated_batt_wh += pred_solar - pred_cons
+                simulated_batt_wh += pred_solar - actual_discharge
             elif price <= price_threshold:
                 action = f"Netzbezug (Akku sparen für >{round(price_threshold,3)}€)"
                 simulated_batt_wh += pred_solar
             else:
                 action = "Nulleinspeisung (DTU An)"
-                simulated_batt_wh += pred_solar - pred_cons
+                simulated_batt_wh += pred_solar - actual_discharge
 
             simulated_batt_wh = max(0, min(batt_cap_wh, simulated_batt_wh))
 
