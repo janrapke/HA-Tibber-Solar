@@ -1,6 +1,6 @@
 """Coordinator to handle the core control logic for Smart Battery Optimizer."""
 import logging
-from datetime import timedelta
+from datetime import timedelta, datetime
 import asyncio
 
 from homeassistant.core import HomeAssistant
@@ -81,6 +81,28 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         self._current_inverter_state = "unknown"
         self._low_solar_minutes = 0
+
+    @property
+    def is_learning_mode_active(self) -> bool:
+        """Check if learning mode is active (within 7 days of start)."""
+        end_time_str = self.learning_engine.data.get("learning_mode_end_time")
+        if not end_time_str:
+            return False
+        try:
+            end_time = datetime.fromisoformat(end_time_str)
+            return datetime.now() < end_time
+        except ValueError:
+            return False
+
+    async def async_start_learning_mode(self):
+        """Start the fast learning mode."""
+        self.learning_engine.reset_learning_counters()
+        await self.learning_engine.async_save()
+
+    async def async_stop_learning_mode(self):
+        """Stop the fast learning mode manually."""
+        self.learning_engine.data["learning_mode_end_time"] = datetime.now().isoformat()
+        await self.learning_engine.async_save()
 
     async def _async_setup(self):
         """Set up the coordinator."""

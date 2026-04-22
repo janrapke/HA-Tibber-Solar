@@ -19,6 +19,7 @@ async def async_setup_entry(
         ManualZeroExportSwitch(coordinator, entry.entry_id),
         PrimaryExcessAutoSwitch(coordinator, entry.entry_id),
         SecondaryExcessAutoSwitch(coordinator, entry.entry_id),
+        LearningModeSwitch(coordinator, entry.entry_id),
     ]
     async_add_entities(entities)
 
@@ -116,4 +117,27 @@ class SecondaryExcessAutoSwitch(CoordinatorEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs):
         self.coordinator.secondary_excess_auto = False
+        await self.coordinator.async_request_refresh()
+
+class LearningModeSwitch(CoordinatorEntity, SwitchEntity):
+    """Switch to start/stop the fast learning mode."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:brain"
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry_id}_learning_mode"
+        self._attr_name = "Lernphase (7 Tage)"
+
+    @property
+    def is_on(self):
+        return self.coordinator.is_learning_mode_active
+
+    async def async_turn_on(self, **kwargs):
+        await self.coordinator.async_start_learning_mode()
+        await self.coordinator.async_request_refresh()
+
+    async def async_turn_off(self, **kwargs):
+        await self.coordinator.async_stop_learning_mode()
         await self.coordinator.async_request_refresh()
