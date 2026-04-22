@@ -4,6 +4,7 @@ DOMAIN = "smart_battery_optimizer"
 VERSION = "1.0.0"
 
 # Configuration keys
+CONF_TIBBER_API_TOKEN = "tibber_api_token"
 CONF_TIBBER_PRICE_SENSOR = "tibber_price_sensor"
 CONF_TIBBER_CONSUMPTION_SENSOR = "tibber_consumption_sensor"
 CONF_TIBBER_EXPORT_SENSOR = "tibber_export_sensor"

@@ -10,6 +10,7 @@ import homeassistant.helpers.config_validation as cv
 
 from .const import (
     DOMAIN,
+    CONF_TIBBER_API_TOKEN,
     CONF_TIBBER_PRICE_SENSOR,
     CONF_TIBBER_CONSUMPTION_SENSOR,
     CONF_TIBBER_EXPORT_SENSOR,
@@ -41,6 +42,7 @@ class SmartBatteryOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         data_schema = vol.Schema(
             {
+                vol.Required(CONF_TIBBER_API_TOKEN): str,
                 vol.Required(CONF_TIBBER_PRICE_SENSOR): selector.EntitySelector(
                     selector.EntitySelectorConfig(domain="sensor")
                 ),

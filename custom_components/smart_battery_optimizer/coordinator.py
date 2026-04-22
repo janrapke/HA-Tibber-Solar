@@ -6,9 +6,11 @@ import asyncio
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 import homeassistant.util.dt as dt_util
+from .tibber import fetch_tibber_prices
 
 from .const import (
     DOMAIN,
+    CONF_TIBBER_API_TOKEN,
     CONF_TIBBER_PRICE_SENSOR,
     CONF_TIBBER_CONSUMPTION_SENSOR,
     CONF_TIBBER_EXPORT_SENSOR,
@@ -43,15 +45,35 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         # Internal state
         self.is_enabled = True
         self.manual_zero_export = False
+        self.tibber_prices = []
+        self.last_tibber_fetch = None
 
         # Output values for sensors
         self.calculated_house_consumption = 0.0
         self.predicted_remaining_solar = 0.0
         self.predicted_remaining_consumption = 0.0
+        self.current_operating_mode = "Initializing"
+        self.hourly_plan = []
 
     async def _async_setup(self):
         """Set up the coordinator."""
         await self.learning_engine.async_load()
+        await self._fetch_tibber_prices()
+
+    async def _fetch_tibber_prices(self):
+        """Fetch prices from Tibber API."""
+        api_token = self.config.get(CONF_TIBBER_API_TOKEN)
+        if not api_token:
+            return
+
+        now = dt_util.now()
+        if self.last_tibber_fetch and (now - self.last_tibber_fetch).total_seconds() < 3600:
+            return # Only fetch once per hour
+
+        prices = await fetch_tibber_prices(api_token)
+        if prices:
+            self.tibber_prices = prices
+            self.last_tibber_fetch = now
 
     def _get_float_state(self, entity_id: str, default: float = 0.0) -> float:
         """Helper to safely get float state from an entity."""
@@ -109,31 +131,36 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         return forecasts
 
-    def _is_price_cheap(self) -> bool:
-        """Check if current Tibber price is considered cheap."""
+    def _get_current_price(self) -> float | None:
+        """Get the current Tibber price from fetched data."""
+        now = dt_util.now()
+        for price_data in self.tibber_prices:
+            dt = price_data.get("datetime")
+            if dt and dt.date() == now.date() and dt.hour == now.hour:
+                return float(price_data.get("total", 0.0))
+
+        # Fallback to sensor if API failed
         price_entity = self.config.get(CONF_TIBBER_PRICE_SENSOR)
         state = self.hass.states.get(price_entity)
-        if not state:
+        if state:
+            return float(state.state)
+        return None
+
+    def _is_price_cheap(self, current_price: float) -> bool:
+        """Determine if price is cheap."""
+        if current_price is None:
             return False
 
-        current_price = self._get_float_state(price_entity)
-
-        # Tibber sensors often have price levels in attributes (e.g., 'price_level': 'CHEAP')
-        # or daily max/min. Here we check attributes.
-        price_level = state.attributes.get("price_level", "NORMAL")
-        if price_level in ("CHEAP", "VERY_CHEAP"):
-            return True
-
-        # Fallback heuristic: below 15 cents
-        if current_price < 0.15:
-            return True
-
-        return False
+        # Hardcoded threshold for now, could be made configurable.
+        # Anything below 18 cents is generally considered cheap in DE.
+        return current_price < 0.18
 
     async def _async_update_data(self):
         """Update data and apply logic."""
         if not self.is_enabled:
             return None
+
+        await self._fetch_tibber_prices()
 
         # 1. Read Sensors
         tibber_cons = self._get_float_state(self.config[CONF_TIBBER_CONSUMPTION_SENSOR])
@@ -176,10 +203,13 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         self.learning_engine._last_hour_processed = current_hour
 
-        # 3. Forecast
+        # 3. Forecast and Planning
         hourly_forecasts = await self._get_hourly_forecasts()
         self.predicted_remaining_solar = self.learning_engine.predict_remaining_solar(current_hour, hourly_forecasts)
         self.predicted_remaining_consumption = self.learning_engine.predict_remaining_consumption(current_hour)
+
+        current_price = self._get_current_price()
+        is_cheap = self._is_price_cheap(current_price)
 
         # 4. Control Logic
         batt_level_pct = self._get_float_state(self.config[CONF_BATTERY_LEVEL_SENSOR])
@@ -205,21 +235,25 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         if self.manual_zero_export:
             # Force zero export mode
+            self.current_operating_mode = "Manueller Modus: Nulleinspeisung erzwungen"
             target_opendtu_limit = self.calculated_house_consumption
             await set_switches(False)
 
         elif battery_will_overfill:
             # We must use the energy now, regardless of price!
+            self.current_operating_mode = "Batterie wird voll: Einspeisung zur Vermeidung von Überschuss"
             target_opendtu_limit = self.calculated_house_consumption
 
             # Manage excess consumers if battery is very full
             if batt_level_pct >= 95 and (current_solar > self.calculated_house_consumption):
+                self.current_operating_mode = "Batterie voll: Priorisierte Verbraucher aktiviert"
                 await set_switches(True)
             else:
                 await set_switches(False)
 
-        elif self._is_price_cheap():
+        elif is_cheap:
             # Price is cheap and battery won't overfill -> turn off inverter, use grid, save solar
+            self.current_operating_mode = "Strompreis günstig: OpenDTU auf 0W, Batterie wird geschont (Netzbezug)"
             target_opendtu_limit = 0.0
             await set_switches(False)
 
@@ -227,11 +261,16 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             # Normal operation: Price is not cheap, zero export.
             # Only do this if battery is above minimum limit.
             if batt_level_pct > batt_min_pct:
+                self.current_operating_mode = "Normalbetrieb: Nulleinspeisung aktiv"
                 target_opendtu_limit = self.calculated_house_consumption
             else:
+                self.current_operating_mode = "Batterie leer: OpenDTU auf 0W (Netzbezug)"
                 target_opendtu_limit = 0.0
 
             await set_switches(False)
+
+        # Build hourly plan for the rest of the day
+        self._build_hourly_plan(current_hour, hourly_forecasts, batt_level_pct, batt_cap_wh)
 
         # Apply limit to OpenDTU
         try:
@@ -255,4 +294,64 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             "predicted_remaining_consumption": self.predicted_remaining_consumption,
             "battery_will_overfill": battery_will_overfill,
             "target_limit": target_opendtu_limit,
+            "current_operating_mode": self.current_operating_mode,
+            "hourly_plan": self.hourly_plan,
+            "current_price": current_price,
+            "current_battery": batt_level_pct,
+            "current_solar": current_solar,
+            "current_consumption": tibber_cons,
         }
+
+    def _build_hourly_plan(self, start_hour: int, hourly_forecasts: list[dict], current_batt_pct: float, batt_cap_wh: float):
+        """Generate a forecast plan for the remaining hours of the day."""
+        plan = []
+        simulated_batt_wh = batt_cap_wh * (current_batt_pct / 100.0)
+
+        forecast_dict = {f["hour"]: f["cloud_cover"] for f in hourly_forecasts}
+        now = dt_util.now()
+
+        for hr in range(start_hour, 24):
+            cc = forecast_dict.get(hr, 50.0)
+
+            # Predict values
+            pred_solar = self.learning_engine.predict_solar_for_hour(hr, cc)
+            pred_cons = self.learning_engine.predict_consumption_for_hour(hr)
+
+            # Get price
+            price = 0.0
+            for p in self.tibber_prices:
+                dt = p.get("datetime")
+                if dt and dt.date() == now.date() and dt.hour == hr:
+                    price = float(p.get("total", 0.0))
+                    break
+
+            is_cheap = self._is_price_cheap(price)
+
+            # Simulate logic
+            action = "Nulleinspeisung"
+            available_cap = batt_cap_wh - simulated_batt_wh
+            will_overfill = (pred_solar * (24 - hr)) > (pred_cons * (24 - hr) + available_cap) # simplified lookahead
+
+            if will_overfill:
+                action = "Überschussvermeidung"
+                simulated_batt_wh += pred_solar - pred_cons
+            elif is_cheap:
+                action = "Netzbezug (Batterie schonen)"
+                simulated_batt_wh += pred_solar # battery only charges, no discharge
+            else:
+                action = "Nulleinspeisung"
+                simulated_batt_wh += pred_solar - pred_cons
+
+            # Clamp battery simulation
+            simulated_batt_wh = max(0, min(batt_cap_wh, simulated_batt_wh))
+
+            plan.append({
+                "hour": f"{hr:02d}:00",
+                "price": price,
+                "solar_wh": round(pred_solar),
+                "consumption_wh": round(pred_cons),
+                "battery_pct_end": round((simulated_batt_wh / batt_cap_wh) * 100),
+                "planned_action": action
+            })
+
+        self.hourly_plan = plan
