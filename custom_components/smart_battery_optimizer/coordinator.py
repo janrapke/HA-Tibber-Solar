@@ -16,7 +16,9 @@ from .const import (
     CONF_TIBBER_EXPORT_SENSOR,
     CONF_BATTERY_LEVEL_SENSOR,
     CONF_SOLAR_POWER_SENSOR,
-    CONF_OPENDTU_INVERTER_SWITCH,
+    CONF_OPENDTU_TURN_ON_BUTTON,
+    CONF_OPENDTU_TURN_OFF_BUTTON,
+    CONF_OPENDTU_PRODUCING_SENSOR,
     CONF_OPENDTU_OUTPUT_SENSOR,
     CONF_WEATHER_ENTITY,
     CONF_BATTERY_CAPACITY_WH,
@@ -54,6 +56,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         self.predicted_remaining_consumption = 0.0
         self.current_operating_mode = "Initializing"
         self.hourly_plan = []
+
+        self._current_inverter_state = "unknown"
 
     async def _async_setup(self):
         """Set up the coordinator."""
@@ -195,7 +199,12 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             except ValueError:
                 pass
 
-        current_solar = self._get_float_state(self.config[CONF_SOLAR_POWER_SENSOR])
+        current_solar = 0.0
+        solar_sensors = self.config.get(CONF_SOLAR_POWER_SENSOR, [])
+        if isinstance(solar_sensors, str):
+            solar_sensors = [solar_sensors]
+        for entity_id in solar_sensors:
+            current_solar += self._get_float_state(entity_id)
 
         await self.learning_engine.record_consumption(current_hour, self.calculated_house_consumption)
         await self.learning_engine.record_solar(current_hour, current_solar, cloud_cover)
@@ -275,21 +284,32 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             turn_on_inverter = True
             await set_excess_switches(False)
 
-        # Apply Switch state to OpenDTU Inverter
-        try:
-            inverter_switch = self.config.get(CONF_OPENDTU_INVERTER_SWITCH)
-            if inverter_switch:
-                switch_state = self.hass.states.get(inverter_switch)
-                is_on = switch_state and switch_state.state == "on"
+        # Verify current state using the Producing binary sensor
+        producing_sensor = self.config.get(CONF_OPENDTU_PRODUCING_SENSOR)
+        if producing_sensor:
+            producing_state = self.hass.states.get(producing_sensor)
+            if producing_state:
+                # "on" means it's producing, "off" means it's not
+                self._current_inverter_state = producing_state.state
 
-                if turn_on_inverter and not is_on:
-                    await self.hass.services.async_call("switch", "turn_on", {"entity_id": inverter_switch}, blocking=False)
-                    _LOGGER.debug("Turned OpenDTU ON (Producing)")
-                elif not turn_on_inverter and is_on:
-                    await self.hass.services.async_call("switch", "turn_off", {"entity_id": inverter_switch}, blocking=False)
-                    _LOGGER.debug("Turned OpenDTU OFF (Not Producing)")
+        # Apply Switch state to OpenDTU Inverter Buttons
+        try:
+            turn_on_btn = self.config.get(CONF_OPENDTU_TURN_ON_BUTTON)
+            turn_off_btn = self.config.get(CONF_OPENDTU_TURN_OFF_BUTTON)
+
+            if turn_on_inverter and self._current_inverter_state != "on":
+                if turn_on_btn:
+                    await self.hass.services.async_call("button", "press", {"entity_id": turn_on_btn}, blocking=False)
+                    # We optimistically update our internal state so we don't spam the button before HA updates the sensor
+                    self._current_inverter_state = "on"
+                    _LOGGER.debug("Pressed OpenDTU Turn ON Button (Producing)")
+            elif not turn_on_inverter and self._current_inverter_state != "off":
+                if turn_off_btn:
+                    await self.hass.services.async_call("button", "press", {"entity_id": turn_off_btn}, blocking=False)
+                    self._current_inverter_state = "off"
+                    _LOGGER.debug("Pressed OpenDTU Turn OFF Button (Not Producing)")
         except Exception as e:
-            _LOGGER.error("Failed to toggle OpenDTU switch: %s", e)
+            _LOGGER.error("Failed to press OpenDTU button: %s", e)
 
         return {
             "calculated_house_consumption": self.calculated_house_consumption,
