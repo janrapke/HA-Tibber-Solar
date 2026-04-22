@@ -116,12 +116,25 @@ class LearningEngine:
             self._current_hour_solar_acc = 0.0
             self._current_hour_solar_count = 0
 
+    def predict_consumption_for_hour(self, hour: int) -> float:
+        """Predict consumption (Wh) for a specific hour based on learned data."""
+        return float(self.data["consumption"].get(str(hour), 0.0))
+
+    def predict_solar_for_hour(self, hour: int, cloud_cover: float) -> float:
+        """Predict solar generation (Wh) for a specific hour and cloud cover based on learned data."""
+        hour_str = str(hour)
+        if hour_str not in self.data["solar"]:
+            return 0.0
+
+        condition = self._get_cloud_category(cloud_cover)
+        return float(self.data["solar"][hour_str].get(condition, 0.0))
+
     def predict_remaining_consumption(self, current_hour: int) -> float:
         """Predict total remaining consumption (Wh) for the rest of the day."""
         remaining_wh = 0.0
         for h in range(current_hour, 24):
             # The average power in W equals the energy in Wh for 1 hour
-            remaining_wh += self.data["consumption"][str(h)]
+            remaining_wh += self.predict_consumption_for_hour(h)
         return remaining_wh
 
     def predict_remaining_solar(self, current_hour: int, hourly_forecasts: List[dict]) -> float:
@@ -137,9 +150,8 @@ class LearningEngine:
         for h in range(current_hour, 24):
             # Default to 'partly' if no forecast is available for that hour
             cloud_cover = forecast_dict.get(h, 50)
-            condition = self._get_cloud_category(cloud_cover)
 
             # Add predicted generation for this hour
-            remaining_wh += self.data["solar"][str(h)][condition]
+            remaining_wh += self.predict_solar_for_hour(h, cloud_cover)
 
         return remaining_wh
