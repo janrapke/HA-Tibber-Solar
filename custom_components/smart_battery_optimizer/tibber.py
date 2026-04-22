@@ -7,20 +7,20 @@ _LOGGER = logging.getLogger(__name__)
 TIBBER_API_URL = "https://api.tibber.com/v1-beta/gql"
 
 async def fetch_tibber_prices(hass, api_token: str) -> list[dict]:
-    """Fetch today's and tomorrow's hourly prices from Tibber."""
+    """Fetch today's and tomorrow's 15-minute prices from Tibber."""
     query = """
     {
       viewer {
         homes {
           currentSubscription {
             priceInfo {
-              today {
+              today(resolution: QUARTER_HOURLY) {
                 total
                 energy
                 tax
                 startsAt
               }
-              tomorrow {
+              tomorrow(resolution: QUARTER_HOURLY) {
                 total
                 energy
                 tax
