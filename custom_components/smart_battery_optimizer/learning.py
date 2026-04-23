@@ -231,6 +231,9 @@ class LearningEngine:
 
             self._current_quarter_consumption_acc = 0.0
             self._current_quarter_consumption_count = 0
+        else:
+            actual_consumption_wh = self.predict_consumption_for_quarter(quarter)
+            _LOGGER.debug("No consumption data recorded for quarter %d, retaining previous learned value.", quarter)
 
         # Finalize solar
         if self._current_quarter_solar_count > 0:
@@ -249,6 +252,9 @@ class LearningEngine:
 
             self._current_quarter_solar_acc = 0.0
             self._current_quarter_solar_count = 0
+        else:
+            actual_solar_wh = self.predict_solar_for_quarter(quarter, cloud_cover)
+            _LOGGER.debug("No valid solar data recorded for quarter %d (e.g. throttled), retaining previous learned value.", quarter)
 
         # Finalize balcony
         if self._current_quarter_balcony_count > 0:

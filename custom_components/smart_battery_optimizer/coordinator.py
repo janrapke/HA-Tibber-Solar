@@ -306,12 +306,24 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         available_batt_capacity_wh = batt_cap_wh * (1.0 - (batt_level_pct / 100.0))
 
-        # Re-calc 24h sum
+        # Re-calc 24h sum and check for intermediate overfill
+        battery_will_overfill = False
+        temp_simulated_wh = batt_cap_wh * (batt_level_pct / 100.0)
+
         for block in self.hourly_plan:
             self.predicted_remaining_solar += block["solar_wh"]
             self.predicted_remaining_consumption += block["consumption_wh"]
 
-        battery_will_overfill = self.predicted_remaining_solar > (self.predicted_remaining_consumption + available_batt_capacity_wh)
+            # Check if at any point during the plan the battery hits 100% capacity
+            temp_simulated_wh += block["solar_wh"] - block["consumption_wh"]
+            if temp_simulated_wh > batt_cap_wh:
+                battery_will_overfill = True
+
+            # Clamp to not artificially inflate future capacity
+            if temp_simulated_wh > batt_cap_wh:
+                 temp_simulated_wh = batt_cap_wh
+            if temp_simulated_wh < 0:
+                 temp_simulated_wh = 0
 
         turn_on_inverter = True
 
@@ -547,8 +559,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                     # The goal is to see if we fail due to *this* threshold.
                     pass
 
-                # Discharge if price > threshold and we have enough battery
-                if fb["price"] > mid_threshold and simulated_batt_wh > min_batt_wh:
+                # Discharge if price > threshold and we have enough battery, OR if battery is full
+                if (fb["price"] > mid_threshold or simulated_batt_wh >= (batt_cap_wh * 0.99)) and simulated_batt_wh > min_batt_wh:
                     # Battery can only discharge at the max inverter output limit
                     actual_discharge = min(fb["cons"], max_discharge_wh_per_15min)
                     simulated_batt_wh -= actual_discharge
@@ -600,13 +612,26 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             rem_solar = sum(b["solar"] for b in future_blocks[i:])
             rem_cons = sum(min(b["cons"], max_discharge_wh_per_15min) for b in future_blocks[i:])
             available_cap = batt_cap_wh - simulated_batt_wh
-            will_overfill = rem_solar > (rem_cons + available_cap)
+
+            # Use a more accurate intermediate overfill check
+            will_overfill = False
+            temp_simulated = simulated_batt_wh
+            for b in future_blocks[i:]:
+                temp_simulated += (b["solar"] * batt_eff) - min(b["cons"], max_discharge_wh_per_15min)
+                if temp_simulated > batt_cap_wh:
+                    will_overfill = True
+                    break
+                temp_simulated = min(batt_cap_wh, max(0, temp_simulated))
 
             if recovery_mode:
                 action = "Batterie am Minimum (DTU Aus)"
                 simulated_batt_wh += pred_solar
             elif will_overfill:
                 action = "Überschussvermeidung (DTU An)"
+                simulated_batt_wh += pred_solar - actual_discharge
+            elif simulated_batt_wh >= (batt_cap_wh * 0.99):
+                # Force zero-export if the battery is basically full, regardless of price
+                action = "Batterie voll (DTU An)"
                 simulated_batt_wh += pred_solar - actual_discharge
             elif price <= price_threshold:
                 action = f"Netzbezug (Akku sparen für >{round(price_threshold,3)}€)"
