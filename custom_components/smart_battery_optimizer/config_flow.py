@@ -137,7 +137,7 @@ class SmartBatteryOptimizerOptionsFlowHandler(config_entries.OptionsFlow):
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
         """Initialize options flow."""
-        self.config_entry = config_entry
+        pass  # config_entry is now managed by the base class
 
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
