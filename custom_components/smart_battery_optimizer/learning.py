@@ -12,7 +12,7 @@ from .const import CONF_BASE_LOAD_W, CONF_SOLAR_PEAK_W
 _LOGGER = logging.getLogger(__name__)
 
 STORAGE_KEY = "smart_battery_optimizer.learning_data_v2"
-STORAGE_VERSION = 2
+STORAGE_VERSION = 1
 
 class LearningEngine:
     """Class to manage learning of consumption and solar generation in 15-min intervals."""
