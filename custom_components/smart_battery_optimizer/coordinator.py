@@ -260,10 +260,10 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             pred_solar_wh = self.learning_engine.predict_solar_for_quarter(self.learning_engine._last_quarter_processed, cloud_cover)
             pred_cons_wh = self.learning_engine.predict_consumption_for_quarter(self.learning_engine._last_quarter_processed)
 
-            # Balcony gets added to predicted solar just like in _build_future_blocks
+            # Balcony reduces predicted consumption. It does NOT charge the battery.
             if self.config.get(CONF_BALCONY_POWER_SENSOR):
                 pred_balcony = self.learning_engine.predict_balcony_for_quarter(self.learning_engine._last_quarter_processed, cloud_cover)
-                pred_solar_wh += pred_balcony
+                pred_cons_wh = max(0.0, pred_cons_wh - pred_balcony)
 
             # If the charge state is absorption/float, true solar potential is hidden.
             # Do not use this quarter to penalize solar prediction.
@@ -647,6 +647,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 "price": round(price, 4),
                 "solar_wh": round(pred_solar),
                 "consumption_wh": round(pred_cons),
+                "house_wh": round(fb["house_cons"]),
+                "balcony_wh": round(fb["balcony"]),
                 "battery_pct_end": round((simulated_batt_wh / batt_cap_wh) * 100),
                 "planned_action": action
             })
@@ -702,14 +704,17 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                     break
 
             pred_solar = self.learning_engine.predict_solar_for_quarter(q, cc)
-            pred_cons = self.learning_engine.predict_consumption_for_quarter(q)
+            house_cons = self.learning_engine.predict_consumption_for_quarter(q)
+            pred_balcony = 0.0
 
-            # Only add predicted balcony if a sensor is configured
+            # Only apply predicted balcony if a sensor is configured
             if self.config.get(CONF_BALCONY_POWER_SENSOR):
                 pred_balcony = self.learning_engine.predict_balcony_for_quarter(q, cc)
-                # Balcony production reduces future consumption from the grid/battery point of view.
-                # We add it to the total predicted solar so the system knows it's available energy.
-                pred_solar += pred_balcony
+
+            # Balcony production reduces future consumption from the grid/battery point of view.
+            # It does NOT add to pred_solar because it cannot charge the battery.
+            # Excess goes to the grid.
+            pred_cons = max(0.0, house_cons - pred_balcony)
 
             # Find price for this 15 min block
             price = 0.0
@@ -727,6 +732,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 "dt": eval_dt,
                 "solar": pred_solar,
                 "cons": pred_cons,
+                "house_cons": house_cons,
+                "balcony": pred_balcony,
                 "price": price
             })
 
