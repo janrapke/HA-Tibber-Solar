@@ -1,7 +1,7 @@
 """Constants for the Smart Battery Optimizer integration."""
 
 DOMAIN = "smart_battery_optimizer"
-VERSION = "1.8.1"
+VERSION = "1.8.2"
 
 # Configuration keys
 CONF_TIBBER_API_TOKEN = "tibber_api_token"

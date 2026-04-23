@@ -114,17 +114,33 @@ class ForecastPlanSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        """Return the number of hours planned."""
+        """Return the next planned state change."""
         if self.coordinator.data:
             plan = self.coordinator.data.get("hourly_plan", [])
-            return f"{len(plan)} Stunden geplant"
+            if not plan:
+                return "Kein Plan"
+
+            current_action = plan[0].get("planned_action", "unknown")
+
+            for block in plan:
+                if block.get("planned_action") != current_action:
+                    action_de = "Einspeisen" if block.get("planned_action") == "discharge" else "Laden/Standby"
+                    return f"{action_de} ab {block.get('hour')}"
+
+            action_de = "Einspeisen" if current_action == "discharge" else "Laden/Standby"
+            return f"{action_de} (durchgehend)"
+
         return "Kein Plan"
 
     @property
     def extra_state_attributes(self):
         """Return the plan as a list in attributes for use in cards like ApexCharts."""
         if self.coordinator.data:
-            return {"hourly_plan": self.coordinator.data.get("hourly_plan", [])}
+            # Home Assistant imposes a strict 16KB limit on state sizes.
+            # Truncate the plan to the next ~24 hours (96 blocks max) to avoid silent drops.
+            plan = self.coordinator.data.get("hourly_plan", [])
+            truncated_plan = plan[:96] if len(plan) > 96 else plan
+            return {"hourly_plan": truncated_plan}
         return {}
 
 # ==========================================
