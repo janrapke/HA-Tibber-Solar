@@ -33,6 +33,9 @@ from .const import (
     CONF_EXCLUDED_POWER_SENSORS,
     CONF_PRIMARY_EXCESS_CONSUMERS,
     CONF_SECONDARY_EXCESS_CONSUMERS,
+    CONF_EARLY_EXCESS_CONSUMERS,
+    CONF_EARLY_EXCESS_EXPECTED_POWER_W,
+    CONF_EARLY_EXCESS_MIN_BATTERY_PCT,
 )
 
 def get_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
@@ -95,6 +98,11 @@ def get_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             vol.Optional(CONF_SECONDARY_EXCESS_CONSUMERS, default=defaults.get(CONF_SECONDARY_EXCESS_CONSUMERS, vol.UNDEFINED)): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="switch", multiple=True)
             ),
+            vol.Optional(CONF_EARLY_EXCESS_CONSUMERS, default=defaults.get(CONF_EARLY_EXCESS_CONSUMERS, vol.UNDEFINED)): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="switch", multiple=True)
+            ),
+            vol.Required(CONF_EARLY_EXCESS_EXPECTED_POWER_W, default=defaults.get(CONF_EARLY_EXCESS_EXPECTED_POWER_W, 400)): int,
+            vol.Required(CONF_EARLY_EXCESS_MIN_BATTERY_PCT, default=defaults.get(CONF_EARLY_EXCESS_MIN_BATTERY_PCT, 30)): vol.All(int, vol.Range(min=0, max=100)),
         }
     )
 

@@ -19,6 +19,7 @@ async def async_setup_entry(
         ManualZeroExportSwitch(coordinator, entry.entry_id),
         PrimaryExcessAutoSwitch(coordinator, entry.entry_id),
         SecondaryExcessAutoSwitch(coordinator, entry.entry_id),
+        EarlyExcessAutoSwitch(coordinator, entry.entry_id),
         LearningModeSwitch(coordinator, entry.entry_id),
     ]
     async_add_entities(entities)
@@ -118,6 +119,30 @@ class SecondaryExcessAutoSwitch(CoordinatorEntity, SwitchEntity):
     async def async_turn_off(self, **kwargs):
         self.coordinator.secondary_excess_auto = False
         await self.coordinator.async_request_refresh()
+
+class EarlyExcessAutoSwitch(CoordinatorEntity, SwitchEntity):
+    """Switch to enable/disable automatic control of early excess consumers."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:clock-fast"
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry_id}_early_excess_auto"
+        self._attr_name = "Frühzeitige Überschuss-Automatik"
+
+    @property
+    def is_on(self):
+        return getattr(self.coordinator, "early_excess_auto", True)
+
+    async def async_turn_on(self, **kwargs):
+        self.coordinator.early_excess_auto = True
+        await self.coordinator.async_request_refresh()
+
+    async def async_turn_off(self, **kwargs):
+        self.coordinator.early_excess_auto = False
+        await self.coordinator.async_request_refresh()
+
 
 class LearningModeSwitch(CoordinatorEntity, SwitchEntity):
     """Switch to start/stop the fast learning mode."""
