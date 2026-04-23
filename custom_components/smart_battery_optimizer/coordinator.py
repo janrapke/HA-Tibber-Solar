@@ -17,6 +17,7 @@ from .const import (
     CONF_BATTERY_LEVEL_SENSOR,
     CONF_SOLAR_POWER_SENSOR,
     CONF_BALCONY_POWER_SENSOR,
+    CONF_OPENDTU_DPL_SWITCH,
     CONF_OPENDTU_TURN_ON_BUTTON,
     CONF_OPENDTU_TURN_OFF_BUTTON,
     CONF_OPENDTU_PRODUCING_SENSOR,
@@ -424,9 +425,31 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 self._current_inverter_state = producing_state.state
 
         try:
+            dpl_switch = self.config.get(CONF_OPENDTU_DPL_SWITCH)
             turn_on_btn = self.config.get(CONF_OPENDTU_TURN_ON_BUTTON)
             turn_off_btn = self.config.get(CONF_OPENDTU_TURN_OFF_BUTTON)
 
+            dpl_value_to_set = None
+            if dpl_switch:
+                dpl_state_obj = self.hass.states.get(dpl_switch)
+                if dpl_state_obj:
+                    current_dpl = dpl_state_obj.state
+                    target_dpl = "0" if turn_on_inverter else "1"
+                    if current_dpl != target_dpl:
+                        domain = dpl_switch.split(".")[0]
+                        if domain == "select":
+                            await self.hass.services.async_call("select", "select_option", {"entity_id": dpl_switch, "option": target_dpl}, blocking=False)
+                        elif domain == "number":
+                            await self.hass.services.async_call("number", "set_value", {"entity_id": dpl_switch, "value": target_dpl}, blocking=False)
+
+                        # Once we set DPL, we assume it's enforced
+                        if target_dpl == "1":
+                            self._current_inverter_state = "off"
+                        else:
+                            self._current_inverter_state = "on"
+
+            # Always check if we need to press buttons (as a fallback or safety measure)
+            # but only if they are configured
             if turn_on_inverter and self._current_inverter_state != "on":
                 if turn_on_btn and self.hass.states.get(turn_on_btn) is not None:
                     await self.hass.services.async_call("button", "press", {"entity_id": turn_on_btn}, blocking=False)
@@ -436,7 +459,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                     await self.hass.services.async_call("button", "press", {"entity_id": turn_off_btn}, blocking=False)
                     self._current_inverter_state = "off"
         except Exception as e:
-            _LOGGER.error("Failed to press OpenDTU button: %s", e)
+            _LOGGER.error("Failed to control OpenDTU: %s", e)
 
         return {
             "calculated_house_consumption": self.calculated_house_consumption,
