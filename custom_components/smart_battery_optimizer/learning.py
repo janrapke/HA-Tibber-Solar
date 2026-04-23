@@ -211,6 +211,10 @@ class LearningEngine:
         """Called once at the end of a 15-min interval to calculate the average Wh and apply EMA."""
         q_str = str(quarter)
 
+        # For pessimistic tracking in the coordinator
+        actual_consumption_wh = 0.0
+        actual_solar_wh = 0.0
+
         # Finalize consumption
         if self._current_quarter_consumption_count > 0:
             counter = self.data["counters"]["consumption"][q_str]
@@ -218,9 +222,9 @@ class LearningEngine:
 
             # Average power in W over 15 min equals energy in Wh for that 15 min if divided by 4
             avg_power = self._current_quarter_consumption_acc / self._current_quarter_consumption_count
-            quarter_wh = avg_power / 4.0
+            actual_consumption_wh = avg_power / 4.0
             current_avg = self.data["consumption"][q_str]
-            self.data["consumption"][q_str] = (alpha * quarter_wh) + ((1 - alpha) * current_avg)
+            self.data["consumption"][q_str] = (alpha * actual_consumption_wh) + ((1 - alpha) * current_avg)
 
             if counter < 6:
                 self.data["counters"]["consumption"][q_str] = counter + 1
@@ -235,10 +239,10 @@ class LearningEngine:
             alpha = self._calculate_alpha(counter)
 
             avg_power = self._current_quarter_solar_acc / self._current_quarter_solar_count
-            quarter_wh = avg_power / 4.0
+            actual_solar_wh = avg_power / 4.0
             current_avg = self.data["solar"][q_str][condition]
 
-            self.data["solar"][q_str][condition] = (alpha * quarter_wh) + ((1 - alpha) * current_avg)
+            self.data["solar"][q_str][condition] = (alpha * actual_solar_wh) + ((1 - alpha) * current_avg)
 
             if counter < 6:
                 self.data["counters"]["solar"][q_str][condition] = counter + 1
@@ -263,6 +267,8 @@ class LearningEngine:
 
             self._current_quarter_balcony_acc = 0.0
             self._current_quarter_balcony_count = 0
+
+        return actual_consumption_wh, actual_solar_wh
 
     def predict_consumption_for_quarter(self, quarter: int) -> float:
         """Predict consumption (Wh) for a specific 15-min interval based on learned data."""

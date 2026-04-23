@@ -1,7 +1,7 @@
 """Constants for the Smart Battery Optimizer integration."""
 
 DOMAIN = "smart_battery_optimizer"
-VERSION = "1.7.0"
+VERSION = "1.8.0"
 
 # Configuration keys
 CONF_TIBBER_API_TOKEN = "tibber_api_token"
@@ -30,3 +30,7 @@ CONF_MAX_INVERTER_POWER_W = "max_inverter_power_w"
 CONF_EXCLUDED_POWER_SENSORS = "excluded_power_sensors"
 CONF_PRIMARY_EXCESS_CONSUMERS = "primary_excess_consumers"
 CONF_SECONDARY_EXCESS_CONSUMERS = "secondary_excess_consumers"
+
+CONF_EARLY_EXCESS_CONSUMERS = "early_excess_consumers"
+CONF_EARLY_EXCESS_EXPECTED_POWER_W = "early_excess_expected_power_w"
+CONF_EARLY_EXCESS_MIN_BATTERY_PCT = "early_excess_min_battery_pct"
