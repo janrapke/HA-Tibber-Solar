@@ -81,6 +81,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         self._current_inverter_state = "unknown"
         self._low_solar_minutes = 0
+        self._battery_recovery_mode = False
 
     @property
     def is_learning_mode_active(self) -> bool:
@@ -328,11 +329,17 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             await set_switches(self.config.get(CONF_SECONDARY_EXCESS_CONSUMERS, []), turn_on_secondary)
 
 
+        # Update recovery mode
+        if batt_level_pct <= batt_min_pct and not is_absorption:
+            self._battery_recovery_mode = True
+        elif batt_level_pct >= (batt_min_pct + 2.0) or is_absorption:
+            self._battery_recovery_mode = False
+
         if self.manual_zero_export:
             self.current_operating_mode = "Manueller Modus: Nulleinspeisung erzwungen"
             turn_on_inverter = True
 
-        elif batt_level_pct <= batt_min_pct and not is_absorption:
+        elif self._battery_recovery_mode:
             self.current_operating_mode = "Batterie am Minimum: OpenDTU aus (Netzbezug)"
             turn_on_inverter = False
 
@@ -404,17 +411,27 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 # Add solar with efficiency loss
                 simulated_batt_wh += fb["solar"] * batt_eff
 
-                # Discharge if price > threshold
-                if fb["price"] > mid_threshold:
+                # Decide if we can discharge
+                # Apply 2% hysteresis logic in simulation as well
+                is_recovery = simulated_batt_wh <= min_batt_wh
+                if not is_recovery and simulated_batt_wh < (min_batt_wh + (batt_cap_wh * 0.02)):
+                    # If we are in the 2% band, use the previous state. For a simple forward simulation,
+                    # if we were below min_batt_wh we don't discharge until we hit +2%.
+                    # But to keep it simple and robust, let's just say we don't discharge if we are below min_batt_wh
+                    # The goal is to see if we fail due to *this* threshold.
+                    pass
+
+                # Discharge if price > threshold and we have enough battery
+                if fb["price"] > mid_threshold and simulated_batt_wh > min_batt_wh:
                     # Battery can only discharge at the max inverter output limit
                     actual_discharge = min(fb["cons"], max_discharge_wh_per_15min)
                     simulated_batt_wh -= actual_discharge
 
-                simulated_batt_wh = min(batt_cap_wh, simulated_batt_wh)
+                    if simulated_batt_wh < min_batt_wh:
+                        failed = True
+                        break
 
-                if simulated_batt_wh < min_batt_wh:
-                    failed = True
-                    break
+                simulated_batt_wh = min(batt_cap_wh, simulated_batt_wh)
 
             if failed:
                 low = mid_threshold
@@ -435,10 +452,20 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         max_inverter_power_w = float(self.config.get(CONF_MAX_INVERTER_POWER_W, 800))
         max_discharge_wh_per_15min = max_inverter_power_w / 4.0
 
+        min_batt_pct = self.config.get(CONF_BATTERY_MIN_LIMIT_PCT, 10)
+        min_batt_wh = batt_cap_wh * (min_batt_pct / 100.0)
+        recovery_mode = getattr(self, "_battery_recovery_mode", False)
+
         for i, fb in enumerate(future_blocks):
             pred_solar = fb["solar"] * batt_eff
             pred_cons = fb["cons"]
             price = fb["price"]
+
+            # Update recovery mode logic for forecast
+            if simulated_batt_wh <= min_batt_wh:
+                recovery_mode = True
+            elif simulated_batt_wh >= (min_batt_wh + (batt_cap_wh * 0.02)):
+                recovery_mode = False
 
             # The actual battery discharge is capped by the inverter
             actual_discharge = min(pred_cons, max_discharge_wh_per_15min)
@@ -449,7 +476,10 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             available_cap = batt_cap_wh - simulated_batt_wh
             will_overfill = rem_solar > (rem_cons + available_cap)
 
-            if will_overfill:
+            if recovery_mode:
+                action = "Batterie am Minimum (DTU Aus)"
+                simulated_batt_wh += pred_solar
+            elif will_overfill:
                 action = "Überschussvermeidung (DTU An)"
                 simulated_batt_wh += pred_solar - actual_discharge
             elif price <= price_threshold:
