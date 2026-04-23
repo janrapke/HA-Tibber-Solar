@@ -157,7 +157,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                         if dt:
                             cloud_cover = f.get("cloud_coverage", 50)
                             forecasts.append({"datetime": dt, "cloud_cover": cloud_cover})
-            else:
+            elif state is not None:
                 response = await self.hass.services.async_call(
                     "weather",
                     "get_forecasts",
@@ -317,6 +317,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         async def set_switches(entities: list, turn_on: bool):
             for switch_entity in entities:
                 state = self.hass.states.get(switch_entity)
+                if state is None:
+                    continue
                 is_on = state and state.state == "on"
                 if turn_on and not is_on:
                     await self.hass.services.async_call("switch", "turn_on", {"entity_id": switch_entity}, blocking=False)
@@ -426,11 +428,11 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             turn_off_btn = self.config.get(CONF_OPENDTU_TURN_OFF_BUTTON)
 
             if turn_on_inverter and self._current_inverter_state != "on":
-                if turn_on_btn:
+                if turn_on_btn and self.hass.states.get(turn_on_btn) is not None:
                     await self.hass.services.async_call("button", "press", {"entity_id": turn_on_btn}, blocking=False)
                     self._current_inverter_state = "on"
             elif not turn_on_inverter and self._current_inverter_state != "off":
-                if turn_off_btn:
+                if turn_off_btn and self.hass.states.get(turn_off_btn) is not None:
                     await self.hass.services.async_call("button", "press", {"entity_id": turn_off_btn}, blocking=False)
                     self._current_inverter_state = "off"
         except Exception as e:

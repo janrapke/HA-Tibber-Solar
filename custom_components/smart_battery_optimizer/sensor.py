@@ -54,7 +54,7 @@ class PredictedRemainingSolarSensor(CoordinatorEntity, SensorEntity):
     _attr_has_entity_name = True
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_native_unit_of_measurement = "Wh"
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = None
 
     def __init__(self, coordinator, entry_id):
         super().__init__(coordinator)
@@ -73,7 +73,7 @@ class PredictedRemainingConsumptionSensor(CoordinatorEntity, SensorEntity):
     _attr_has_entity_name = True
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_native_unit_of_measurement = "Wh"
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = None
 
     def __init__(self, coordinator, entry_id):
         super().__init__(coordinator)
