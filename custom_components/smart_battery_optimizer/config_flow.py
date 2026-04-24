@@ -37,6 +37,7 @@ from .const import (
     CONF_EARLY_EXCESS_CONSUMERS,
     CONF_EARLY_EXCESS_EXPECTED_POWER_W,
     CONF_EARLY_EXCESS_MIN_BATTERY_PCT,
+    CONF_SMART_DEVICES,
 )
 
 def get_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
@@ -107,6 +108,7 @@ def get_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             ),
             vol.Required(CONF_EARLY_EXCESS_EXPECTED_POWER_W, default=defaults.get(CONF_EARLY_EXCESS_EXPECTED_POWER_W, 400)): int,
             vol.Required(CONF_EARLY_EXCESS_MIN_BATTERY_PCT, default=defaults.get(CONF_EARLY_EXCESS_MIN_BATTERY_PCT, 30)): vol.All(int, vol.Range(min=0, max=100)),
+            vol.Optional(CONF_SMART_DEVICES, default=defaults.get(CONF_SMART_DEVICES, "")): str,
         }
     )
 

@@ -8,8 +8,11 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 import homeassistant.util.dt as dt_util
 from .tibber import fetch_tibber_prices
 
+from .device_manager import SmartDeviceManager
+
 from .const import (
     DOMAIN,
+    CONF_SMART_DEVICES,
     CONF_TIBBER_API_TOKEN,
     CONF_TIBBER_PRICE_SENSOR,
     CONF_TIBBER_CONSUMPTION_SENSOR,
@@ -53,6 +56,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         )
         self.config = config
         self.learning_engine = LearningEngine(hass, config)
+        self.device_manager = SmartDeviceManager(hass)
 
         # Internal state
         self.is_enabled = True
@@ -113,6 +117,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
     async def _async_setup(self):
         """Set up the coordinator."""
         await self.learning_engine.async_load()
+        await self.device_manager.async_load()
         await self._fetch_tibber_prices()
 
     async def _fetch_tibber_prices(self):
@@ -215,6 +220,28 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         excluded_power = 0.0
         for entity_id in self.config.get(CONF_EXCLUDED_POWER_SENSORS, []):
             excluded_power += self._get_float_state(entity_id)
+
+        # Smart Devices logic
+        now = dt_util.now()
+        smart_devices_str = self.config.get(CONF_SMART_DEVICES, "")
+        if smart_devices_str:
+            smart_devices = [s.strip() for s in smart_devices_str.split(",") if s.strip()]
+            for device_id in smart_devices:
+                power = self._get_float_state(device_id)
+                # 1. If currently learning, record power
+                if device_id in self.device_manager.learning_states:
+                    self.device_manager.record_power(device_id, power)
+
+                    # Auto stop learning if zero power for > 10 mins
+                    if self.device_manager.learning_states[device_id]["zero_power_minutes"] > 10:
+                        await self.device_manager.stop_learning(device_id)
+
+                # 2. Subtract from house consumption if learning OR if it's currently running according to a plan
+                # Or just generally subtract smart devices from base house load if we plan them explicitly?
+                # The user asked: "Ja es macht sinn das aus der hausberechbung auszuschließen."
+                # We can just exclude the smart device's current power from the calculated house consumption always,
+                # similar to other excluded_power_sensors.
+                excluded_power += power
 
         current_balcony = 0.0
         balcony_sensor = self.config.get(CONF_BALCONY_POWER_SENSOR)
@@ -671,6 +698,102 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         return blocks
 
+    async def async_calculate_optimal_start_time(self, device_id: str, program_name: str, max_hours: int = 24) -> tuple[datetime, float]:
+        """Find the optimal start time and cost for a device program."""
+        profile = self.device_manager.get_program_profile(device_id, program_name)
+        if not profile:
+            return dt_util.now(), 0.0
+
+        now = dt_util.now()
+        # Round up to next 15-minute mark for cleaner planning
+        start_eval = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0) + timedelta(minutes=15)
+        end_eval = start_eval + timedelta(hours=max_hours)
+
+        hourly_forecasts = await self._get_hourly_forecasts()
+
+        best_time = start_eval
+        best_cost = float('inf')
+
+        # Back up existing planned devices
+        original_plan = dict(self.device_manager.planned_devices)
+
+        eval_dt = start_eval
+        while eval_dt < end_eval:
+            # 1. Simulate WITHOUT this new device
+            if device_id in self.device_manager.planned_devices:
+                del self.device_manager.planned_devices[device_id]
+            blocks_without = self._build_future_blocks(now, hourly_forecasts)
+
+            # 2. Simulate WITH this device at eval_dt
+            self.device_manager.set_planned_device(device_id, program_name, eval_dt, 0.0)
+            blocks_with = self._build_future_blocks(now, hourly_forecasts)
+
+            # 3. Calculate difference in expected grid import cost
+            # For each simulation, we need to run battery simulation to see what actually hits the grid.
+            # Simplified cost calc:
+            cost_without = self._simulate_grid_cost(now, blocks_without)
+            cost_with = self._simulate_grid_cost(now, blocks_with)
+
+            marginal_cost = cost_with - cost_without
+
+            if marginal_cost < best_cost:
+                best_cost = marginal_cost
+                best_time = eval_dt
+
+            eval_dt += timedelta(minutes=15)
+
+        # Restore original plan
+        self.device_manager.planned_devices = original_plan
+        return best_time, max(0.0, best_cost)
+
+    def _simulate_grid_cost(self, now, blocks: list[dict]) -> float:
+        """Simulate total grid cost for a set of blocks, considering battery."""
+        batt_cap_wh = self.config.get(CONF_BATTERY_CAPACITY_WH, 5000)
+        batt_pct = self._get_float_state(self.config.get(CONF_BATTERY_LEVEL_SENSOR))
+        simulated_batt_wh = batt_cap_wh * (batt_pct / 100.0)
+
+        batt_eff = float(self.config.get(CONF_BATTERY_EFFICIENCY_PCT, 90)) / 100.0
+        max_inverter_power_w = float(self.config.get(CONF_MAX_INVERTER_POWER_W, 800))
+        max_discharge_wh_per_15min = max_inverter_power_w / 4.0
+
+        min_batt_pct = self.config.get(CONF_BATTERY_MIN_LIMIT_PCT, 10)
+        min_batt_wh = batt_cap_wh * (min_batt_pct / 100.0)
+
+        total_cost = 0.0
+
+        # We need the threshold to know when it would discharge.
+        # For a fast simulation, we assume it discharges when price > 0.20 or whatever current threshold is.
+        # But an even simpler approach: it discharges whenever consumption > solar, up to inverter limit.
+
+        for b in blocks:
+            pred_solar = b["solar"] * batt_eff
+            pred_cons = b["cons"]
+            price = b["price"]
+
+            # Add solar to battery
+            simulated_batt_wh += pred_solar
+
+            # Can we cover consumption from battery?
+            if simulated_batt_wh > min_batt_wh:
+                available_discharge = simulated_batt_wh - min_batt_wh
+                actual_discharge = min(pred_cons, max_discharge_wh_per_15min, available_discharge)
+                simulated_batt_wh -= actual_discharge
+
+                # Grid import is remainder
+                grid_import_wh = pred_cons - actual_discharge
+            else:
+                grid_import_wh = pred_cons
+
+            # Battery caps
+            simulated_batt_wh = min(batt_cap_wh, simulated_batt_wh)
+
+            # Cost for grid import
+            # Price is per kWh
+            cost = (grid_import_wh / 1000.0) * price
+            total_cost += cost
+
+        return total_cost
+
     def _build_future_blocks(self, now, hourly_forecasts: list[dict]) -> list[dict]:
         """Builds a list of 15-min blocks until the end of available prices."""
         # Find maximum time we have prices for
@@ -703,6 +826,20 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
             pred_solar = self.learning_engine.predict_solar_for_quarter(q, cc)
             pred_cons = self.learning_engine.predict_consumption_for_quarter(q)
+
+            # Add planned smart devices to expected consumption
+            # Each block is 15 minutes. We check all minutes in this block.
+            planned_device_power_w_sum = 0.0
+            for minute_offset in range(15):
+                dt_minute = eval_dt + timedelta(minutes=minute_offset)
+                planned_device_power_w_sum += self.device_manager.get_planned_power_at_time(dt_minute)
+
+            # Convert average Watts over 15 mins to Wh
+            # Sum of watts for each minute / 15 gives average W for the block.
+            # (avg W) / 4 = Wh for the quarter.
+            # Simplified: sum(W_minute) / 60 = Wh
+            planned_device_wh = planned_device_power_w_sum / 60.0
+            pred_cons += planned_device_wh
 
             # Only add predicted balcony if a sensor is configured
             if self.config.get(CONF_BALCONY_POWER_SENSOR):
