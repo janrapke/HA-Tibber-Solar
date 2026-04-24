@@ -34,6 +34,7 @@ from .const import (
     CONF_EARLY_EXCESS_CONSUMERS,
     CONF_EARLY_EXCESS_MIN_BATTERY_PCT,
     CONF_EARLY_EXCESS_EXPECTED_POWER_W,
+    CONF_EXCESS_EXTERNAL_INVERTER,
 )
 from .learning import LearningEngine
 
