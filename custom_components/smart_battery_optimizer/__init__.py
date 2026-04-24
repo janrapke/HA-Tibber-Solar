@@ -8,7 +8,7 @@ from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[str] = ["sensor", "switch", "number"]
+PLATFORMS: list[str] = ["sensor", "switch", "number", "button"]
 
 from .coordinator import SmartBatteryOptimizerCoordinator
 
