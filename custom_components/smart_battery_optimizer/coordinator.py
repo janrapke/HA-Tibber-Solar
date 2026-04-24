@@ -685,9 +685,11 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         # Extend max_dt to end of the last block
         max_dt += timedelta(minutes=15)
 
-        # If no future prices, default to a 24h lookahead to ensure simulation works
-        if max_dt <= now + timedelta(hours=1):
-             max_dt = now + timedelta(hours=24)
+        # We want to always simulate at least 24h into the future to ensure we
+        # don't run out of battery during the night/next morning.
+        min_required_horizon = now + timedelta(hours=24)
+        if max_dt < min_required_horizon:
+             max_dt = min_required_horizon
 
         blocks = []
         eval_dt = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0)
@@ -717,12 +719,26 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             pred_cons = max(0.0, house_cons - pred_balcony)
 
             # Find price for this 15 min block
-            price = 0.0
+            price = None
             for p in self.tibber_prices:
                 p_dt = p.get("datetime")
                 if p_dt and p_dt <= eval_dt < p_dt + timedelta(minutes=15):
                     price = float(p.get("total", 0.0))
                     break
+
+            # Fallback logic: if Tibber hasn't published tomorrow's prices yet,
+            # use the price from exactly 24 hours ago.
+            if price is None:
+                fallback_dt = eval_dt - timedelta(hours=24)
+                for p in self.tibber_prices:
+                    p_dt = p.get("datetime")
+                    if p_dt and p_dt <= fallback_dt < p_dt + timedelta(minutes=15):
+                        price = float(p.get("total", 0.0))
+                        break
+
+            # Last resort fallback if still no price found
+            if price is None:
+                price = 0.20
 
             # Extreme Price Reserve Logic
             if price > self.extreme_price_threshold:
