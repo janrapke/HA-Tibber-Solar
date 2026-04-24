@@ -37,9 +37,6 @@ from .const import (
     CONF_EARLY_EXCESS_CONSUMERS,
     CONF_EARLY_EXCESS_EXPECTED_POWER_W,
     CONF_EARLY_EXCESS_MIN_BATTERY_PCT,
-    CONF_PERSON_ENTITIES,
-    CONF_ABSENCE_CALENDARS,
-    CONF_SPONTANEOUS_ABSENCE_MINUTES,
 )
 
 def get_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
@@ -110,13 +107,6 @@ def get_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             ),
             vol.Required(CONF_EARLY_EXCESS_EXPECTED_POWER_W, default=defaults.get(CONF_EARLY_EXCESS_EXPECTED_POWER_W, 400)): int,
             vol.Required(CONF_EARLY_EXCESS_MIN_BATTERY_PCT, default=defaults.get(CONF_EARLY_EXCESS_MIN_BATTERY_PCT, 30)): vol.All(int, vol.Range(min=0, max=100)),
-            vol.Optional(CONF_PERSON_ENTITIES, default=defaults.get(CONF_PERSON_ENTITIES, vol.UNDEFINED)): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="person", multiple=True)
-            ),
-            vol.Optional(CONF_ABSENCE_CALENDARS, default=defaults.get(CONF_ABSENCE_CALENDARS, vol.UNDEFINED)): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain="calendar", multiple=True)
-            ),
-            vol.Required(CONF_SPONTANEOUS_ABSENCE_MINUTES, default=defaults.get(CONF_SPONTANEOUS_ABSENCE_MINUTES, 120)): int,
         }
     )
 

@@ -20,10 +20,7 @@
           "battery_capacity_wh": "Battery Capacity (Wh)",
           "battery_min_limit_pct": "Minimum Battery Limit (%)",
           "excluded_power_sensors": "Excluded Power Sensors (e.g., EV Charger)",
-          "prioritized_excess_consumers": "Prioritized Consumers (Switches for excess power)",
-          "person_entities": "Person Trackers (for presence detection)",
-          "absence_calendars": "Absence Calendars (for planned away time/shifts)",
-          "spontaneous_absence_minutes": "Spontaneous Absence Timer (minutes)"
+          "prioritized_excess_consumers": "Prioritized Consumers (Switches for excess power)"
         }
       }
     },
@@ -56,10 +53,7 @@
           "battery_capacity_wh": "Battery Capacity (Wh)",
           "battery_min_limit_pct": "Minimum Battery Limit (%)",
           "excluded_power_sensors": "Excluded Power Sensors (e.g., EV Charger)",
-          "prioritized_excess_consumers": "Prioritized Consumers (Switches for excess power)",
-          "person_entities": "Person Trackers (for presence detection)",
-          "absence_calendars": "Absence Calendars (for planned away time/shifts)",
-          "spontaneous_absence_minutes": "Spontaneous Absence Timer (minutes)"
+          "prioritized_excess_consumers": "Prioritized Consumers (Switches for excess power)"
         }
       }
     }

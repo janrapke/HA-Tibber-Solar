@@ -35,10 +35,6 @@ from .const import (
     CONF_EARLY_EXCESS_CONSUMERS,
     CONF_EARLY_EXCESS_MIN_BATTERY_PCT,
     CONF_EARLY_EXCESS_EXPECTED_POWER_W,
-    CONF_PERSON_ENTITIES,
-    CONF_ABSENCE_CALENDARS,
-    CONF_SPONTANEOUS_ABSENCE_MINUTES,
-    CONF_SOLAR_PEAK_W,
 )
 from .learning import LearningEngine
 
@@ -91,13 +87,6 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         self._current_inverter_state = "unknown"
         self._low_solar_minutes = 0
         self._battery_recovery_mode = False
-
-        self._spontaneous_absence_end: dict[str, datetime] = {}
-
-        # Intraday Solar Correction tracking
-        self._intraday_solar_expected_acc = 0.0
-        self._intraday_solar_actual_acc = 0.0
-        self._intraday_solar_factor = 1.0
 
     @property
     def is_learning_mode_active(self) -> bool:
@@ -260,111 +249,16 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             if charge_state_obj:
                 charge_state = charge_state_obj.state
 
-        # Determine active persons and spontaneous absences
-        persons = self.config.get(CONF_PERSON_ENTITIES, [])
-        if isinstance(persons, str):
-            persons = [persons]
-
-        active_persons = []
-        spontaneous_minutes = int(self.config.get(CONF_SPONTANEOUS_ABSENCE_MINUTES, 120))
-
-        for person_id in persons:
-            state_obj = self.hass.states.get(person_id)
-            if state_obj and state_obj.state == "home":
-                active_persons.append(person_id)
-                # If they are home, clear any spontaneous absence timer
-                if person_id in self._spontaneous_absence_end:
-                    del self._spontaneous_absence_end[person_id]
-            else:
-                # They are NOT home. Check if they just left (no timer yet)
-                if person_id not in self._spontaneous_absence_end:
-                    self._spontaneous_absence_end[person_id] = now + timedelta(minutes=spontaneous_minutes)
-
-        # Pre-fetch calendar events for absence planning (up to 35 hours)
-        calendars = self.config.get(CONF_ABSENCE_CALENDARS, [])
-        if isinstance(calendars, str):
-            calendars = [calendars]
-
-        planned_absences = []
-        horizon_end = now + timedelta(hours=35)
-        for cal_id in calendars:
-            try:
-                response = await self.hass.services.async_call(
-                    "calendar",
-                    "get_events",
-                    {
-                        "entity_id": cal_id,
-                        "start_date_time": now.isoformat(),
-                        "end_date_time": horizon_end.isoformat()
-                    },
-                    blocking=True,
-                    return_response=True
-                )
-                if response and cal_id in response:
-                    events = response[cal_id].get("events", [])
-                    for e in events:
-                        start_str = e.get("start")
-                        end_str = e.get("end")
-                        if start_str and end_str:
-                            start_dt = dt_util.parse_datetime(start_str)
-                            end_dt = dt_util.parse_datetime(end_str)
-                            # Handle all-day events (date strings instead of datetime)
-                            if not start_dt:
-                                start_dt = dt_util.parse_date(start_str)
-                                if start_dt:
-                                    start_dt = dt_util.start_of_local_day(datetime.combine(start_dt, datetime.min.time()))
-                            if not end_dt:
-                                end_dt = dt_util.parse_date(end_str)
-                                if end_dt:
-                                    # All day events technically end at midnight the next day
-                                    end_dt = dt_util.start_of_local_day(datetime.combine(end_dt, datetime.min.time()))
-
-                            if start_dt and end_dt:
-                                planned_absences.append((start_dt, end_dt))
-            except Exception as e:
-                _LOGGER.warning("Could not fetch calendar events for %s: %s", cal_id, e)
-
-        self._planned_absences = planned_absences
-        self._active_persons_now = active_persons
-        self._all_tracked_persons = persons
-
-        await self.learning_engine.record_consumption(current_quarter, self.calculated_house_consumption, active_persons)
+        await self.learning_engine.record_consumption(current_quarter, self.calculated_house_consumption)
         await self.learning_engine.record_solar(current_quarter, current_solar, cloud_cover, charge_state)
         await self.learning_engine.record_balcony(current_quarter, current_balcony, cloud_cover)
 
-        is_weekend = now.weekday() >= 5
-
         if current_quarter != self.learning_engine._last_quarter_processed and self.learning_engine._last_quarter_processed != -1:
-            # Clean up old intraday tracking if it's a new day
-            if current_quarter < self.learning_engine._last_quarter_processed:
-                self._intraday_solar_expected_acc = 0.0
-                self._intraday_solar_actual_acc = 0.0
-                self._intraday_solar_factor = 1.0
-                self.pessimistic_solar_factor = 1.0
-                self.pessimistic_consumption_factor = 1.0
+            actual_cons_wh, actual_solar_wh = await self.learning_engine.finalize_quarter(self.learning_engine._last_quarter_processed, cloud_cover)
 
-            actual_cons_wh, actual_solar_wh = await self.learning_engine.finalize_quarter(self.learning_engine._last_quarter_processed, cloud_cover, is_weekend)
-
-            # Intraday Solar Correction logic
+            # Calculate pessimistic factors
             pred_solar_wh = self.learning_engine.predict_solar_for_quarter(self.learning_engine._last_quarter_processed, cloud_cover)
-
-            is_absorption = charge_state and charge_state.lower() in ("absorption", "float", "ausgleichsladung", "equalization")
-            if not is_absorption:
-                self._intraday_solar_expected_acc += pred_solar_wh
-                self._intraday_solar_actual_acc += actual_solar_wh
-
-                # Keep rolling window manageable (e.g. max 8 quarters / 2 hours of memory)
-                if self._intraday_solar_expected_acc > 1000:
-                    self._intraday_solar_expected_acc *= 0.5
-                    self._intraday_solar_actual_acc *= 0.5
-
-                if self._intraday_solar_expected_acc > 10:
-                    raw_factor = self._intraday_solar_actual_acc / self._intraday_solar_expected_acc
-                    # Clamp the factor to prevent crazy spikes, say between 0.2 and 2.0
-                    self._intraday_solar_factor = max(0.2, min(2.0, raw_factor))
-
-            # Predict consumption using active persons to establish pessimistic factor
-            pred_cons_wh = self.learning_engine.predict_consumption_for_quarter(self.learning_engine._last_quarter_processed, is_weekend, getattr(self.learning_engine, "_current_quarter_active_persons", []))
+            pred_cons_wh = self.learning_engine.predict_consumption_for_quarter(self.learning_engine._last_quarter_processed)
 
             # Balcony reduces predicted consumption. It does NOT charge the battery.
             if self.config.get(CONF_BALCONY_POWER_SENSOR):
@@ -457,15 +351,10 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         cloud_tolerance_mins = getattr(self, "excess_cloud_tolerance_mins", 5.0)
         cloud_override_off = self._low_solar_minutes >= cloud_tolerance_mins
 
-        # For excess logic, ensure it triggers if the battery is practically full now
-        # (virtual_batt_pct >= 99) regardless of the future lookahead,
-        # or if the lookahead predicts it will overfill.
-        excess_condition_met = battery_will_overfill or virtual_batt_pct >= 99.0
-
         # Primary Hysteresis Logic
         if self.primary_excess_auto:
             turn_on_primary = False
-            if virtual_batt_pct >= getattr(self, "primary_excess_on", 95.0) and has_excess_power and excess_condition_met:
+            if virtual_batt_pct >= getattr(self, "primary_excess_on", 95.0) and has_excess_power and battery_will_overfill:
                 turn_on_primary = True
             elif virtual_batt_pct <= getattr(self, "primary_excess_off", 90.0) or cloud_override_off:
                 turn_on_primary = False
@@ -478,7 +367,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         # Secondary Hysteresis Logic
         if self.secondary_excess_auto:
             turn_on_secondary = False
-            if virtual_batt_pct >= getattr(self, "secondary_excess_on", 98.0) and has_excess_power and excess_condition_met:
+            if virtual_batt_pct >= getattr(self, "secondary_excess_on", 98.0) and has_excess_power and battery_will_overfill:
                 turn_on_secondary = True
             elif virtual_batt_pct <= getattr(self, "secondary_excess_off", 95.0) or cloud_override_off:
                 turn_on_secondary = False
@@ -563,11 +452,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                         if domain == "select":
                             await self.hass.services.async_call("select", "select_option", {"entity_id": dpl_switch, "option": target_dpl}, blocking=False)
                         elif domain == "number":
-                            # Ensure we pass a float/int if the entity expects it
-                            val_to_set = float(target_dpl)
-                            await self.hass.services.async_call("number", "set_value", {"entity_id": dpl_switch, "value": val_to_set}, blocking=False)
-                        elif domain == "text":
-                            await self.hass.services.async_call("text", "set_value", {"entity_id": dpl_switch, "value": target_dpl}, blocking=False)
+                            await self.hass.services.async_call("number", "set_value", {"entity_id": dpl_switch, "value": target_dpl}, blocking=False)
 
                         # Once we set DPL, we assume it's enforced
                         if target_dpl == "1":
@@ -821,60 +706,12 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                     break
 
             pred_solar = self.learning_engine.predict_solar_for_quarter(q, cc)
-
-            # Apply intraday solar correction if it's for today
-            end_of_today = now.replace(hour=23, minute=59, second=59, microsecond=999999)
-            if eval_dt <= end_of_today:
-                pred_solar *= getattr(self, "_intraday_solar_factor", 1.0)
-                # Cap to physical limit
-                solar_peak_w = float(self.config.get(CONF_SOLAR_PEAK_W, 6000))
-                solar_peak_wh_15min = solar_peak_w / 4.0
-                if pred_solar > solar_peak_wh_15min:
-                    pred_solar = solar_peak_wh_15min
-
-            # Project presence for this future block
-            projected_active_persons = []
-
-            # Is there a calendar event (planned absence) covering this block?
-            # We assume a global calendar approach: if an absence calendar event is active,
-            # we assume nobody is home UNLESS their live tracker overrides it.
-            is_planned_absence = False
-            for start_dt, end_dt in getattr(self, "_planned_absences", []):
-                if start_dt <= eval_dt < end_dt:
-                    is_planned_absence = True
-                    break
-
-            active_now = getattr(self, "_active_persons_now", [])
-            spontaneous_ends = getattr(self, "_spontaneous_absence_end", {})
-            all_persons = getattr(self, "_all_tracked_persons", [])
-
-            for person_id in all_persons:
-                if person_id in active_now:
-                    # Live tracker says they are home -> Overrides calendar and everything else
-                    projected_active_persons.append(person_id)
-                elif is_planned_absence:
-                    # Not home, and calendar says they shouldn't be -> They are away
-                    pass
-                elif person_id in spontaneous_ends:
-                    # Not home, no calendar event -> Are they within the spontaneous absence window?
-                    if eval_dt < spontaneous_ends[person_id]:
-                        # Still in the window -> Project away
-                        pass
-                    else:
-                        # Spontaneous window expired, assume they return (pessimistic planning)
-                        projected_active_persons.append(person_id)
-                else:
-                    # Edge case fallback (e.g. no tracker data at all), default to present for safety
-                    projected_active_persons.append(person_id)
-
-            house_cons = self.learning_engine.predict_consumption_for_quarter(q, eval_dt.weekday() >= 5, projected_active_persons)
+            house_cons = self.learning_engine.predict_consumption_for_quarter(q)
             pred_balcony = 0.0
 
             # Only apply predicted balcony if a sensor is configured
             if self.config.get(CONF_BALCONY_POWER_SENSOR):
                 pred_balcony = self.learning_engine.predict_balcony_for_quarter(q, cc)
-                if eval_dt <= end_of_today:
-                    pred_balcony *= getattr(self, "_intraday_solar_factor", 1.0)
 
             # Balcony production reduces future consumption from the grid/battery point of view.
             # It does NOT add to pred_solar because it cannot charge the battery.
