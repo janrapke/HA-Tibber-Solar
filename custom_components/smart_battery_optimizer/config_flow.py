@@ -17,7 +17,6 @@ from .const import (
     CONF_BATTERY_LEVEL_SENSOR,
     CONF_SOLAR_POWER_SENSOR,
     CONF_BALCONY_POWER_SENSOR,
-    CONF_OPENDTU_DPL_SWITCH,
     CONF_OPENDTU_TURN_ON_BUTTON,
     CONF_OPENDTU_TURN_OFF_BUTTON,
     CONF_OPENDTU_PRODUCING_SENSOR,
@@ -65,13 +64,10 @@ def get_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             vol.Optional(CONF_BALCONY_POWER_SENSOR, default=defaults.get(CONF_BALCONY_POWER_SENSOR, vol.UNDEFINED)): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor", device_class="power")
             ),
-            vol.Optional(CONF_OPENDTU_DPL_SWITCH, default=defaults.get(CONF_OPENDTU_DPL_SWITCH, vol.UNDEFINED)): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain=["select", "number"])
-            ),
-            vol.Optional(CONF_OPENDTU_TURN_ON_BUTTON, default=defaults.get(CONF_OPENDTU_TURN_ON_BUTTON, vol.UNDEFINED)): selector.EntitySelector(
+            vol.Required(CONF_OPENDTU_TURN_ON_BUTTON, default=defaults.get(CONF_OPENDTU_TURN_ON_BUTTON, vol.UNDEFINED)): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="button")
             ),
-            vol.Optional(CONF_OPENDTU_TURN_OFF_BUTTON, default=defaults.get(CONF_OPENDTU_TURN_OFF_BUTTON, vol.UNDEFINED)): selector.EntitySelector(
+            vol.Required(CONF_OPENDTU_TURN_OFF_BUTTON, default=defaults.get(CONF_OPENDTU_TURN_OFF_BUTTON, vol.UNDEFINED)): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="button")
             ),
             vol.Required(CONF_OPENDTU_PRODUCING_SENSOR, default=defaults.get(CONF_OPENDTU_PRODUCING_SENSOR, vol.UNDEFINED)): selector.EntitySelector(
@@ -107,6 +103,7 @@ def get_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             ),
             vol.Required(CONF_EARLY_EXCESS_EXPECTED_POWER_W, default=defaults.get(CONF_EARLY_EXCESS_EXPECTED_POWER_W, 400)): int,
             vol.Required(CONF_EARLY_EXCESS_MIN_BATTERY_PCT, default=defaults.get(CONF_EARLY_EXCESS_MIN_BATTERY_PCT, 30)): vol.All(int, vol.Range(min=0, max=100)),
+            vol.Optional(CONF_EXCESS_EXTERNAL_INVERTER, default=defaults.get(CONF_EXCESS_EXTERNAL_INVERTER, False)): selector.BooleanSelector(),
         }
     )
 
