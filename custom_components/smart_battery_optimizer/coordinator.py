@@ -428,6 +428,10 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             self.current_operating_mode = "Batterie wird voll/Absorption: Überschussvermeidung aktiv"
             turn_on_inverter = True
 
+        elif virtual_batt_pct >= 100.0:
+            self.current_operating_mode = "Batterie 100% voll: DTU an (Nulleinspeisung aktiv)"
+            turn_on_inverter = True
+
         elif current_price is not None and current_price <= price_threshold:
             self.current_operating_mode = f"Strom günstig (<{round(price_threshold,3)}€): DTU aus (Akku wird gespart)"
             turn_on_inverter = False
@@ -437,20 +441,33 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             turn_on_inverter = True
 
         producing_sensor = self.config.get(CONF_OPENDTU_PRODUCING_SENSOR)
+        inverter_is_on = True # Default to True to force off if unknown
         if producing_sensor:
             producing_state = self.hass.states.get(producing_sensor)
             if producing_state:
-                self._current_inverter_state = producing_state.state
+                # OpenDTU producing sensor is a binary_sensor. It is 'on' when producing, 'off' when not.
+                # However, during initialization or errors, it might be 'unavailable' or 'unknown'.
+                # We also want to fire the button if our logical state changes, even if the sensor hasn't updated yet.
+                inverter_is_on = producing_state.state == "on"
+
+                # Check if the state is something other than "on" or "off" (e.g. string state from older config)
+                if producing_state.state not in ("on", "off"):
+                    # If it's a string like "producing", we map it.
+                    inverter_is_on = str(producing_state.state).lower() in ("on", "true", "1", "producing")
 
         try:
             turn_on_btn = self.config.get(CONF_OPENDTU_TURN_ON_BUTTON)
             turn_off_btn = self.config.get(CONF_OPENDTU_TURN_OFF_BUTTON)
 
-            if turn_on_inverter and self._current_inverter_state != "on":
+            # Fire the button if the requested state differs from what we *think* the current state is.
+            # We also fire if our internal requested state changed since last time, just to be sure.
+            requested_state_str = "on" if turn_on_inverter else "off"
+
+            if turn_on_inverter and (not inverter_is_on or self._current_inverter_state != "on"):
                 if turn_on_btn and self.hass.states.get(turn_on_btn) is not None:
                     await self.hass.services.async_call("button", "press", {"entity_id": turn_on_btn}, blocking=False)
                     self._current_inverter_state = "on"
-            elif not turn_on_inverter and self._current_inverter_state != "off":
+            elif not turn_on_inverter and (inverter_is_on or self._current_inverter_state != "off"):
                 if turn_off_btn and self.hass.states.get(turn_off_btn) is not None:
                     await self.hass.services.async_call("button", "press", {"entity_id": turn_off_btn}, blocking=False)
                     self._current_inverter_state = "off"
@@ -605,6 +622,9 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 simulated_batt_wh += pred_solar
             elif will_overfill:
                 action = "Überschussvermeidung (DTU An)"
+                simulated_batt_wh += pred_solar - actual_discharge
+            elif simulated_batt_wh >= batt_cap_wh:
+                action = "Batterie voll (DTU An)"
                 simulated_batt_wh += pred_solar - actual_discharge
             elif price <= price_threshold:
                 action = f"Netzbezug (Akku sparen für >{round(price_threshold,3)}€)"

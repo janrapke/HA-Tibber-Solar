@@ -27,6 +27,7 @@ class ResetLearningDataButton(CoordinatorEntity, ButtonEntity):
         """Initialize the button."""
         super().__init__(coordinator)
         self.config_entry = config_entry
+        self._attr_has_entity_name = True
         self._attr_name = "Reset Learning Data"
         self._attr_unique_id = f"{config_entry.entry_id}_reset_learning_data"
         self._attr_icon = "mdi:database-refresh-outline"
