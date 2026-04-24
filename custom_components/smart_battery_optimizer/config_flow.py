@@ -36,6 +36,7 @@ from .const import (
     CONF_EARLY_EXCESS_CONSUMERS,
     CONF_EARLY_EXCESS_EXPECTED_POWER_W,
     CONF_EARLY_EXCESS_MIN_BATTERY_PCT,
+    CONF_EXCESS_EXTERNAL_INVERTER,
 )
 
 def get_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
