@@ -339,56 +339,70 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         cloud_tolerance_mins = getattr(self, "excess_cloud_tolerance_mins", 5.0)
         cloud_override_off = self._low_solar_minutes >= cloud_tolerance_mins
 
+        # Helper for checking if consumers are on external inverter
+        external_inverters = self.config.get(CONF_EXCESS_EXTERNAL_INVERTER, [])
+        if isinstance(external_inverters, bool):
+            external_inverters = []
+        def _any_external(entities):
+            return any(e in external_inverters for e in entities)
+
         # Primary Hysteresis Logic
-        external_inverter = self.config.get(CONF_EXCESS_EXTERNAL_INVERTER, False)
+        primary_entities = self.config.get(CONF_PRIMARY_EXCESS_CONSUMERS, [])
+        primary_is_external = _any_external(primary_entities)
 
         if self.primary_excess_auto:
             turn_on_primary = False
-            if external_inverter:
+            if primary_is_external:
                 # External inverter: strict battery percentage logic, ignore solar/cloud
                 if virtual_batt_pct >= getattr(self, "primary_excess_on", 95.0):
                     turn_on_primary = True
                 elif virtual_batt_pct <= getattr(self, "primary_excess_off", 90.0):
                     turn_on_primary = False
                 else:
-                    turn_on_primary = any(self.hass.states.get(e) and self.hass.states.get(e).state == "on" for e in self.config.get(CONF_PRIMARY_EXCESS_CONSUMERS, []))
+                    turn_on_primary = any(self.hass.states.get(e) and self.hass.states.get(e).state == "on" for e in primary_entities)
             else:
                 if virtual_batt_pct >= getattr(self, "primary_excess_on", 95.0) and has_excess_power and battery_will_overfill:
                     turn_on_primary = True
                 elif virtual_batt_pct <= getattr(self, "primary_excess_off", 90.0) or cloud_override_off:
                     turn_on_primary = False
                 else:
-                    turn_on_primary = any(self.hass.states.get(e) and self.hass.states.get(e).state == "on" for e in self.config.get(CONF_PRIMARY_EXCESS_CONSUMERS, []))
+                    turn_on_primary = any(self.hass.states.get(e) and self.hass.states.get(e).state == "on" for e in primary_entities)
 
-            await set_switches(self.config.get(CONF_PRIMARY_EXCESS_CONSUMERS, []), turn_on_primary)
+            await set_switches(primary_entities, turn_on_primary)
 
         # Secondary Hysteresis Logic
+        secondary_entities = self.config.get(CONF_SECONDARY_EXCESS_CONSUMERS, [])
+        secondary_is_external = _any_external(secondary_entities)
+
         if self.secondary_excess_auto:
             turn_on_secondary = False
-            if external_inverter:
+            if secondary_is_external:
                 if virtual_batt_pct >= getattr(self, "secondary_excess_on", 98.0):
                     turn_on_secondary = True
                 elif virtual_batt_pct <= getattr(self, "secondary_excess_off", 95.0):
                     turn_on_secondary = False
                 else:
-                    turn_on_secondary = any(self.hass.states.get(e) and self.hass.states.get(e).state == "on" for e in self.config.get(CONF_SECONDARY_EXCESS_CONSUMERS, []))
+                    turn_on_secondary = any(self.hass.states.get(e) and self.hass.states.get(e).state == "on" for e in secondary_entities)
             else:
                 if virtual_batt_pct >= getattr(self, "secondary_excess_on", 98.0) and has_excess_power and battery_will_overfill:
                     turn_on_secondary = True
                 elif virtual_batt_pct <= getattr(self, "secondary_excess_off", 95.0) or cloud_override_off:
                     turn_on_secondary = False
                 else:
-                    turn_on_secondary = any(self.hass.states.get(e) and self.hass.states.get(e).state == "on" for e in self.config.get(CONF_SECONDARY_EXCESS_CONSUMERS, []))
+                    turn_on_secondary = any(self.hass.states.get(e) and self.hass.states.get(e).state == "on" for e in secondary_entities)
 
-            await set_switches(self.config.get(CONF_SECONDARY_EXCESS_CONSUMERS, []), turn_on_secondary)
+            await set_switches(secondary_entities, turn_on_secondary)
 
 
         # Early Excess Logic
+        early_entities = self.config.get(CONF_EARLY_EXCESS_CONSUMERS, [])
+        early_is_external = _any_external(early_entities)
+
         if getattr(self, "early_excess_auto", True):
             early_excess_min_batt = float(self.config.get(CONF_EARLY_EXCESS_MIN_BATTERY_PCT, 30.0))
             if virtual_batt_pct < early_excess_min_batt:
                 turn_on_early = False
-            elif not has_excess_power and cloud_override_off and not external_inverter:
+            elif not has_excess_power and cloud_override_off and not early_is_external:
                 turn_on_early = False
             else:
                 early_expected_w = float(self.config.get(CONF_EARLY_EXCESS_EXPECTED_POWER_W, 400.0))
@@ -497,14 +511,20 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         early_expected_wh_per_15min = early_expected_w / 4.0
         max_inverter_power_w = float(self.config.get(CONF_MAX_INVERTER_POWER_W, 800))
         max_discharge_wh_per_15min = max_inverter_power_w / 4.0
-        external_inverter = self.config.get(CONF_EXCESS_EXTERNAL_INVERTER, False)
+
+        external_inverters = self.config.get(CONF_EXCESS_EXTERNAL_INVERTER, [])
+        if isinstance(external_inverters, bool):
+            external_inverters = []
+        early_entities = self.config.get(CONF_EARLY_EXCESS_CONSUMERS, [])
+        early_is_external = any(e in external_inverters for e in early_entities)
 
         for fb in future_blocks:
             pred_solar = fb["solar"] * batt_eff
 
-            if external_inverter:
+            if early_is_external:
                 # If external, early cons is drawn directly from battery, independent of DTU
                 pred_cons = fb["cons"]
+                actual_discharge = 0
                 if pred_solar > pred_cons:
                     simulated_batt_wh += (pred_solar - pred_cons)
                 else:
@@ -515,6 +535,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 simulated_batt_wh -= early_expected_wh_per_15min
             else:
                 pred_cons = fb["cons"] + early_expected_wh_per_15min
+                actual_discharge = 0
                 if pred_solar > pred_cons:
                     simulated_batt_wh += (pred_solar - pred_cons)
                 else:
@@ -528,7 +549,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
     def _simulate_optimal_threshold(self, now, hourly_forecasts: list[dict], current_batt_pct: float, batt_cap_wh: float, batt_min_pct: float) -> float:
         """Simulates the future to find the optimal price threshold to discharge the battery."""
-        future_blocks = self._build_future_blocks(now, hourly_forecasts)
+        # Use pessimistic blocks for the threshold calculation to ensure safe predictions
+        future_blocks = self._build_future_blocks_pessimistic(now, hourly_forecasts)
 
         max_inverter_power_w = float(self.config.get(CONF_MAX_INVERTER_POWER_W, 800))
         max_discharge_wh_per_15min = max_inverter_power_w / 4.0
@@ -543,20 +565,12 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             simulated_batt_wh = batt_cap_wh * (current_batt_pct / 100.0)
             min_batt_wh = batt_cap_wh * (batt_min_pct / 100.0)
 
-            failed = False
+            failed_due_to_empty = False
+            failed_due_to_full = False
+
             for fb in future_blocks:
                 # Add solar with efficiency loss
                 simulated_batt_wh += fb["solar"] * batt_eff
-
-                # Decide if we can discharge
-                # Apply 2% hysteresis logic in simulation as well
-                is_recovery = simulated_batt_wh <= min_batt_wh
-                if not is_recovery and simulated_batt_wh < (min_batt_wh + (batt_cap_wh * 0.02)):
-                    # If we are in the 2% band, use the previous state. For a simple forward simulation,
-                    # if we were below min_batt_wh we don't discharge until we hit +2%.
-                    # But to keep it simple and robust, let's just say we don't discharge if we are below min_batt_wh
-                    # The goal is to see if we fail due to *this* threshold.
-                    pass
 
                 # Discharge if price > threshold and we have enough battery
                 if fb["price"] > mid_threshold and simulated_batt_wh > min_batt_wh:
@@ -565,24 +579,55 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                     simulated_batt_wh -= actual_discharge
 
                     if simulated_batt_wh < min_batt_wh:
-                        failed = True
+                        failed_due_to_empty = True
                         break
 
-                simulated_batt_wh = min(batt_cap_wh, simulated_batt_wh)
+                # The primary directive: 100% is bad. If we reach ~99%, the threshold is too high (too much saving).
+                if simulated_batt_wh >= (batt_cap_wh * 0.99):
+                    failed_due_to_full = True
+                    break
 
-            if failed:
+
+
+            if failed_due_to_full:
+                # We need to discharge more, lower the threshold so it discharges at cheaper prices
+                high = mid_threshold
+
+
+            elif failed_due_to_empty:
+                # We discharged too much, raise the threshold
                 low = mid_threshold
             else:
+                # Neither empty nor full, this is a valid threshold.
+                # Try to lower the threshold further to maximize battery usage (offset more grid import)
                 best_threshold = mid_threshold
                 high = mid_threshold
 
         return best_threshold
 
+    def _build_future_blocks_pessimistic(self, now, hourly_forecasts: list[dict]) -> list[dict]:
+        """Builds a pessimistic list of 15-min blocks applying the current daily deviation factors."""
+        blocks = self._build_future_blocks(now, hourly_forecasts)
+
+        # Determine end of today for the pessimistic daily boundary
+        end_of_today = now.replace(hour=23, minute=59, second=59, microsecond=999999)
+
+        # Apply the factors only for blocks belonging to today
+        solar_factor = min(1.0, getattr(self, "pessimistic_solar_factor", 1.0))
+        cons_factor = max(1.0, getattr(self, "pessimistic_consumption_factor", 1.0))
+
+        for b in blocks:
+            if b["dt"] <= end_of_today:
+                b["solar"] = b["solar"] * solar_factor
+                b["cons"] = b["cons"] * cons_factor
+
+        return blocks
+
     def _build_forecast_plan(self, now, hourly_forecasts: list[dict], current_batt_pct: float, batt_cap_wh: float, price_threshold: float):
         """Generate a forecast plan for the dynamic horizon using the dynamic threshold."""
         plan = []
         simulated_batt_wh = batt_cap_wh * (current_batt_pct / 100.0)
-        future_blocks = self._build_future_blocks(now, hourly_forecasts)
+        future_blocks = self._build_future_blocks_pessimistic(now, hourly_forecasts)
 
         batt_eff = float(self.config.get(CONF_BATTERY_EFFICIENCY_PCT, 90)) / 100.0
 
@@ -610,21 +655,19 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             # Will overfill check (basic lookahead sum, capped to inverter limit)
             rem_solar = sum(b["solar"] for b in future_blocks[i:])
 
-            external_inverter = self.config.get(CONF_EXCESS_EXTERNAL_INVERTER, False)
-
             rem_cons = sum(min(b["cons"], max_discharge_wh_per_15min) for b in future_blocks[i:])
 
             available_cap = batt_cap_wh - simulated_batt_wh
             will_overfill = rem_solar > (rem_cons + available_cap)
 
-            if recovery_mode:
+            if simulated_batt_wh >= batt_cap_wh:
+                action = "Batterie 100% voll (DTU An)"
+                simulated_batt_wh += pred_solar - actual_discharge
+            elif recovery_mode:
                 action = "Batterie am Minimum (DTU Aus)"
                 simulated_batt_wh += pred_solar
             elif will_overfill:
                 action = "Überschussvermeidung (DTU An)"
-                simulated_batt_wh += pred_solar - actual_discharge
-            elif simulated_batt_wh >= batt_cap_wh:
-                action = "Batterie voll (DTU An)"
                 simulated_batt_wh += pred_solar - actual_discharge
             elif price <= price_threshold:
                 action = f"Netzbezug (Akku sparen für >{round(price_threshold,3)}€)"
@@ -646,24 +689,6 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         self.hourly_plan = plan
 
-    def _build_future_blocks_pessimistic(self, now, hourly_forecasts: list[dict]) -> list[dict]:
-        """Builds a pessimistic list of 15-min blocks applying the current daily deviation factors."""
-        blocks = self._build_future_blocks(now, hourly_forecasts)
-
-        # Determine end of today for the pessimistic daily boundary
-        end_of_today = now.replace(hour=23, minute=59, second=59, microsecond=999999)
-
-        # Apply the factors only for blocks belonging to today
-        solar_factor = min(1.0, getattr(self, "pessimistic_solar_factor", 1.0))
-        cons_factor = max(1.0, getattr(self, "pessimistic_consumption_factor", 1.0))
-
-        for b in blocks:
-            if b["dt"] <= end_of_today:
-                b["solar"] = b["solar"] * solar_factor
-                b["cons"] = b["cons"] * cons_factor
-
-        return blocks
-
     def _build_future_blocks(self, now, hourly_forecasts: list[dict]) -> list[dict]:
         """Builds a list of 15-min blocks until the end of available prices."""
         # Find maximum time we have prices for
@@ -678,7 +703,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         # If no future prices, default to a 24h lookahead to ensure simulation works
         if max_dt <= now + timedelta(hours=1):
-             max_dt = now + timedelta(hours=24)
+            max_dt = now + timedelta(hours=24)
 
         blocks = []
         eval_dt = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0)
