@@ -559,9 +559,12 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         for fb in future_blocks:
             pred_solar = fb["solar"] * batt_eff
 
+            # Real dynamic consumption
+            base_cons = max(0.0, fb["house_wh"] - fb["balcony"])
+
             if early_is_external:
                 # If external, early cons is drawn directly from battery, independent of DTU
-                pred_cons = fb["cons"]
+                pred_cons = base_cons
                 if pred_solar > pred_cons:
                     simulated_batt_wh += (pred_solar - pred_cons)
                 else:
@@ -571,7 +574,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 # Early consumer unconditionally drains from battery
                 simulated_batt_wh -= early_expected_wh_per_15min
             else:
-                pred_cons = fb["cons"] + early_expected_wh_per_15min
+                pred_cons = base_cons + early_expected_wh_per_15min
                 if pred_solar > pred_cons:
                     simulated_batt_wh += (pred_solar - pred_cons)
                 else:
@@ -608,11 +611,13 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 # Add solar with efficiency loss
                 simulated_batt_wh += fb["solar"] * batt_eff
 
+                pred_cons = max(0.0, fb["house_wh"] - fb["balcony"])
+
                 # Discharge if price > threshold and we have enough battery.
                 # HOWEVER, if price is negative, we explicitly do NOT discharge, because we want to consume grid power.
                 if fb["price"] > mid_threshold and simulated_batt_wh > min_batt_wh and fb["price"] >= 0.0:
                     # Battery can only discharge at the max inverter output limit (for the house load)
-                    actual_discharge = min(fb["cons"], max_discharge_wh_per_15min)
+                    actual_discharge = min(pred_cons, max_discharge_wh_per_15min)
                     simulated_batt_wh -= actual_discharge
 
                     if simulated_batt_wh < min_batt_wh:
@@ -656,7 +661,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         for b in blocks:
             if b["dt"] <= end_of_today:
                 b["solar"] = b["solar"] * solar_factor
-                b["cons"] = b["cons"] * cons_factor
+                b["balcony"] = b["balcony"] * solar_factor
+                b["house_wh"] = b["house_wh"] * cons_factor
 
         return blocks
 
@@ -677,8 +683,13 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         for i, fb in enumerate(future_blocks):
             pred_solar = fb["solar"] * batt_eff
-            pred_cons = fb["cons"]
+            pred_balcony = fb["balcony"]
+            raw_house_wh = fb["house_wh"]
+            cc = fb["cc"]
             price = fb["price"]
+
+            # The actual consumption the battery sees is house minus balcony
+            pred_cons = max(0.0, raw_house_wh - pred_balcony)
 
             # Update recovery mode logic for forecast
             if simulated_batt_wh <= min_batt_wh:
@@ -692,7 +703,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             # Will overfill check (basic lookahead sum, capped to inverter limit)
             rem_solar = sum(b["solar"] for b in future_blocks[i:])
 
-            rem_cons = sum(min(b["cons"], max_discharge_wh_per_15min) for b in future_blocks[i:])
+            # Recalculate remaining dynamic consumption
+            rem_cons = sum(min(max(0.0, b["house_wh"] - b["balcony"]), max_discharge_wh_per_15min) for b in future_blocks[i:])
 
             available_cap = batt_cap_wh - simulated_batt_wh
             will_overfill = rem_solar > (rem_cons + available_cap)
@@ -722,7 +734,10 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 "hour": fb["dt"].strftime("%H:%M"),
                 "price": round(price, 4),
                 "solar_wh": round(pred_solar),
+                "balcony_wh": round(pred_balcony),
+                "house_wh": round(raw_house_wh),
                 "consumption_wh": round(pred_cons),
+                "cloud_cover": round(cc),
                 "battery_pct_end": round((simulated_batt_wh / batt_cap_wh) * 100),
                 "planned_action": action
             })
@@ -762,12 +777,10 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             pred_solar = self.learning_engine.predict_solar_for_quarter(q, cc)
             pred_cons = self.learning_engine.predict_consumption_for_quarter(q)
 
+            pred_balcony = 0.0
             # Only add predicted balcony if a sensor is configured
             if self.config.get(CONF_BALCONY_POWER_SENSOR):
                 pred_balcony = self.learning_engine.predict_balcony_for_quarter(q, cc)
-                # Balcony production reduces future consumption from the grid/battery point of view.
-                # We add it to the total predicted solar so the system knows it's available energy.
-                pred_solar += pred_balcony
 
             # Find price for this 15 min block
             price = 0.0
@@ -780,11 +793,14 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             # Extreme Price Reserve Logic
             if price > self.extreme_price_threshold:
                 pred_solar = pred_solar * self.extreme_price_factor
+                pred_balcony = pred_balcony * self.extreme_price_factor
 
             blocks.append({
                 "dt": eval_dt,
                 "solar": pred_solar,
-                "cons": pred_cons,
+                "balcony": pred_balcony,
+                "house_wh": pred_cons,
+                "cc": cc,
                 "price": price
             })
 
