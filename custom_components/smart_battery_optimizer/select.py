@@ -9,7 +9,7 @@ from .const import DOMAIN, CONF_SMART_DEVICES
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
     """Set up the select platform."""
-    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
 
     entities = []
 
@@ -17,7 +17,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
     if smart_devices_str:
         smart_devices = [s.strip() for s in smart_devices_str.split(",") if s.strip()]
         for device_id in smart_devices:
-            # We use the domain and object_id to construct a friendly name
             object_id = device_id.split(".")[1] if "." in device_id else device_id
             entities.append(SmartDeviceProgramSelect(coordinator, device_id, object_id))
 
@@ -34,8 +33,6 @@ class SmartDeviceProgramSelect(CoordinatorEntity, SelectEntity):
         self._object_id = object_id
         self._attr_unique_id = f"{DOMAIN}_{object_id}_program"
         self._attr_name = f"{object_id.replace('_', ' ').title()} Programm"
-
-        # State
         self._current_option = None
 
     @property
@@ -62,7 +59,6 @@ class SmartDeviceProgramSelect(CoordinatorEntity, SelectEntity):
             self._current_option = option
             self.async_write_ha_state()
 
-            # Recalculate optimal time and propose it
             start_time, cost = await self.coordinator.async_calculate_optimal_start_time(self._device_id, option)
             self.coordinator.device_manager.set_proposed_device(self._device_id, option, start_time, cost)
 

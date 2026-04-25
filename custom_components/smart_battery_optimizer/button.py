@@ -4,13 +4,12 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-import homeassistant.util.dt as dt_util
 
 from .const import DOMAIN, CONF_SMART_DEVICES
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback):
     """Set up the button platform."""
-    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
 
     entities = []
 
@@ -51,7 +50,6 @@ class StopLearningButton(CoordinatorEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Handle the button press."""
-        # Let device_manager name it automatically
         await self.coordinator.device_manager.stop_learning(self._device_id)
         await self.coordinator.async_request_refresh()
 
@@ -67,16 +65,5 @@ class ConfirmPlanButton(CoordinatorEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Handle the button press."""
-        # Get selected program from select entity
-        select_entity_id = f"select.{self._object_id}_programm"
-        state = self.coordinator.hass.states.get(select_entity_id)
-
-        if not state or state.state == "unknown" or "Keine Programme" in state.state:
-            return
-
-        program_name = state.state
-
-        # Move proposed plan to confirmed plan
         self.coordinator.device_manager.confirm_proposed_plan(self._device_id)
-
         await self.coordinator.async_request_refresh()
