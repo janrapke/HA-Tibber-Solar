@@ -11,16 +11,16 @@
           "tibber_export_sensor": "Tibber Pulse Export Sensor",
           "battery_level_sensor": "Battery Level Sensor (%)",
           "solar_power_sensor": "Solar Power Sensors (W)",
-          "opendtu_dpl_switch": "OpenDTU DPL Mode Select/Number (Optional)",
-          "opendtu_turn_on_button": "OpenDTU Inverter Turn ON Button (Optional)",
-          "opendtu_turn_off_button": "OpenDTU Inverter Turn OFF Button (Optional)",
+          "opendtu_turn_on_button": "OpenDTU Inverter Turn ON Button",
+          "opendtu_turn_off_button": "OpenDTU Inverter Turn OFF Button",
           "opendtu_producing_sensor": "OpenDTU Producing Binary Sensor",
           "opendtu_output_sensor": "OpenDTU Inverter Output Sensor (W)",
           "weather_entity": "Weather Entity (for cloud cover)",
           "battery_capacity_wh": "Battery Capacity (Wh)",
           "battery_min_limit_pct": "Minimum Battery Limit (%)",
           "excluded_power_sensors": "Excluded Power Sensors (e.g., EV Charger)",
-          "prioritized_excess_consumers": "Prioritized Consumers (Switches for excess power)"
+          "prioritized_excess_consumers": "Prioritized Consumers (Switches for excess power)",
+          "excess_external_inverter": "Switches connected to External Inverter (Ignore OpenDTU limits)"
         }
       }
     },
@@ -44,16 +44,16 @@
           "tibber_export_sensor": "Tibber Pulse Export Sensor",
           "battery_level_sensor": "Battery Level Sensor (%)",
           "solar_power_sensor": "Solar Power Sensors (W)",
-          "opendtu_dpl_switch": "OpenDTU DPL Mode Select/Number (Optional)",
-          "opendtu_turn_on_button": "OpenDTU Inverter Turn ON Button (Optional)",
-          "opendtu_turn_off_button": "OpenDTU Inverter Turn OFF Button (Optional)",
+          "opendtu_turn_on_button": "OpenDTU Inverter Turn ON Button",
+          "opendtu_turn_off_button": "OpenDTU Inverter Turn OFF Button",
           "opendtu_producing_sensor": "OpenDTU Producing Binary Sensor",
           "opendtu_output_sensor": "OpenDTU Inverter Output Sensor (W)",
           "weather_entity": "Weather Entity (for cloud cover)",
           "battery_capacity_wh": "Battery Capacity (Wh)",
           "battery_min_limit_pct": "Minimum Battery Limit (%)",
           "excluded_power_sensors": "Excluded Power Sensors (e.g., EV Charger)",
-          "prioritized_excess_consumers": "Prioritized Consumers (Switches for excess power)"
+          "prioritized_excess_consumers": "Prioritized Consumers (Switches for excess power)",
+          "excess_external_inverter": "Switches connected to External Inverter (Ignore OpenDTU limits)"
         }
       }
     }

@@ -147,6 +147,23 @@ class LearningEngine:
             self.data["balcony"][str(q)]["partly"] = balcony_wh_15min * 0.5
             self.data["balcony"][str(q)]["cloudy"] = balcony_wh_15min * 0.2
 
+    async def hard_reset_data(self):
+        """Hard reset the learning data completely and reinitialize with priors."""
+        self.data = {
+            "consumption": {},
+            "solar": {str(q): {} for q in range(96)},
+            "balcony": {str(q): {} for q in range(96)},
+            "counters": {
+                "consumption": {str(q): 0 for q in range(96)},
+                "solar": {str(q): {"clear": 0, "partly": 0, "cloudy": 0} for q in range(96)},
+                "balcony": {str(q): {"clear": 0, "partly": 0, "cloudy": 0} for q in range(96)}
+            },
+            "learning_mode_end_time": None
+        }
+        self._initialize_priors()
+        await self.async_save()
+        _LOGGER.info("Learning data has been hard-reset to priors.")
+
     def reset_learning_counters(self):
         """Reset all learning counters to 0 and set learning mode end time to 7 days from now."""
         for q in range(96):
@@ -207,7 +224,7 @@ class LearningEngine:
             return 0.1
         return max(0.7 - (0.1 * counter), 0.1)
 
-    async def finalize_quarter(self, quarter: int, cloud_cover: float):
+    async def finalize_quarter(self, quarter: int, cloud_cover: float, price: float = 0.0):
         """Called once at the end of a 15-min interval to calculate the average Wh and apply EMA."""
         q_str = str(quarter)
 
@@ -215,8 +232,16 @@ class LearningEngine:
         actual_consumption_wh = 0.0
         actual_solar_wh = 0.0
 
+        # Do not learn consumption data if prices are negative
+        skip_consumption = False
+        try:
+            if price is not None and float(price) < 0.0:
+                skip_consumption = True
+        except (ValueError, TypeError):
+            pass
+
         # Finalize consumption
-        if self._current_quarter_consumption_count > 0:
+        if self._current_quarter_consumption_count > 0 and not skip_consumption:
             counter = self.data["counters"]["consumption"][q_str]
             alpha = self._calculate_alpha(counter)
 
@@ -231,9 +256,6 @@ class LearningEngine:
 
             self._current_quarter_consumption_acc = 0.0
             self._current_quarter_consumption_count = 0
-        else:
-            actual_consumption_wh = self.predict_consumption_for_quarter(quarter)
-            _LOGGER.debug("No consumption data recorded for quarter %d, retaining previous learned value.", quarter)
 
         # Finalize solar
         if self._current_quarter_solar_count > 0:
@@ -252,9 +274,6 @@ class LearningEngine:
 
             self._current_quarter_solar_acc = 0.0
             self._current_quarter_solar_count = 0
-        else:
-            actual_solar_wh = self.predict_solar_for_quarter(quarter, cloud_cover)
-            _LOGGER.debug("No valid solar data recorded for quarter %d (e.g. throttled), retaining previous learned value.", quarter)
 
         # Finalize balcony
         if self._current_quarter_balcony_count > 0:
@@ -276,9 +295,16 @@ class LearningEngine:
 
         return actual_consumption_wh, actual_solar_wh
 
+
+
+
     def predict_consumption_for_quarter(self, quarter: int) -> float:
         """Predict consumption (Wh) for a specific 15-min interval based on learned data."""
-        return float(self.data["consumption"].get(str(quarter), 0.0))
+        val = float(self.data["consumption"].get(str(quarter), 0.0))
+        # Ensure a minimum base load to prevent 0 Wh bugs in forecasting
+        base_load_w = float(self.config.get(CONF_BASE_LOAD_W, 250))
+        min_wh = base_load_w / 4.0
+        return max(val, min_wh * 0.5)  # Allow it to drop to half base load but not 0
 
     def predict_solar_for_quarter(self, quarter: int, cloud_cover: float) -> float:
         """Predict solar generation (Wh) for a specific 15-min interval and cloud cover based on learned data."""
