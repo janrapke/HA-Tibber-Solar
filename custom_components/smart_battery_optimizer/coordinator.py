@@ -263,10 +263,6 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                         old_price = p.get("price", 0.0)
                         break
 
-            # If we don't have the old price cached cleanly, we can approximate by passing current_price if it's still negative,
-            # or realistically, Tibber prices don't change intra-hour, so current_price is usually fine.
-            # But the most precise way is to pass current_price or 0.0. Let's just use current_price.
-
             c_price = old_price
             actual_cons_wh, actual_solar_wh = await self.learning_engine.finalize_quarter(self.learning_engine._last_quarter_processed, cloud_cover, c_price)
 
@@ -287,10 +283,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             else:
                 self.pessimistic_solar_factor = actual_solar_wh / pred_solar_wh
 
-            if actual_cons_wh <= pred_cons_wh or pred_cons_wh == 0:
-                self.pessimistic_consumption_factor = 1.0
-            else:
-                self.pessimistic_consumption_factor = actual_cons_wh / pred_cons_wh
+            # Removed pessimistic consumption factor as spikes (e.g. cooking) ruin the daily forecast
+            self.pessimistic_consumption_factor = 1.0
 
             await self.learning_engine.async_save()
 
@@ -509,13 +503,14 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
             # Fire the button if the requested state differs from what we *think* the current state is.
             # We also fire if our internal requested state changed since last time, just to be sure.
+            # For negative prices, we force the OFF button every time to ensure DPL is definitely set.
             requested_state_str = "on" if turn_on_inverter else "off"
 
             if turn_on_inverter and (not inverter_is_on or self._current_inverter_state != "on"):
                 if turn_on_btn and self.hass.states.get(turn_on_btn) is not None:
                     await self.hass.services.async_call("button", "press", {"entity_id": turn_on_btn}, blocking=False)
                     self._current_inverter_state = "on"
-            elif not turn_on_inverter and (inverter_is_on or self._current_inverter_state != "off"):
+            elif not turn_on_inverter and (inverter_is_on or self._current_inverter_state != "off" or is_negative_price):
                 if turn_off_btn and self.hass.states.get(turn_off_btn) is not None:
                     await self.hass.services.async_call("button", "press", {"entity_id": turn_off_btn}, blocking=False)
                     self._current_inverter_state = "off"
