@@ -803,6 +803,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             planned_device_wh = planned_device_power_w_sum / 60.0
             pred_cons += planned_device_wh
 
+            pred_balcony = 0.0
             # Only add predicted balcony if a sensor is configured
             if self.config.get(CONF_BALCONY_POWER_SENSOR):
                 pred_balcony = self.learning_engine.predict_balcony_for_quarter(q, cc)
@@ -890,7 +891,11 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         for b in blocks:
             pred_solar = b["solar"] * batt_eff
-            pred_cons = b["cons"]
+            pred_cons = b.get("house_wh", 0.0)
+            pred_cons -= b.get("balcony", 0.0)
+            if pred_cons < 0:
+                pred_cons = 0
+
             price = b["price"]
 
             simulated_batt_wh += pred_solar
