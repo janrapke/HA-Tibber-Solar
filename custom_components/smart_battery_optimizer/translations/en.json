@@ -20,7 +20,7 @@
           "battery_min_limit_pct": "Minimum Battery Limit (%)",
           "excluded_power_sensors": "Excluded Power Sensors (e.g., EV Charger)",
           "prioritized_excess_consumers": "Prioritized Consumers (Switches for excess power)",
-          "excess_external_inverter": "Excess Consumers on External Inverter (Ignore OpenDTU limits)"
+          "excess_external_inverter": "Switches connected to External Inverter (Ignore OpenDTU limits)"
         }
       }
     },
@@ -53,7 +53,7 @@
           "battery_min_limit_pct": "Minimum Battery Limit (%)",
           "excluded_power_sensors": "Excluded Power Sensors (e.g., EV Charger)",
           "prioritized_excess_consumers": "Prioritized Consumers (Switches for excess power)",
-          "excess_external_inverter": "Excess Consumers on External Inverter (Ignore OpenDTU limits)"
+          "excess_external_inverter": "Switches connected to External Inverter (Ignore OpenDTU limits)"
         }
       }
     }

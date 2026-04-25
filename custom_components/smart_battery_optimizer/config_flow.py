@@ -44,6 +44,10 @@ def get_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
     if defaults is None:
         defaults = {}
 
+    ext_inv_default = defaults.get(CONF_EXCESS_EXTERNAL_INVERTER, vol.UNDEFINED)
+    if isinstance(ext_inv_default, bool):
+        ext_inv_default = vol.UNDEFINED
+
     return vol.Schema(
         {
             vol.Required(CONF_TIBBER_API_TOKEN, default=defaults.get(CONF_TIBBER_API_TOKEN, "")): str,
@@ -104,7 +108,9 @@ def get_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             ),
             vol.Required(CONF_EARLY_EXCESS_EXPECTED_POWER_W, default=defaults.get(CONF_EARLY_EXCESS_EXPECTED_POWER_W, 400)): int,
             vol.Required(CONF_EARLY_EXCESS_MIN_BATTERY_PCT, default=defaults.get(CONF_EARLY_EXCESS_MIN_BATTERY_PCT, 30)): vol.All(int, vol.Range(min=0, max=100)),
-            vol.Optional(CONF_EXCESS_EXTERNAL_INVERTER, default=defaults.get(CONF_EXCESS_EXTERNAL_INVERTER, False)): selector.BooleanSelector(),
+            vol.Optional(CONF_EXCESS_EXTERNAL_INVERTER, default=ext_inv_default): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="switch", multiple=True)
+            ),
         }
     )
 
