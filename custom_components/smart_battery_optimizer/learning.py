@@ -233,7 +233,12 @@ class LearningEngine:
         actual_solar_wh = 0.0
 
         # Do not learn consumption data if prices are negative
-        skip_consumption = price < 0.0
+        skip_consumption = False
+        try:
+            if price is not None and float(price) < 0.0:
+                skip_consumption = True
+        except (ValueError, TypeError):
+            pass
 
         # Finalize consumption
         if self._current_quarter_consumption_count > 0 and not skip_consumption:
@@ -297,7 +302,7 @@ class LearningEngine:
         """Predict consumption (Wh) for a specific 15-min interval based on learned data."""
         val = float(self.data["consumption"].get(str(quarter), 0.0))
         # Ensure a minimum base load to prevent 0 Wh bugs in forecasting
-        base_load_w = float(self.config.get("base_load_w", 250))
+        base_load_w = float(self.config.get(CONF_BASE_LOAD_W, 250))
         min_wh = base_load_w / 4.0
         return max(val, min_wh * 0.5)  # Allow it to drop to half base load but not 0
 
