@@ -1,15 +1,15 @@
 """Manager for Smart Devices in Smart Battery Optimizer."""
 import logging
-import json
-import os
-import aiofiles
 from datetime import datetime, timedelta
 
+import homeassistant.util.dt as dt_util
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.storage import Store
 
 _LOGGER = logging.getLogger(__name__)
 
-STORAGE_FILE = ".storage/smart_battery_optimizer_devices.json"
+STORAGE_KEY = "smart_battery_optimizer_devices"
+STORAGE_VERSION = 1
 
 class SmartDeviceManager:
     """Manages smart devices, learning programs, and storage."""
@@ -17,34 +17,31 @@ class SmartDeviceManager:
     def __init__(self, hass: HomeAssistant):
         """Initialize."""
         self.hass = hass
+        self._store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
         self.data = {
             "devices": {}
         }
         self.learning_states = {}
         self.planned_devices = {}
         self.proposed_devices = {}
+        self.running_devices = {}
 
     async def async_load(self):
         """Load data from storage."""
-        filepath = self.hass.config.path(STORAGE_FILE)
-        if os.path.exists(filepath):
-            try:
-                async with aiofiles.open(filepath, "r", encoding="utf-8") as f:
-                    content = await f.read()
-                    self.data = json.loads(content)
-            except Exception as e:
-                _LOGGER.error("Failed to load device data: %s", e)
+        try:
+            stored_data = await self._store.async_load()
+            if stored_data:
+                self.data = stored_data
+        except Exception as e:
+            _LOGGER.error("Failed to load device data: %s", e)
 
         if "devices" not in self.data:
             self.data["devices"] = {}
 
     async def async_save(self):
         """Save data to storage."""
-        filepath = self.hass.config.path(STORAGE_FILE)
         try:
-            os.makedirs(os.path.dirname(filepath), exist_ok=True)
-            async with aiofiles.open(filepath, "w", encoding="utf-8") as f:
-                await f.write(json.dumps(self.data, indent=2))
+            await self._store.async_save(self.data)
         except Exception as e:
             _LOGGER.error("Failed to save device data: %s", e)
 
@@ -55,7 +52,7 @@ class SmartDeviceManager:
                 "active": True,
                 "profile": [],
                 "zero_power_minutes": 0,
-                "start_time": datetime.now()
+                "start_time": dt_util.now()
             }
 
     async def stop_learning(self, device_id: str, program_name: str = None):
@@ -106,6 +103,25 @@ class SmartDeviceManager:
         except KeyError:
             return []
 
+    async def rename_program(self, device_id: str, old_name: str, new_name: str):
+        """Rename a saved program."""
+        if device_id in self.data["devices"] and old_name in self.data["devices"][device_id]["programs"]:
+            if new_name and new_name != old_name:
+                self.data["devices"][device_id]["programs"][new_name] = self.data["devices"][device_id]["programs"].pop(old_name)
+                await self.async_save()
+
+    async def delete_program(self, device_id: str, program_name: str):
+        """Delete a saved program."""
+        if device_id in self.data["devices"] and program_name in self.data["devices"][device_id]["programs"]:
+            del self.data["devices"][device_id]["programs"][program_name]
+            await self.async_save()
+
+    async def clear_device(self, device_id: str):
+        """Delete all data for a device."""
+        if device_id in self.data["devices"]:
+            self.data["devices"][device_id]["programs"] = {}
+            await self.async_save()
+
     def set_proposed_device(self, device_id: str, program_name: str, start_time: datetime, expected_cost: float):
         """Propose a device to run at a specific time (before confirmation)."""
         self.proposed_devices[device_id] = {
@@ -142,13 +158,87 @@ class SmartDeviceManager:
     def get_planned_power_at_time(self, dt: datetime) -> float:
         """Get total planned power consumption for all devices at a specific minute."""
         total_power = 0.0
+
+        # Include planned devices that haven't started yet
         for device_id, plan in self.planned_devices.items():
             start_time = plan["start_time"]
             profile = plan["profile"]
 
-            # Allow up to 30 mins late start
             if dt >= start_time:
                 minute_offset = int((dt - start_time).total_seconds() / 60)
                 if 0 <= minute_offset < len(profile):
                     total_power += profile[minute_offset]
+
+        # Include running devices (spontaneous or auto-started)
+        for device_id, run in self.running_devices.items():
+            start_time = run["start_time"]
+            profile = run["profile"]
+
+            if dt >= start_time:
+                minute_offset = int((dt - start_time).total_seconds() / 60)
+                if 0 <= minute_offset < len(profile):
+                    total_power += profile[minute_offset]
+
         return total_power
+
+    def update_live_device_states(self, device_id: str, current_power: float):
+        """Update states based on live power: auto-start, auto-detect, auto-cancel."""
+        now = dt_util.now()
+
+        # 1. Check Auto-Cancel for planned devices (if > 60 mins past start and NOT running)
+        if device_id in self.planned_devices:
+            plan = self.planned_devices[device_id]
+            mins_past_start = (now - plan["start_time"]).total_seconds() / 60.0
+
+            if mins_past_start > 60:
+                # Cancel the plan if it hasn't turned on yet (power remains low)
+                if current_power <= 10.0:
+                    _LOGGER.info(f"Auto-canceling plan for {device_id} (60 mins late).")
+                    self.cancel_planned_device(device_id)
+
+        # 2. Check if a device just turned ON (> 10W)
+        if current_power > 10.0:
+            if device_id in self.planned_devices:
+                # Auto-Start: It was planned, and now it's consuming power
+                plan = self.planned_devices.pop(device_id)
+                self.running_devices[device_id] = {
+                    "program_name": plan["program_name"],
+                    "start_time": now,
+                    "profile": plan["profile"],
+                    "spontaneous": False
+                }
+                _LOGGER.info(f"Auto-started planned program {plan['program_name']} for {device_id}.")
+
+            elif device_id not in self.running_devices and device_id not in self.learning_states:
+                # Auto-Detect: Spontaneous start
+                best_match_program = self._auto_detect_program(device_id)
+                if best_match_program:
+                    profile = self.get_program_profile(device_id, best_match_program)
+                    self.running_devices[device_id] = {
+                        "program_name": best_match_program,
+                        "start_time": now,
+                        "profile": profile,
+                        "spontaneous": True
+                    }
+                    _LOGGER.info(f"Auto-detected spontaneous program {best_match_program} for {device_id}.")
+
+        # 3. Check if running device has finished
+        if device_id in self.running_devices:
+            run = self.running_devices[device_id]
+            mins_running = (now - run["start_time"]).total_seconds() / 60.0
+            if mins_running >= len(run["profile"]):
+                # Program naturally finished according to its profile
+                del self.running_devices[device_id]
+
+    def _auto_detect_program(self, device_id: str) -> str | None:
+        """Find the most likely program based on user's current selection or history."""
+        # For a full live pattern match we would need a rolling buffer of live power.
+        # As a simple fallback for spontaneous starts, we use the currently selected program if valid,
+        # or just the first available program, so the simulation has *some* curve to subtract.
+        programs = self.get_programs(device_id)
+        if not programs:
+            return None
+
+        # In a more advanced version, we would compare the last 5 minutes of power to the arrays.
+        # For now, default to the first one to enable spontaneous tracking.
+        return programs[0]

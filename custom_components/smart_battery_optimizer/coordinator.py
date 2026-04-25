@@ -228,10 +228,15 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             smart_devices = [s.strip() for s in smart_devices_str.split(",") if s.strip()]
             for device_id in smart_devices:
                 power = self._get_float_state(device_id)
+
+                # Auto-Detect, Auto-Start, Auto-Cancel
+                self.device_manager.update_live_device_states(device_id, power)
+
                 if device_id in self.device_manager.learning_states:
                     self.device_manager.record_power(device_id, power)
                     if self.device_manager.learning_states[device_id]["zero_power_minutes"] > 10:
                         await self.device_manager.stop_learning(device_id)
+
                 excluded_power += power
 
         current_balcony = 0.0
@@ -834,11 +839,11 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         return blocks
 
-    async def async_calculate_optimal_start_time(self, device_id: str, program_name: str, max_hours: int = 24) -> tuple[datetime, float]:
-        """Find the optimal start time and cost for a device program."""
+    async def async_calculate_optimal_start_times(self, device_id: str, program_name: str, max_hours: int = 24) -> list[tuple[datetime, float]]:
+        """Find the top 3 optimal start times and costs, spaced at least 60 minutes apart."""
         profile = self.device_manager.get_program_profile(device_id, program_name)
         if not profile:
-            return dt_util.now(), 0.0
+            return [(dt_util.now(), 0.0)]
 
         now = dt_util.now()
         start_eval = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0) + timedelta(minutes=15)
@@ -846,8 +851,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         hourly_forecasts = await self._get_hourly_forecasts()
 
-        best_time = start_eval
-        best_cost = float('inf')
+        results = []
 
         original_plan = dict(self.device_manager.planned_devices)
 
@@ -863,16 +867,34 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             cost_without = self._simulate_grid_cost(blocks_without)
             cost_with = self._simulate_grid_cost(blocks_with)
 
-            marginal_cost = cost_with - cost_without
-
-            if marginal_cost < best_cost:
-                best_cost = marginal_cost
-                best_time = eval_dt
+            marginal_cost = max(0.0, cost_with - cost_without)
+            results.append((eval_dt, marginal_cost))
 
             eval_dt += timedelta(minutes=15)
 
         self.device_manager.planned_devices = original_plan
-        return best_time, max(0.0, best_cost)
+
+        # Sort by lowest cost
+        results.sort(key=lambda x: x[1])
+
+        # Filter top 3 ensuring at least 60 mins apart
+        top_results = []
+        for res in results:
+            dt, cost = res
+            too_close = False
+            for top_dt, _ in top_results:
+                if abs((dt - top_dt).total_seconds()) < 3600:
+                    too_close = True
+                    break
+            if not too_close:
+                top_results.append(res)
+            if len(top_results) >= 3:
+                break
+
+        if not top_results:
+            top_results = [(dt_util.now(), 0.0)]
+
+        return top_results
 
     def _simulate_grid_cost(self, blocks: list[dict]) -> float:
         """Simulate total grid cost for a set of blocks, considering battery."""

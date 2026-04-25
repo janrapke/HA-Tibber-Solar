@@ -4,6 +4,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.device_registry import DeviceInfo
 
 from .const import DOMAIN, CONF_SMART_DEVICES
 
@@ -19,6 +20,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
         for device_id in smart_devices:
             object_id = device_id.split(".")[1] if "." in device_id else device_id
             entities.append(SmartDeviceProgramSelect(coordinator, device_id, object_id))
+            entities.append(SmartDeviceAlternativeTimeSelect(coordinator, device_id, object_id))
 
     if entities:
         async_add_entities(entities)
@@ -33,6 +35,12 @@ class SmartDeviceProgramSelect(CoordinatorEntity, SelectEntity):
         self._object_id = object_id
         self._attr_unique_id = f"{DOMAIN}_{object_id}_program"
         self._attr_name = f"{object_id.replace('_', ' ').title()} Programm"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device_id)},
+            name=object_id.replace('_', ' ').title(),
+            manufacturer="Smart Battery Optimizer",
+            model="Smart Appliance"
+        )
         self._current_option = None
 
     @property
@@ -59,7 +67,72 @@ class SmartDeviceProgramSelect(CoordinatorEntity, SelectEntity):
             self._current_option = option
             self.async_write_ha_state()
 
-            start_time, cost = await self.coordinator.async_calculate_optimal_start_time(self._device_id, option)
-            self.coordinator.device_manager.set_proposed_device(self._device_id, option, start_time, cost)
+            top_times = await self.coordinator.async_calculate_optimal_start_times(self._device_id, option)
+            if top_times:
+                best_start_time, best_cost = top_times[0]
+                self.coordinator.device_manager.set_proposed_device(self._device_id, option, best_start_time, best_cost)
 
+                # Store alternatives in device manager for the Alternative Select to read
+                self.coordinator.device_manager.proposed_devices[self._device_id]["alternatives"] = top_times
+
+            await self.coordinator.async_request_refresh()
+
+class SmartDeviceAlternativeTimeSelect(CoordinatorEntity, SelectEntity):
+    """Select entity to choose an alternative start time."""
+
+    def __init__(self, coordinator, device_id: str, object_id: str):
+        """Initialize the select entity."""
+        super().__init__(coordinator)
+        self._device_id = device_id
+        self._object_id = object_id
+        self._attr_unique_id = f"{DOMAIN}_{object_id}_alternative_time"
+        self._attr_name = f"{object_id.replace('_', ' ').title()} Alternative Zeit"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device_id)},
+            name=object_id.replace('_', ' ').title(),
+            manufacturer="Smart Battery Optimizer",
+            model="Smart Appliance"
+        )
+        self._attr_icon = "mdi:clock-fast"
+
+    @property
+    def options(self) -> list[str]:
+        """Return the available top 3 times."""
+        prop = self.coordinator.device_manager.proposed_devices.get(self._device_id)
+        if prop and "alternatives" in prop:
+            opts = []
+            for i, (dt, cost) in enumerate(prop["alternatives"]):
+                opts.append(f"{dt.strftime('%H:%M')} (ca. {round(cost, 2)}€)")
+            return opts
+        return ["Keine Vorschläge"]
+
+    @property
+    def current_option(self) -> str | None:
+        """Return the currently selected proposed time."""
+        prop = self.coordinator.device_manager.proposed_devices.get(self._device_id)
+        if prop:
+            current_dt_str = prop["start_time"].strftime('%H:%M')
+            for opt in self.options:
+                if opt.startswith(current_dt_str):
+                    return opt
+        options = self.options
+        if options and "Keine Vorschläge" not in options[0]:
+            return options[0]
+        return None
+
+    async def async_select_option(self, option: str) -> None:
+        """Change the proposed start time to the selected alternative."""
+        if option and "Keine Vorschläge" not in option:
+            prop = self.coordinator.device_manager.proposed_devices.get(self._device_id)
+            if prop and "alternatives" in prop:
+                # Find matching alternative
+                for dt, cost in prop["alternatives"]:
+                    if option.startswith(dt.strftime('%H:%M')):
+                        self.coordinator.device_manager.set_proposed_device(
+                            self._device_id, prop["program_name"], dt, cost
+                        )
+                        # Re-attach alternatives so they aren't lost
+                        self.coordinator.device_manager.proposed_devices[self._device_id]["alternatives"] = prop["alternatives"]
+                        break
+            self.async_write_ha_state()
             await self.coordinator.async_request_refresh()
