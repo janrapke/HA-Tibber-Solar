@@ -5,6 +5,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.const import EntityCategory
+from homeassistant.helpers.device_registry import DeviceInfo
 
 import homeassistant.util.dt as dt_util
 
@@ -248,6 +249,12 @@ class SmartDeviceStartTimeSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f'{DOMAIN}_{object_id}_start_time'
         self._attr_name = f'{object_id.replace("_", " ").title()} Empfohlene Startzeit'
         self._attr_icon = 'mdi:clock-time-four-outline'
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device_id)},
+            name=object_id.replace('_', ' ').title(),
+            manufacturer="Smart Battery Optimizer",
+            model="Smart Appliance"
+        )
 
     @property
     def native_value(self):
@@ -266,6 +273,12 @@ class SmartDeviceDelayTimerSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f'{DOMAIN}_{object_id}_delay_timer'
         self._attr_name = f'{object_id.replace("_", " ").title()} Startverzögerung (Timer)'
         self._attr_icon = 'mdi:timer-sand'
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device_id)},
+            name=object_id.replace('_', ' ').title(),
+            manufacturer="Smart Battery Optimizer",
+            model="Smart Appliance"
+        )
 
     @property
     def native_value(self):
@@ -292,6 +305,12 @@ class SmartDeviceExpectedCostSensor(CoordinatorEntity, SensorEntity):
         self._attr_native_unit_of_measurement = '€'
         self._attr_icon = 'mdi:currency-eur'
         self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device_id)},
+            name=object_id.replace('_', ' ').title(),
+            manufacturer="Smart Battery Optimizer",
+            model="Smart Appliance"
+        )
 
     @property
     def native_value(self):
@@ -310,12 +329,24 @@ class SmartDeviceStatusSensor(CoordinatorEntity, SensorEntity):
         self._attr_unique_id = f'{DOMAIN}_{object_id}_status'
         self._attr_name = f'{object_id.replace("_", " ").title()} Status'
         self._attr_icon = 'mdi:information-outline'
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device_id)},
+            name=object_id.replace('_', ' ').title(),
+            manufacturer="Smart Battery Optimizer",
+            model="Smart Appliance"
+        )
 
     @property
     def native_value(self):
         if self._device_id in self.coordinator.device_manager.learning_states:
             minutes = self.coordinator.device_manager.learning_states[self._device_id]['zero_power_minutes']
             return f'Lerne... ({minutes}m Standby)'
+
+        run = self.coordinator.device_manager.running_devices.get(self._device_id)
+        if run:
+            if run.get("spontaneous"):
+                return f'Läuft (Spontan: {run["program_name"]})'
+            return f'Läuft (Geplant)'
 
         plan = self.coordinator.device_manager.planned_devices.get(self._device_id)
         if plan:
