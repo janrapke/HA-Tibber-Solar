@@ -224,7 +224,7 @@ class LearningEngine:
             return 0.1
         return max(0.7 - (0.1 * counter), 0.1)
 
-    async def finalize_quarter(self, quarter: int, cloud_cover: float):
+    async def finalize_quarter(self, quarter: int, cloud_cover: float, price: float = 0.0):
         """Called once at the end of a 15-min interval to calculate the average Wh and apply EMA."""
         q_str = str(quarter)
 
@@ -232,8 +232,11 @@ class LearningEngine:
         actual_consumption_wh = 0.0
         actual_solar_wh = 0.0
 
+        # Do not learn consumption data if prices are negative
+        skip_consumption = price < 0.0
+
         # Finalize consumption
-        if self._current_quarter_consumption_count > 0:
+        if self._current_quarter_consumption_count > 0 and not skip_consumption:
             counter = self.data["counters"]["consumption"][q_str]
             alpha = self._calculate_alpha(counter)
 
@@ -297,6 +300,7 @@ class LearningEngine:
         base_load_w = float(self.config.get("base_load_w", 250))
         min_wh = base_load_w / 4.0
         return max(val, min_wh * 0.5)  # Allow it to drop to half base load but not 0
+
     def predict_solar_for_quarter(self, quarter: int, cloud_cover: float) -> float:
         """Predict solar generation (Wh) for a specific 15-min interval and cloud cover based on learned data."""
         q_str = str(quarter)
