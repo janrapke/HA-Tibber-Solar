@@ -6,7 +6,9 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.const import EntityCategory
 
-from .const import DOMAIN
+import homeassistant.util.dt as dt_util
+
+from .const import DOMAIN, CONF_SMART_DEVICES
 from .coordinator import SmartBatteryOptimizerCoordinator
 
 async def async_setup_entry(
@@ -27,6 +29,17 @@ async def async_setup_entry(
         DiagCurrentSolarSensor(coordinator, entry.entry_id),
         DiagCurrentGridConsumptionSensor(coordinator, entry.entry_id),
     ]
+
+    smart_devices_str = entry.options.get(CONF_SMART_DEVICES) or entry.data.get(CONF_SMART_DEVICES, "")
+    if smart_devices_str:
+        smart_devices = [s.strip() for s in smart_devices_str.split(",") if s.strip()]
+        for device_id in smart_devices:
+            object_id = device_id.split(".")[1] if "." in device_id else device_id
+            entities.append(SmartDeviceStartTimeSensor(coordinator, device_id, object_id))
+            entities.append(SmartDeviceDelayTimerSensor(coordinator, device_id, object_id))
+            entities.append(SmartDeviceExpectedCostSensor(coordinator, device_id, object_id))
+            entities.append(SmartDeviceStatusSensor(coordinator, device_id, object_id))
+
     async_add_entities(entities)
 
 class CalculatedConsumptionSensor(CoordinatorEntity, SensorEntity):
@@ -227,3 +240,89 @@ class DiagCurrentGridConsumptionSensor(CoordinatorEntity, SensorEntity):
         if self.coordinator.data:
             return self.coordinator.data.get("current_consumption")
         return None
+
+class SmartDeviceStartTimeSensor(CoordinatorEntity, SensorEntity):
+    def __init__(self, coordinator, device_id: str, object_id: str):
+        super().__init__(coordinator)
+        self._device_id = device_id
+        self._attr_unique_id = f'{DOMAIN}_{object_id}_start_time'
+        self._attr_name = f'{object_id.replace("_", " ").title()} Empfohlene Startzeit'
+        self._attr_icon = 'mdi:clock-time-four-outline'
+
+    @property
+    def native_value(self):
+        plan = self.coordinator.device_manager.planned_devices.get(self._device_id)
+        prop = self.coordinator.device_manager.proposed_devices.get(self._device_id)
+
+        target = plan if plan else prop
+        if target:
+            return target['start_time'].strftime('%H:%M')
+        return 'Kein Programm gewählt'
+
+class SmartDeviceDelayTimerSensor(CoordinatorEntity, SensorEntity):
+    def __init__(self, coordinator, device_id: str, object_id: str):
+        super().__init__(coordinator)
+        self._device_id = device_id
+        self._attr_unique_id = f'{DOMAIN}_{object_id}_delay_timer'
+        self._attr_name = f'{object_id.replace("_", " ").title()} Startverzögerung (Timer)'
+        self._attr_icon = 'mdi:timer-sand'
+
+    @property
+    def native_value(self):
+        plan = self.coordinator.device_manager.planned_devices.get(self._device_id)
+        prop = self.coordinator.device_manager.proposed_devices.get(self._device_id)
+
+        target = plan if plan else prop
+        if target:
+            now = dt_util.now()
+            diff = target['start_time'] - now
+            if diff.total_seconds() <= 0:
+                return 'Jetzt starten'
+            hours, remainder = divmod(diff.total_seconds(), 3600)
+            minutes, _ = divmod(remainder, 60)
+            return f'{int(hours)}h {int(minutes)}m'
+        return '-'
+
+class SmartDeviceExpectedCostSensor(CoordinatorEntity, SensorEntity):
+    def __init__(self, coordinator, device_id: str, object_id: str):
+        super().__init__(coordinator)
+        self._device_id = device_id
+        self._attr_unique_id = f'{DOMAIN}_{object_id}_expected_cost'
+        self._attr_name = f'{object_id.replace("_", " ").title()} Erwartete Kosten'
+        self._attr_native_unit_of_measurement = '€'
+        self._attr_icon = 'mdi:currency-eur'
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+
+    @property
+    def native_value(self):
+        plan = self.coordinator.device_manager.planned_devices.get(self._device_id)
+        prop = self.coordinator.device_manager.proposed_devices.get(self._device_id)
+
+        target = plan if plan else prop
+        if target:
+            return round(target['expected_cost'], 2)
+        return 0.0
+
+class SmartDeviceStatusSensor(CoordinatorEntity, SensorEntity):
+    def __init__(self, coordinator, device_id: str, object_id: str):
+        super().__init__(coordinator)
+        self._device_id = device_id
+        self._attr_unique_id = f'{DOMAIN}_{object_id}_status'
+        self._attr_name = f'{object_id.replace("_", " ").title()} Status'
+        self._attr_icon = 'mdi:information-outline'
+
+    @property
+    def native_value(self):
+        if self._device_id in self.coordinator.device_manager.learning_states:
+            minutes = self.coordinator.device_manager.learning_states[self._device_id]['zero_power_minutes']
+            return f'Lerne... ({minutes}m Standby)'
+
+        plan = self.coordinator.device_manager.planned_devices.get(self._device_id)
+        if plan:
+            return f'Geplant für {plan["start_time"].strftime("%H:%M")}'
+
+        prop = self.coordinator.device_manager.proposed_devices.get(self._device_id)
+        if prop:
+            return f'Vorschlag: {prop["start_time"].strftime("%H:%M")} (Bitte bestätigen)'
+
+        return 'Bereit'
