@@ -45,7 +45,11 @@ class CalculatedConsumptionSensor(CoordinatorEntity, SensorEntity):
     @property
     def native_value(self):
         if self.coordinator.data:
-            return round(self.coordinator.data.get("calculated_house_consumption", 0), 1)
+            val = self.coordinator.data.get("calculated_house_consumption", 0)
+            try:
+                return round(float(val), 1)
+            except (ValueError, TypeError):
+                return 0.0
         return None
 
 class PredictedRemainingSolarSensor(CoordinatorEntity, SensorEntity):

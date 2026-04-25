@@ -221,7 +221,16 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         if balcony_sensor:
             current_balcony = self._get_float_state(balcony_sensor)
 
-        self.calculated_house_consumption = max(0, tibber_cons - tibber_exp + opendtu_output - excluded_power + current_balcony)
+        # Ensure all inputs are valid floats before math operations to prevent TypeErrors
+        try:
+            self.calculated_house_consumption = max(
+                0.0,
+                float(tibber_cons) - float(tibber_exp) + float(opendtu_output) - float(excluded_power) + float(current_balcony)
+            )
+        except (ValueError, TypeError) as e:
+            _LOGGER.warning("Could not calculate house consumption due to invalid sensor states: %s", e)
+            # Fallback to last known or 0
+            self.calculated_house_consumption = getattr(self, 'calculated_house_consumption', 0.0)
 
         now = dt_util.now()
         current_quarter = self._get_quarter_index(now)
