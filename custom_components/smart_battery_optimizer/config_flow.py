@@ -19,7 +19,6 @@ from .const import (
     CONF_BALCONY_POWER_SENSOR,
     CONF_OPENDTU_TURN_ON_BUTTON,
     CONF_OPENDTU_TURN_OFF_BUTTON,
-    CONF_OPENDTU_DPL_MODE_SELECT,
     CONF_OPENDTU_PRODUCING_SENSOR,
     CONF_OPENDTU_OUTPUT_SENSOR,
     CONF_WEATHER_ENTITY,
@@ -75,9 +74,6 @@ def get_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             ),
             vol.Required(CONF_OPENDTU_TURN_OFF_BUTTON, default=defaults.get(CONF_OPENDTU_TURN_OFF_BUTTON, vol.UNDEFINED)): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="button")
-            ),
-            vol.Optional(CONF_OPENDTU_DPL_MODE_SELECT, default=defaults.get(CONF_OPENDTU_DPL_MODE_SELECT, vol.UNDEFINED)): selector.EntitySelector(
-                selector.EntitySelectorConfig(domain=["select", "number", "input_select", "input_number"])
             ),
             vol.Required(CONF_OPENDTU_PRODUCING_SENSOR, default=defaults.get(CONF_OPENDTU_PRODUCING_SENSOR, vol.UNDEFINED)): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="binary_sensor")
