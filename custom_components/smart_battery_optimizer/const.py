@@ -37,3 +37,4 @@ CONF_EARLY_EXCESS_EXPECTED_POWER_W = "early_excess_expected_power_w"
 CONF_EARLY_EXCESS_MIN_BATTERY_PCT = "early_excess_min_battery_pct"
 
 CONF_EXCESS_EXTERNAL_INVERTER = "excess_external_inverter"
+CONF_SMART_DEVICES = "smart_devices"
