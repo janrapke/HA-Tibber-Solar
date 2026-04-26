@@ -25,6 +25,7 @@ class SmartDeviceManager:
         self.planned_devices = {}
         self.proposed_devices = {}
         self.running_devices = {}
+        self.selected_programs = {}
 
     async def async_load(self):
         """Load data from storage."""
@@ -37,6 +38,14 @@ class SmartDeviceManager:
 
         if "devices" not in self.data:
             self.data["devices"] = {}
+
+    def set_selected_program(self, device_id: str, program_name: str):
+        """Store the currently selected program for UI actions."""
+        self.selected_programs[device_id] = program_name
+
+    def get_selected_program(self, device_id: str) -> str | None:
+        """Get the currently selected program."""
+        return self.selected_programs.get(device_id)
 
     async def async_save(self):
         """Save data to storage."""
@@ -181,8 +190,8 @@ class SmartDeviceManager:
 
         return total_power
 
-    def update_live_device_states(self, device_id: str, current_power: float):
-        """Update states based on live power: auto-start, auto-detect, auto-cancel."""
+    async def update_live_device_states(self, device_id: str, current_power: float):
+        """Update states based on live power: auto-start, auto-detect, auto-cancel, and continuous learning."""
         now = dt_util.now()
 
         # 1. Check Auto-Cancel for planned devices (if > 60 mins past start and NOT running)
@@ -205,7 +214,9 @@ class SmartDeviceManager:
                     "program_name": plan["program_name"],
                     "start_time": now,
                     "profile": plan["profile"],
-                    "spontaneous": False
+                    "spontaneous": False,
+                    "live_recording": [],
+                    "zero_power_minutes": 0
                 }
                 _LOGGER.info(f"Auto-started planned program {plan['program_name']} for {device_id}.")
 
@@ -218,17 +229,76 @@ class SmartDeviceManager:
                         "program_name": best_match_program,
                         "start_time": now,
                         "profile": profile,
-                        "spontaneous": True
+                        "spontaneous": True,
+                        "live_recording": [],
+                        "zero_power_minutes": 0
                     }
                     _LOGGER.info(f"Auto-detected spontaneous program {best_match_program} for {device_id}.")
 
-        # 3. Check if running device has finished
+        # 3. Track live power and handle finish/learning
         if device_id in self.running_devices:
             run = self.running_devices[device_id]
+
+            # Record live power for continuous learning
+            run["live_recording"].append(current_power)
+
+            if current_power <= 5.0:
+                run["zero_power_minutes"] += 1
+            else:
+                run["zero_power_minutes"] = 0
+
             mins_running = (now - run["start_time"]).total_seconds() / 60.0
-            if mins_running >= len(run["profile"]):
-                # Program naturally finished according to its profile
+
+            # A program is considered completely finished if it has been running for at least 15 minutes
+            # AND it has sat at 0W for 10 consecutive minutes (standby)
+            if mins_running >= 15 and run["zero_power_minutes"] > 10:
+                # Continuous Learning: Merge live recording into saved profile
+                await self._merge_live_recording(device_id, run["program_name"], run["live_recording"])
                 del self.running_devices[device_id]
+            elif mins_running >= (len(run["profile"]) + 60):
+                # Fallback: Force cancel if it runs 60 minutes longer than expected but never hit standby cleanly
+                del self.running_devices[device_id]
+
+    async def _merge_live_recording(self, device_id: str, program_name: str, live_recording: list[float]):
+        """Blend a completed live recording into the saved profile using EMA."""
+        if device_id not in self.data["devices"] or program_name not in self.data["devices"][device_id]["programs"]:
+            return
+
+        # Trim trailing zeros from the recording
+        while live_recording and live_recording[-1] <= 5.0:
+            live_recording.pop()
+
+        if not live_recording:
+            return
+
+        saved_profile = self.data["devices"][device_id]["programs"][program_name]["profile_watt_per_minute"]
+
+        new_profile = []
+        max_len = max(len(saved_profile), len(live_recording))
+
+        # Alpha: 0.2 means the new recording influences the saved profile by 20%.
+        # This smooths out anomalies while gradually adapting to structural changes.
+        alpha = 0.2
+
+        for i in range(max_len):
+            saved_val = saved_profile[i] if i < len(saved_profile) else 0.0
+            live_val = live_recording[i] if i < len(live_recording) else 0.0
+
+            if i >= len(saved_profile):
+                # New run was longer, just append the new data
+                new_profile.append(live_val)
+            elif i >= len(live_recording):
+                # New run was shorter. Taper off the saved profile towards zero faster.
+                new_profile.append(saved_val * (1.0 - alpha))
+            else:
+                # Normal blend
+                new_profile.append((saved_val * (1.0 - alpha)) + (live_val * alpha))
+
+        self.data["devices"][device_id]["programs"][program_name]["profile_watt_per_minute"] = new_profile
+        self.data["devices"][device_id]["programs"][program_name]["duration_minutes"] = len(new_profile)
+
+        _LOGGER.info(f"Continuously learned and updated profile for {program_name} on {device_id}.")
+        await self.async_save()
 
     def _auto_detect_program(self, device_id: str) -> str | None:
         """Find the most likely program based on user's current selection or history."""

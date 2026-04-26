@@ -44,12 +44,8 @@ class SmartDeviceProgramNameText(CoordinatorEntity, TextEntity):
     @property
     def native_value(self) -> str | None:
         """Return the name of the currently selected program."""
-        select_entity_id = f"select.{self._object_id}_programm"
-        state = self.coordinator.hass.states.get(select_entity_id)
-
-        if state and state.state and state.state != "unknown" and "Keine Programme" not in state.state:
-            return state.state
-        return ""
+        program = self.coordinator.device_manager.get_selected_program(self._device_id)
+        return program if program else ""
 
     async def async_set_value(self, value: str) -> None:
         """Rename the program."""
@@ -60,11 +56,7 @@ class SmartDeviceProgramNameText(CoordinatorEntity, TextEntity):
         if old_name and old_name != value:
             await self.coordinator.device_manager.rename_program(self._device_id, old_name, value)
 
-            # Since the name changed, we should trigger the select entity to update
-            select_entity_id = f"select.{self._object_id}_programm"
-            select_state = self.coordinator.hass.states.get(select_entity_id)
-            if select_state:
-                # Force select entity to update to new value
-                await self.coordinator.hass.services.async_call("select", "select_option", {"entity_id": select_entity_id, "option": value}, blocking=False)
+            # Update the selected program reference
+            self.coordinator.device_manager.set_selected_program(self._device_id, value)
 
             await self.coordinator.async_request_refresh()

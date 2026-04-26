@@ -65,6 +65,7 @@ class SmartDeviceProgramSelect(CoordinatorEntity, SelectEntity):
         """Change the selected option."""
         if option and "Keine Programme" not in option:
             self._current_option = option
+            self.coordinator.device_manager.set_selected_program(self._device_id, option)
             self.async_write_ha_state()
 
             top_times = await self.coordinator.async_calculate_optimal_start_times(self._device_id, option)

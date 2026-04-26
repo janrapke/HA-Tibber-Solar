@@ -108,15 +108,10 @@ class DeleteProgramButton(CoordinatorEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Handle the button press."""
-        select_entity_id = f"select.{self._object_id}_programm"
-        state = self.coordinator.hass.states.get(select_entity_id)
-
-        if not state or state.state == "unknown" or "Keine Programme" in state.state:
-            return
-
-        program_name = state.state
-        await self.coordinator.device_manager.delete_program(self._device_id, program_name)
-        await self.coordinator.async_request_refresh()
+        program_name = self.coordinator.device_manager.get_selected_program(self._device_id)
+        if program_name:
+            await self.coordinator.device_manager.delete_program(self._device_id, program_name)
+            await self.coordinator.async_request_refresh()
 
 class ClearDeviceButton(CoordinatorEntity, ButtonEntity):
     """Button to clear all data for a device."""
