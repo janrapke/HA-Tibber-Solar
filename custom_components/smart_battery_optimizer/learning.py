@@ -31,7 +31,11 @@ class LearningEngine:
                 "solar": {},
                 "balcony": {}
             },
-            "learning_mode_end_time": None
+            "learning_mode_end_time": None,
+            "savings": {
+                "total_battery_savings": 0.0,
+                "total_battery_savings_vs_no_battery": 0.0
+            }
         }
 
         self._current_quarter_consumption_acc = 0.0
@@ -40,6 +44,10 @@ class LearningEngine:
         self._current_quarter_solar_count = 0
         self._current_quarter_balcony_acc = 0.0
         self._current_quarter_balcony_count = 0
+        self._current_quarter_dtu_acc = 0.0
+        self._current_quarter_dtu_count = 0
+        self._current_quarter_grid_import_acc = 0.0
+        self._current_quarter_grid_import_count = 0
         self._last_quarter_processed = -1
 
         # Initialize default structures for 96 quarters (24h * 4)
@@ -106,6 +114,10 @@ class LearningEngine:
             if "learning_mode_end_time" in stored_data:
                 self.data["learning_mode_end_time"] = stored_data["learning_mode_end_time"]
 
+            if "savings" in stored_data:
+                self.data["savings"]["total_battery_savings"] = stored_data["savings"].get("total_battery_savings", 0.0)
+                self.data["savings"]["total_battery_savings_vs_no_battery"] = stored_data["savings"].get("total_battery_savings_vs_no_battery", 0.0)
+
             _LOGGER.debug("Loaded learning data: %s", self.data)
         else:
             _LOGGER.info("No learning data found, initializing with priors.")
@@ -158,7 +170,11 @@ class LearningEngine:
                 "solar": {str(q): {"clear": 0, "partly": 0, "cloudy": 0} for q in range(96)},
                 "balcony": {str(q): {"clear": 0, "partly": 0, "cloudy": 0} for q in range(96)}
             },
-            "learning_mode_end_time": None
+            "learning_mode_end_time": None,
+            "savings": {
+                "total_battery_savings": 0.0,
+                "total_battery_savings_vs_no_battery": 0.0
+            }
         }
         self._initialize_priors()
         await self.async_save()
@@ -210,6 +226,22 @@ class LearningEngine:
         self._current_quarter_solar_acc += power_w
         self._current_quarter_solar_count += 1
 
+    async def record_dtu_output(self, current_quarter: int, power_w: float):
+        """Accumulate DTU output data for the current 15-min interval."""
+        if power_w < 0:
+            return
+
+        self._current_quarter_dtu_acc += power_w
+        self._current_quarter_dtu_count += 1
+
+    async def record_grid_import(self, current_quarter: int, power_w: float):
+        """Accumulate Grid Import data for the current 15-min interval."""
+        if power_w < 0:
+            return
+
+        self._current_quarter_grid_import_acc += power_w
+        self._current_quarter_grid_import_count += 1
+
     async def record_balcony(self, current_quarter: int, power_w: float, cloud_cover: float):
         """Accumulate balcony solar production data for the current 15-min interval."""
         if power_w < 0:
@@ -231,6 +263,8 @@ class LearningEngine:
         # For pessimistic tracking in the coordinator
         actual_consumption_wh = 0.0
         actual_solar_wh = 0.0
+        actual_dtu_wh = 0.0
+        actual_grid_import_wh = 0.0
 
         # Do not learn consumption data if prices are negative
         skip_consumption = False
@@ -293,7 +327,23 @@ class LearningEngine:
             self._current_quarter_balcony_acc = 0.0
             self._current_quarter_balcony_count = 0
 
-        return actual_consumption_wh, actual_solar_wh
+        # Finalize DTU
+        if self._current_quarter_dtu_count > 0:
+            avg_power = self._current_quarter_dtu_acc / self._current_quarter_dtu_count
+            actual_dtu_wh = avg_power / 4.0
+
+            self._current_quarter_dtu_acc = 0.0
+            self._current_quarter_dtu_count = 0
+
+        # Finalize Grid Import
+        if self._current_quarter_grid_import_count > 0:
+            avg_power = self._current_quarter_grid_import_acc / self._current_quarter_grid_import_count
+            actual_grid_import_wh = avg_power / 4.0
+
+            self._current_quarter_grid_import_acc = 0.0
+            self._current_quarter_grid_import_count = 0
+
+        return actual_consumption_wh, actual_solar_wh, actual_dtu_wh, actual_grid_import_wh
 
 
 

@@ -19,6 +19,7 @@ from .const import (
     CONF_BALCONY_POWER_SENSOR,
     CONF_OPENDTU_TURN_ON_BUTTON,
     CONF_OPENDTU_TURN_OFF_BUTTON,
+    CONF_OPENDTU_DPL_MODE_SELECT,
     CONF_OPENDTU_PRODUCING_SENSOR,
     CONF_OPENDTU_OUTPUT_SENSOR,
     CONF_WEATHER_ENTITY,
@@ -261,6 +262,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         await self.learning_engine.record_consumption(current_quarter, self.calculated_house_consumption)
         await self.learning_engine.record_solar(current_quarter, current_solar, cloud_cover, charge_state)
         await self.learning_engine.record_balcony(current_quarter, current_balcony, cloud_cover)
+        await self.learning_engine.record_dtu_output(current_quarter, opendtu_output)
+        await self.learning_engine.record_grid_import(current_quarter, tibber_cons)
 
         if current_quarter != self.learning_engine._last_quarter_processed and self.learning_engine._last_quarter_processed != -1:
             # Get price from that quarter to pass to finalize_quarter
@@ -273,7 +276,21 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                         break
 
             c_price = old_price
-            actual_cons_wh, actual_solar_wh = await self.learning_engine.finalize_quarter(self.learning_engine._last_quarter_processed, cloud_cover, c_price)
+            actual_cons_wh, actual_solar_wh, actual_dtu_wh, actual_grid_import_wh = await self.learning_engine.finalize_quarter(self.learning_engine._last_quarter_processed, cloud_cover, c_price)
+
+            # Savings calculations
+            c_price_for_savings = max(0.0, c_price) / 1000.0  # EUR per Wh, ignore negative prices
+
+            # 1. Total Battery Savings
+            self.learning_engine.data["savings"]["total_battery_savings"] += actual_dtu_wh * c_price_for_savings
+
+            # 2. Total Battery Savings vs No Battery
+            sim_rest_wh = max(0.0, actual_cons_wh - actual_solar_wh)
+            sim_cost = sim_rest_wh * c_price_for_savings
+            actual_cost = actual_grid_import_wh * c_price_for_savings
+
+            savings_diff = sim_cost - actual_cost
+            self.learning_engine.data["savings"]["total_battery_savings_vs_no_battery"] += savings_diff
 
             # Calculate pessimistic factors
             pred_solar_wh = self.learning_engine.predict_solar_for_quarter(self.learning_engine._last_quarter_processed, cloud_cover)
@@ -509,22 +526,47 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         try:
             turn_on_btn = self.config.get(CONF_OPENDTU_TURN_ON_BUTTON)
             turn_off_btn = self.config.get(CONF_OPENDTU_TURN_OFF_BUTTON)
+            dpl_mode_select = self.config.get(CONF_OPENDTU_DPL_MODE_SELECT)
+
+            dpl_mode_current = None
+            if dpl_mode_select:
+                dpl_state_obj = self.hass.states.get(dpl_mode_select)
+                if dpl_state_obj:
+                    # Keep as string for comparison
+                    dpl_mode_current = str(dpl_state_obj.state)
 
             # Fire the button if the requested state differs from what we *think* the current state is.
             # We also fire if our internal requested state changed since last time, just to be sure.
             # For negative prices, we force the OFF button every time to ensure DPL is definitely set.
             requested_state_str = "on" if turn_on_inverter else "off"
 
-            if turn_on_inverter and (not inverter_is_on or self._current_inverter_state != "on"):
+            async def set_dpl_mode(entity_id: str, value: str):
+                domain = entity_id.split('.')[0]
+                if domain in ("select", "input_select"):
+                    await self.hass.services.async_call(domain, "select_option", {"entity_id": entity_id, "option": value}, blocking=False)
+                elif domain in ("number", "input_number"):
+                    try:
+                        await self.hass.services.async_call(domain, "set_value", {"entity_id": entity_id, "value": float(value)}, blocking=False)
+                    except ValueError:
+                        pass
+
+            dpl_mismatch_on = dpl_mode_select and dpl_mode_current not in ("0", "0.0")
+            dpl_mismatch_off = dpl_mode_select and dpl_mode_current not in ("1", "1.0")
+
+            if turn_on_inverter and (not inverter_is_on or self._current_inverter_state != "on" or dpl_mismatch_on):
                 if turn_on_btn and self.hass.states.get(turn_on_btn) is not None:
                     await self.hass.services.async_call("button", "press", {"entity_id": turn_on_btn}, blocking=False)
-                    self._current_inverter_state = "on"
-            elif not turn_on_inverter and (inverter_is_on or self._current_inverter_state != "off" or is_negative_price):
+                if dpl_mode_select and self.hass.states.get(dpl_mode_select) is not None:
+                    await set_dpl_mode(dpl_mode_select, "0")
+                self._current_inverter_state = "on"
+            elif not turn_on_inverter and (inverter_is_on or self._current_inverter_state != "off" or is_negative_price or dpl_mismatch_off):
                 if turn_off_btn and self.hass.states.get(turn_off_btn) is not None:
                     await self.hass.services.async_call("button", "press", {"entity_id": turn_off_btn}, blocking=False)
-                    self._current_inverter_state = "off"
+                if dpl_mode_select and self.hass.states.get(dpl_mode_select) is not None:
+                    await set_dpl_mode(dpl_mode_select, "1")
+                self._current_inverter_state = "off"
         except Exception as e:
-            _LOGGER.error("Failed to press OpenDTU button: %s", e)
+            _LOGGER.error("Failed to press OpenDTU button or set DPL Mode: %s", e)
 
         return {
             "calculated_house_consumption": self.calculated_house_consumption,
@@ -756,9 +798,11 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         # Extend max_dt to end of the last block
         max_dt += timedelta(minutes=15)
 
-        # If no future prices, default to a 24h lookahead to ensure simulation works
-        if max_dt <= now + timedelta(hours=1):
-            max_dt = now + timedelta(hours=24)
+        # Ensure we always simulate at least 24 hours into the future,
+        # but if we have prices up to midnight tomorrow, we go up to that max_dt.
+        minimum_end_dt = now + timedelta(hours=24)
+        if max_dt < minimum_end_dt:
+            max_dt = minimum_end_dt
 
         blocks = []
         eval_dt = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0)
@@ -783,12 +827,26 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 pred_balcony = self.learning_engine.predict_balcony_for_quarter(q, cc)
 
             # Find price for this 15 min block
-            price = 0.0
+            price = None
             for p in self.tibber_prices:
                 p_dt = p.get("datetime")
                 if p_dt and p_dt <= eval_dt < p_dt + timedelta(minutes=15):
                     price = float(p.get("total", 0.0))
                     break
+
+            # Fallback: if we don't have the price (e.g. tomorrow's prices aren't published yet),
+            # copy the price from exactly 24 hours ago.
+            if price is None:
+                fallback_dt = eval_dt - timedelta(hours=24)
+                for p in self.tibber_prices:
+                    p_dt = p.get("datetime")
+                    if p_dt and p_dt <= fallback_dt < p_dt + timedelta(minutes=15):
+                        price = float(p.get("total", 0.0))
+                        break
+
+            # If still None (which shouldn't happen unless we have no prices at all), fallback to 0.0
+            if price is None:
+                price = 0.0
 
             # Extreme Price Reserve Logic
             if price > self.extreme_price_threshold:
