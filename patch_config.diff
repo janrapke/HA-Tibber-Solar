@@ -1,0 +1,31 @@
+<<<<<<< SEARCH
+    ext_inv_default = defaults.get(CONF_EXCESS_EXTERNAL_INVERTER, vol.UNDEFINED)
+    if isinstance(ext_inv_default, bool):
+        ext_inv_default = vol.UNDEFINED
+
+    return vol.Schema(
+        {
+            vol.Required(CONF_TIBBER_API_TOKEN, default=defaults.get(CONF_TIBBER_API_TOKEN, "")): str,
+=======
+    ext_inv_default = defaults.get(CONF_EXCESS_EXTERNAL_INVERTER, vol.UNDEFINED)
+    if isinstance(ext_inv_default, bool):
+        ext_inv_default = vol.UNDEFINED
+
+    return vol.Schema(
+        {
+            vol.Required(CONF_TIBBER_API_TOKEN, default=defaults.get(CONF_TIBBER_API_TOKEN, "")): str,
+>>>>>>> REPLACE
+<<<<<<< SEARCH
+            vol.Optional(CONF_EXCESS_EXTERNAL_INVERTER, default=ext_inv_default): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="switch", multiple=True)
+            ),
+        }
+    )
+=======
+            vol.Optional(CONF_EXCESS_EXTERNAL_INVERTER, default=ext_inv_default): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="switch", multiple=True)
+            ),
+            vol.Optional(CONF_SMART_DEVICES, default=defaults.get(CONF_SMART_DEVICES, "")): str,
+        }
+    )
+>>>>>>> REPLACE
