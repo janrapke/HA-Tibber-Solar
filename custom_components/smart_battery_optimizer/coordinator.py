@@ -285,6 +285,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         await self.learning_engine.record_consumption(current_quarter, self.calculated_house_consumption)
         await self.learning_engine.record_solar(current_quarter, current_solar, cloud_cover, charge_state)
         await self.learning_engine.record_balcony(current_quarter, current_balcony, cloud_cover)
+        await self.learning_engine.record_dtu_output(current_quarter, opendtu_output)
+        await self.learning_engine.record_grid_import(current_quarter, tibber_cons)
 
         if current_quarter != self.learning_engine._last_quarter_processed and self.learning_engine._last_quarter_processed != -1:
             # Get price from that quarter to pass to finalize_quarter
@@ -297,7 +299,21 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                         break
 
             c_price = old_price
-            actual_cons_wh, actual_solar_wh = await self.learning_engine.finalize_quarter(self.learning_engine._last_quarter_processed, cloud_cover, c_price)
+            actual_cons_wh, actual_solar_wh, actual_dtu_wh, actual_grid_import_wh = await self.learning_engine.finalize_quarter(self.learning_engine._last_quarter_processed, cloud_cover, c_price)
+
+            # Savings calculations
+            c_price_for_savings = max(0.0, c_price) / 1000.0  # EUR per Wh, ignore negative prices
+
+            # 1. Total Battery Savings
+            self.learning_engine.data["savings"]["total_battery_savings"] += actual_dtu_wh * c_price_for_savings
+
+            # 2. Total Battery Savings vs No Battery
+            sim_rest_wh = max(0.0, actual_cons_wh - actual_solar_wh)
+            sim_cost = sim_rest_wh * c_price_for_savings
+            actual_cost = actual_grid_import_wh * c_price_for_savings
+
+            savings_diff = sim_cost - actual_cost
+            self.learning_engine.data["savings"]["total_battery_savings_vs_no_battery"] += savings_diff
 
             # Calculate pessimistic factors
             pred_solar_wh = self.learning_engine.predict_solar_for_quarter(self.learning_engine._last_quarter_processed, cloud_cover)
