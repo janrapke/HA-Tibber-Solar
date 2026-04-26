@@ -32,6 +32,11 @@ class OptimizerEnableSwitch(CoordinatorEntity, SwitchEntity):
 
     def __init__(self, coordinator, entry_id):
         super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
         self._attr_unique_id = f"{entry_id}_enable"
         self._attr_name = "Smart Battery Optimizer Enabled"
 
@@ -57,6 +62,11 @@ class ManualZeroExportSwitch(CoordinatorEntity, SwitchEntity):
 
     def __init__(self, coordinator, entry_id):
         super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
         self._attr_unique_id = f"{entry_id}_manual_zero_export"
         self._attr_name = "Force Zero Export"
 
@@ -82,6 +92,11 @@ class PrimaryExcessAutoSwitch(CoordinatorEntity, SwitchEntity):
 
     def __init__(self, coordinator, entry_id):
         super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
         self._attr_unique_id = f"{entry_id}_primary_excess_auto"
         self._attr_name = "Primäre Überschuss-Automatik"
 
@@ -105,6 +120,11 @@ class SecondaryExcessAutoSwitch(CoordinatorEntity, SwitchEntity):
 
     def __init__(self, coordinator, entry_id):
         super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
         self._attr_unique_id = f"{entry_id}_secondary_excess_auto"
         self._attr_name = "Sekundäre Überschuss-Automatik"
 
@@ -128,6 +148,11 @@ class EarlyExcessAutoSwitch(CoordinatorEntity, SwitchEntity):
 
     def __init__(self, coordinator, entry_id):
         super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
         self._attr_unique_id = f"{entry_id}_early_excess_auto"
         self._attr_name = "Frühzeitige Überschuss-Automatik"
 
@@ -152,6 +177,11 @@ class LearningModeSwitch(CoordinatorEntity, SwitchEntity):
 
     def __init__(self, coordinator, entry_id):
         super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
         self._attr_unique_id = f"{entry_id}_learning_mode"
         self._attr_name = "Lernphase (7 Tage)"
 
