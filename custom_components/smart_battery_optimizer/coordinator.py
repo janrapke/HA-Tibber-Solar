@@ -8,10 +8,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 import homeassistant.util.dt as dt_util
 from .tibber import fetch_tibber_prices
 
-from .device_manager import SmartDeviceManager
-
 from .const import (
-    CONF_SMART_DEVICES,
     DOMAIN,
     CONF_TIBBER_API_TOKEN,
     CONF_TIBBER_PRICE_SENSOR,
@@ -56,7 +53,6 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         )
         self.config = config
         self.learning_engine = LearningEngine(hass, config)
-        self.device_manager = SmartDeviceManager(hass)
 
         # Internal state
         self.is_enabled = True
@@ -117,7 +113,6 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
     async def _async_setup(self):
         """Set up the coordinator."""
         await self.learning_engine.async_load()
-        await self.device_manager.async_load()
         await self._fetch_tibber_prices()
 
     async def _fetch_tibber_prices(self):
@@ -220,24 +215,6 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         excluded_power = 0.0
         for entity_id in self.config.get(CONF_EXCLUDED_POWER_SENSORS, []):
             excluded_power += self._get_float_state(entity_id)
-
-        # Smart Devices logic
-        now = dt_util.now()
-        smart_devices_str = self.config.get(CONF_SMART_DEVICES, "")
-        if smart_devices_str:
-            smart_devices = [s.strip() for s in smart_devices_str.split(",") if s.strip()]
-            for device_id in smart_devices:
-                power = self._get_float_state(device_id)
-
-                # Auto-Detect, Auto-Start, Auto-Cancel, and Continuous Learning
-                await self.device_manager.update_live_device_states(device_id, power)
-
-                if device_id in self.device_manager.learning_states:
-                    self.device_manager.record_power(device_id, power)
-                    if self.device_manager.learning_states[device_id]["zero_power_minutes"] > 10:
-                        await self.device_manager.stop_learning(device_id)
-
-                excluded_power += power
 
         current_balcony = 0.0
         balcony_sensor = self.config.get(CONF_BALCONY_POWER_SENSOR)
@@ -800,14 +777,6 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             pred_solar = self.learning_engine.predict_solar_for_quarter(q, cc)
             pred_cons = self.learning_engine.predict_consumption_for_quarter(q)
 
-            planned_device_power_w_sum = 0.0
-            for minute_offset in range(15):
-                dt_minute = eval_dt + timedelta(minutes=minute_offset)
-                planned_device_power_w_sum += self.device_manager.get_planned_power_at_time(dt_minute)
-
-            planned_device_wh = planned_device_power_w_sum / 60.0
-            pred_cons += planned_device_wh
-
             pred_balcony = 0.0
             # Only add predicted balcony if a sensor is configured
             if self.config.get(CONF_BALCONY_POWER_SENSOR):
@@ -838,101 +807,3 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             eval_dt += timedelta(minutes=15)
 
         return blocks
-
-    async def async_calculate_optimal_start_times(self, device_id: str, program_name: str, max_hours: int = 24) -> list[tuple[datetime, float]]:
-        """Find the top 3 optimal start times and costs, spaced at least 60 minutes apart."""
-        profile = self.device_manager.get_program_profile(device_id, program_name)
-        if not profile:
-            return [(dt_util.now(), 0.0)]
-
-        now = dt_util.now()
-        start_eval = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0) + timedelta(minutes=15)
-        end_eval = start_eval + timedelta(hours=max_hours)
-
-        hourly_forecasts = await self._get_hourly_forecasts()
-
-        results = []
-
-        original_plan = dict(self.device_manager.planned_devices)
-
-        eval_dt = start_eval
-        while eval_dt < end_eval:
-            if device_id in self.device_manager.planned_devices:
-                del self.device_manager.planned_devices[device_id]
-            blocks_without = self._build_future_blocks(now, hourly_forecasts)
-
-            self.device_manager.set_planned_device(device_id, program_name, eval_dt, 0.0)
-            blocks_with = self._build_future_blocks(now, hourly_forecasts)
-
-            cost_without = self._simulate_grid_cost(blocks_without)
-            cost_with = self._simulate_grid_cost(blocks_with)
-
-            marginal_cost = max(0.0, cost_with - cost_without)
-            results.append((eval_dt, marginal_cost))
-
-            eval_dt += timedelta(minutes=15)
-
-        self.device_manager.planned_devices = original_plan
-
-        # Sort by lowest cost
-        results.sort(key=lambda x: x[1])
-
-        # Filter top 3 ensuring at least 60 mins apart
-        top_results = []
-        for res in results:
-            dt, cost = res
-            too_close = False
-            for top_dt, _ in top_results:
-                if abs((dt - top_dt).total_seconds()) < 3600:
-                    too_close = True
-                    break
-            if not too_close:
-                top_results.append(res)
-            if len(top_results) >= 3:
-                break
-
-        if not top_results:
-            top_results = [(dt_util.now(), 0.0)]
-
-        return top_results
-
-    def _simulate_grid_cost(self, blocks: list[dict]) -> float:
-        """Simulate total grid cost for a set of blocks, considering battery."""
-        batt_cap_wh = self.config.get(CONF_BATTERY_CAPACITY_WH, 5000)
-        batt_pct = self._get_float_state(self.config.get(CONF_BATTERY_LEVEL_SENSOR))
-        simulated_batt_wh = batt_cap_wh * (batt_pct / 100.0)
-
-        batt_eff = float(self.config.get(CONF_BATTERY_EFFICIENCY_PCT, 90)) / 100.0
-        max_inverter_power_w = float(self.config.get(CONF_MAX_INVERTER_POWER_W, 800))
-        max_discharge_wh_per_15min = max_inverter_power_w / 4.0
-
-        min_batt_pct = self.config.get(CONF_BATTERY_MIN_LIMIT_PCT, 10)
-        min_batt_wh = batt_cap_wh * (min_batt_pct / 100.0)
-
-        total_cost = 0.0
-
-        for b in blocks:
-            pred_solar = b["solar"] * batt_eff
-            pred_cons = b.get("house_wh", 0.0)
-            pred_cons -= b.get("balcony", 0.0)
-            if pred_cons < 0:
-                pred_cons = 0
-
-            price = b["price"]
-
-            simulated_batt_wh += pred_solar
-
-            if simulated_batt_wh > min_batt_wh:
-                available_discharge = simulated_batt_wh - min_batt_wh
-                actual_discharge = min(pred_cons, max_discharge_wh_per_15min, available_discharge)
-                simulated_batt_wh -= actual_discharge
-                grid_import_wh = pred_cons - actual_discharge
-            else:
-                grid_import_wh = pred_cons
-
-            simulated_batt_wh = min(batt_cap_wh, simulated_batt_wh)
-
-            cost = (grid_import_wh / 1000.0) * price
-            total_cost += cost
-
-        return total_cost

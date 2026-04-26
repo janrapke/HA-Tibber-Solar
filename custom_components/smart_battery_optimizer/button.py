@@ -24,6 +24,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry, async_add_e
             entities.append(ConfirmPlanButton(coordinator, device_id, object_id))
             entities.append(DeleteProgramButton(coordinator, device_id, object_id))
             entities.append(ClearDeviceButton(coordinator, device_id, object_id))
+            entities.append(RecalculatePlanButton(coordinator, device_id, object_id))
 
     if entities:
         async_add_entities(entities)
@@ -132,4 +133,32 @@ class ClearDeviceButton(CoordinatorEntity, ButtonEntity):
     async def async_press(self) -> None:
         """Handle the button press."""
         await self.coordinator.device_manager.clear_device(self._device_id)
+        await self.coordinator.async_request_refresh()
+
+class RecalculatePlanButton(CoordinatorEntity, ButtonEntity):
+    """Button to recalculate the optimal times for the selected program."""
+
+    def __init__(self, coordinator, device_id: str, object_id: str):
+        super().__init__(coordinator)
+        self._device_id = device_id
+        self._object_id = object_id
+        self._attr_unique_id = f"{DOMAIN}_{object_id}_recalculate_plan"
+        self._attr_name = f"{object_id.replace('_', ' ').title()} Zeiten neu berechnen"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device_id)},
+            name=object_id.replace('_', ' ').title(),
+            manufacturer="Smart Battery Optimizer",
+            model="Smart Appliance"
+        )
+        self._attr_icon = "mdi:calculator"
+
+    async def async_press(self) -> None:
+        """Handle the button press."""
+        program = self.coordinator.device_manager.get_selected_program(self._device_id)
+        if program and "Keine Programme" not in program:
+            top_times = await self.coordinator.async_calculate_optimal_start_times(self._device_id, program)
+            if top_times:
+                best_start_time, best_cost = top_times[0]
+                self.coordinator.device_manager.set_proposed_device(self._device_id, program, best_start_time, best_cost)
+                self.coordinator.device_manager.proposed_devices[self._device_id]["alternatives"] = top_times
         await self.coordinator.async_request_refresh()

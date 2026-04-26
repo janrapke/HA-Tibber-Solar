@@ -116,7 +116,8 @@ class SmartDeviceManager:
         """Rename a saved program."""
         if device_id in self.data["devices"] and old_name in self.data["devices"][device_id]["programs"]:
             if new_name and new_name != old_name:
-                self.data["devices"][device_id]["programs"][new_name] = self.data["devices"][device_id]["programs"].pop(old_name)
+                prog_data = self.data["devices"][device_id]["programs"].pop(old_name)
+                self.data["devices"][device_id]["programs"][new_name] = prog_data
                 await self.async_save()
 
     async def delete_program(self, device_id: str, program_name: str):
