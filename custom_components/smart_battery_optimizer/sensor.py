@@ -39,6 +39,11 @@ class CalculatedConsumptionSensor(CoordinatorEntity, SensorEntity):
 
     def __init__(self, coordinator, entry_id):
         super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
         self._attr_unique_id = f"{entry_id}_calculated_house_consumption"
         self._attr_name = "Calculated House Consumption"
 
@@ -62,6 +67,11 @@ class PredictedRemainingSolarSensor(CoordinatorEntity, SensorEntity):
 
     def __init__(self, coordinator, entry_id):
         super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
         self._attr_unique_id = f"{entry_id}_predicted_remaining_solar"
         self._attr_name = "Predicted Remaining Solar (Today)"
 
@@ -81,6 +91,11 @@ class PredictedRemainingConsumptionSensor(CoordinatorEntity, SensorEntity):
 
     def __init__(self, coordinator, entry_id):
         super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
         self._attr_unique_id = f"{entry_id}_predicted_remaining_consumption"
         self._attr_name = "Predicted Remaining Consumption (Today)"
 
@@ -97,6 +112,11 @@ class CurrentOperatingModeSensor(CoordinatorEntity, SensorEntity):
 
     def __init__(self, coordinator, entry_id):
         super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
         self._attr_unique_id = f"{entry_id}_current_operating_mode"
         self._attr_name = "Aktueller Betriebsmodus"
 
@@ -113,6 +133,11 @@ class ForecastPlanSensor(CoordinatorEntity, SensorEntity):
 
     def __init__(self, coordinator, entry_id):
         super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
         self._attr_unique_id = f"{entry_id}_forecast_plan"
         self._attr_name = "Tagesplan Vorhersage"
 
@@ -160,6 +185,11 @@ class DiagCurrentPriceSensor(CoordinatorEntity, SensorEntity):
 
     def __init__(self, coordinator, entry_id):
         super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
         self._attr_unique_id = f"{entry_id}_diag_current_price"
         self._attr_name = "Interner aktueller Tibber Preis"
 
@@ -181,6 +211,11 @@ class DiagCurrentBatterySensor(CoordinatorEntity, SensorEntity):
 
     def __init__(self, coordinator, entry_id):
         super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
         self._attr_unique_id = f"{entry_id}_diag_current_battery"
         self._attr_name = "Interner Batterie Stand"
 
@@ -200,6 +235,11 @@ class DiagCurrentSolarSensor(CoordinatorEntity, SensorEntity):
 
     def __init__(self, coordinator, entry_id):
         super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
         self._attr_unique_id = f"{entry_id}_diag_current_solar"
         self._attr_name = "Interne Solar Leistung"
 
@@ -219,6 +259,11 @@ class DiagCurrentGridConsumptionSensor(CoordinatorEntity, SensorEntity):
 
     def __init__(self, coordinator, entry_id):
         super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
         self._attr_unique_id = f"{entry_id}_diag_current_grid"
         self._attr_name = "Interner Netzbezug (Tibber)"
 

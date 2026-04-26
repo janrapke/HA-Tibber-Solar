@@ -41,6 +41,11 @@ class ExtremePriceThresholdNumber(CoordinatorEntity, NumberEntity):
     def __init__(self, coordinator, entry_id):
         """Initialize the number entity."""
         super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
         self._attr_unique_id = f"{entry_id}_extreme_price_threshold"
         self._attr_name = "Extrem-Preis Schwelle (€)"
         self._attr_native_value = coordinator.extreme_price_threshold
@@ -69,6 +74,11 @@ class ExtremePriceFactorNumber(CoordinatorEntity, NumberEntity):
     def __init__(self, coordinator, entry_id):
         """Initialize the number entity."""
         super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
         self._attr_unique_id = f"{entry_id}_extreme_price_factor"
         self._attr_name = "Extrem-Preis Solar-Reserve Faktor (%)"
         self._attr_native_value = coordinator.extreme_price_factor * 100.0
@@ -94,6 +104,11 @@ class PrimaryExcessOnThreshold(CoordinatorEntity, NumberEntity):
 
     def __init__(self, coordinator, entry_id):
         super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
         self._attr_unique_id = f"{entry_id}_primary_excess_on"
         self._attr_name = "Primär Überschuss Ein (%)"
         self._attr_native_value = getattr(coordinator, "primary_excess_on", 95.0)
@@ -118,6 +133,11 @@ class PrimaryExcessOffThreshold(CoordinatorEntity, NumberEntity):
 
     def __init__(self, coordinator, entry_id):
         super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
         self._attr_unique_id = f"{entry_id}_primary_excess_off"
         self._attr_name = "Primär Überschuss Aus (%)"
         self._attr_native_value = getattr(coordinator, "primary_excess_off", 90.0)
@@ -142,6 +162,11 @@ class SecondaryExcessOnThreshold(CoordinatorEntity, NumberEntity):
 
     def __init__(self, coordinator, entry_id):
         super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
         self._attr_unique_id = f"{entry_id}_secondary_excess_on"
         self._attr_name = "Sekundär Überschuss Ein (%)"
         self._attr_native_value = getattr(coordinator, "secondary_excess_on", 98.0)
@@ -166,6 +191,11 @@ class SecondaryExcessOffThreshold(CoordinatorEntity, NumberEntity):
 
     def __init__(self, coordinator, entry_id):
         super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
         self._attr_unique_id = f"{entry_id}_secondary_excess_off"
         self._attr_name = "Sekundär Überschuss Aus (%)"
         self._attr_native_value = getattr(coordinator, "secondary_excess_off", 95.0)
@@ -190,6 +220,11 @@ class ExcessCloudToleranceNumber(CoordinatorEntity, NumberEntity):
 
     def __init__(self, coordinator, entry_id):
         super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
         self._attr_unique_id = f"{entry_id}_excess_cloud_tolerance"
         self._attr_name = "Überschuss Wolken-Toleranz (Minuten)"
         self._attr_native_value = getattr(coordinator, "excess_cloud_tolerance_mins", 5.0)
