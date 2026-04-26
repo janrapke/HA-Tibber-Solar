@@ -1,7 +1,7 @@
 """Constants for the Smart Battery Optimizer integration."""
 
 DOMAIN = "smart_battery_optimizer"
-VERSION = "1.8.5"
+VERSION = "1.8.4"
 
 # Configuration keys
 CONF_TIBBER_API_TOKEN = "tibber_api_token"
@@ -13,7 +13,6 @@ CONF_SOLAR_POWER_SENSOR = "solar_power_sensor"
 CONF_BALCONY_POWER_SENSOR = "balcony_power_sensor"
 CONF_OPENDTU_TURN_ON_BUTTON = "opendtu_turn_on_button"
 CONF_OPENDTU_TURN_OFF_BUTTON = "opendtu_turn_off_button"
-CONF_OPENDTU_DPL_MODE_SELECT = "opendtu_dpl_mode_select"
 CONF_OPENDTU_PRODUCING_SENSOR = "opendtu_producing_sensor"
 CONF_OPENDTU_OUTPUT_SENSOR = "opendtu_output_sensor"
 CONF_WEATHER_ENTITY = "weather_entity"
@@ -37,3 +36,4 @@ CONF_EARLY_EXCESS_EXPECTED_POWER_W = "early_excess_expected_power_w"
 CONF_EARLY_EXCESS_MIN_BATTERY_PCT = "early_excess_min_battery_pct"
 
 CONF_EXCESS_EXTERNAL_INVERTER = "excess_external_inverter"
+CONF_SMART_DEVICES = "smart_devices"

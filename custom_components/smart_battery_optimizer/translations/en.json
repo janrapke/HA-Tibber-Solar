@@ -13,7 +13,6 @@
           "solar_power_sensor": "Solar Power Sensors (W)",
           "opendtu_turn_on_button": "OpenDTU Inverter Turn ON Button",
           "opendtu_turn_off_button": "OpenDTU Inverter Turn OFF Button",
-          "opendtu_dpl_mode_select": "OpenDTU DPL Mode Entity",
           "opendtu_producing_sensor": "OpenDTU Producing Binary Sensor",
           "opendtu_output_sensor": "OpenDTU Inverter Output Sensor (W)",
           "weather_entity": "Weather Entity (for cloud cover)",
