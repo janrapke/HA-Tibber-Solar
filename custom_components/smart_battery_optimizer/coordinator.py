@@ -22,6 +22,7 @@ from .const import (
     CONF_BALCONY_POWER_SENSOR,
     CONF_OPENDTU_TURN_ON_BUTTON,
     CONF_OPENDTU_TURN_OFF_BUTTON,
+    CONF_OPENDTU_DPL_MODE_SELECT,
     CONF_OPENDTU_PRODUCING_SENSOR,
     CONF_OPENDTU_OUTPUT_SENSOR,
     CONF_WEATHER_ENTITY,
@@ -532,22 +533,47 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         try:
             turn_on_btn = self.config.get(CONF_OPENDTU_TURN_ON_BUTTON)
             turn_off_btn = self.config.get(CONF_OPENDTU_TURN_OFF_BUTTON)
+            dpl_mode_select = self.config.get(CONF_OPENDTU_DPL_MODE_SELECT)
+
+            dpl_mode_current = None
+            if dpl_mode_select:
+                dpl_state_obj = self.hass.states.get(dpl_mode_select)
+                if dpl_state_obj:
+                    # Keep as string for comparison
+                    dpl_mode_current = str(dpl_state_obj.state)
 
             # Fire the button if the requested state differs from what we *think* the current state is.
             # We also fire if our internal requested state changed since last time, just to be sure.
             # For negative prices, we force the OFF button every time to ensure DPL is definitely set.
             requested_state_str = "on" if turn_on_inverter else "off"
 
-            if turn_on_inverter and (not inverter_is_on or self._current_inverter_state != "on"):
+            async def set_dpl_mode(entity_id: str, value: str):
+                domain = entity_id.split('.')[0]
+                if domain in ("select", "input_select"):
+                    await self.hass.services.async_call(domain, "select_option", {"entity_id": entity_id, "option": value}, blocking=False)
+                elif domain in ("number", "input_number"):
+                    try:
+                        await self.hass.services.async_call(domain, "set_value", {"entity_id": entity_id, "value": float(value)}, blocking=False)
+                    except ValueError:
+                        pass
+
+            dpl_mismatch_on = dpl_mode_select and dpl_mode_current not in ("0", "0.0")
+            dpl_mismatch_off = dpl_mode_select and dpl_mode_current not in ("1", "1.0")
+
+            if turn_on_inverter and (not inverter_is_on or self._current_inverter_state != "on" or dpl_mismatch_on):
                 if turn_on_btn and self.hass.states.get(turn_on_btn) is not None:
                     await self.hass.services.async_call("button", "press", {"entity_id": turn_on_btn}, blocking=False)
-                    self._current_inverter_state = "on"
-            elif not turn_on_inverter and (inverter_is_on or self._current_inverter_state != "off" or is_negative_price):
+                if dpl_mode_select and self.hass.states.get(dpl_mode_select) is not None:
+                    await set_dpl_mode(dpl_mode_select, "0")
+                self._current_inverter_state = "on"
+            elif not turn_on_inverter and (inverter_is_on or self._current_inverter_state != "off" or is_negative_price or dpl_mismatch_off):
                 if turn_off_btn and self.hass.states.get(turn_off_btn) is not None:
                     await self.hass.services.async_call("button", "press", {"entity_id": turn_off_btn}, blocking=False)
-                    self._current_inverter_state = "off"
+                if dpl_mode_select and self.hass.states.get(dpl_mode_select) is not None:
+                    await set_dpl_mode(dpl_mode_select, "1")
+                self._current_inverter_state = "off"
         except Exception as e:
-            _LOGGER.error("Failed to press OpenDTU button: %s", e)
+            _LOGGER.error("Failed to press OpenDTU button or set DPL Mode: %s", e)
 
         return {
             "calculated_house_consumption": self.calculated_house_consumption,
