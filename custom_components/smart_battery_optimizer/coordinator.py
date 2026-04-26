@@ -229,8 +229,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             for device_id in smart_devices:
                 power = self._get_float_state(device_id)
 
-                # Auto-Detect, Auto-Start, Auto-Cancel
-                self.device_manager.update_live_device_states(device_id, power)
+                # Auto-Detect, Auto-Start, Auto-Cancel, and Continuous Learning
+                await self.device_manager.update_live_device_states(device_id, power)
 
                 if device_id in self.device_manager.learning_states:
                     self.device_manager.record_power(device_id, power)
