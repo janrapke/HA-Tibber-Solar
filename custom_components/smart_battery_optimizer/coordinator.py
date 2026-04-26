@@ -805,9 +805,11 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         # Extend max_dt to end of the last block
         max_dt += timedelta(minutes=15)
 
-        # If no future prices, default to a 24h lookahead to ensure simulation works
-        if max_dt <= now + timedelta(hours=1):
-            max_dt = now + timedelta(hours=24)
+        # Ensure we always simulate at least 24 hours into the future,
+        # but if we have prices up to midnight tomorrow, we go up to that max_dt.
+        minimum_end_dt = now + timedelta(hours=24)
+        if max_dt < minimum_end_dt:
+            max_dt = minimum_end_dt
 
         blocks = []
         eval_dt = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0)
@@ -840,12 +842,26 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 pred_balcony = self.learning_engine.predict_balcony_for_quarter(q, cc)
 
             # Find price for this 15 min block
-            price = 0.0
+            price = None
             for p in self.tibber_prices:
                 p_dt = p.get("datetime")
                 if p_dt and p_dt <= eval_dt < p_dt + timedelta(minutes=15):
                     price = float(p.get("total", 0.0))
                     break
+
+            # Fallback: if we don't have the price (e.g. tomorrow's prices aren't published yet),
+            # copy the price from exactly 24 hours ago.
+            if price is None:
+                fallback_dt = eval_dt - timedelta(hours=24)
+                for p in self.tibber_prices:
+                    p_dt = p.get("datetime")
+                    if p_dt and p_dt <= fallback_dt < p_dt + timedelta(minutes=15):
+                        price = float(p.get("total", 0.0))
+                        break
+
+            # If still None (which shouldn't happen unless we have no prices at all), fallback to 0.0
+            if price is None:
+                price = 0.0
 
             # Extreme Price Reserve Logic
             if price > self.extreme_price_threshold:
