@@ -15,6 +15,7 @@ CONF_OPENDTU_TURN_ON_BUTTON = "opendtu_turn_on_button"
 CONF_OPENDTU_TURN_OFF_BUTTON = "opendtu_turn_off_button"
 CONF_OPENDTU_PRODUCING_SENSOR = "opendtu_producing_sensor"
 CONF_OPENDTU_OUTPUT_SENSOR = "opendtu_output_sensor"
+CONF_OPENDTU_DPL_MODE_SELECT = "opendtu_dpl_mode_select"
 CONF_WEATHER_ENTITY = "weather_entity"
 CONF_SOLAR_CHARGE_STATE_SENSOR = "solar_charge_state_sensor"
 
