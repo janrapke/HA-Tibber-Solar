@@ -320,33 +320,59 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             c_price = old_price
             actual_cons_wh, actual_solar_wh = await self.learning_engine.finalize_quarter(self.learning_engine._last_quarter_processed, cloud_cover, c_price)
 
-            # Calculate pessimistic factors
-            pred_solar_wh = self.learning_engine.predict_solar_for_quarter(self.learning_engine._last_quarter_processed, cloud_cover)
-            pred_cons_wh = self.learning_engine.predict_consumption_for_quarter(self.learning_engine._last_quarter_processed)
+            # Implicit Cloud Cover Correction
+            pred_solar_clear = self.learning_engine.predict_solar_for_quarter(self.learning_engine._last_quarter_processed, 0.0)
+            pred_solar_partly = self.learning_engine.predict_solar_for_quarter(self.learning_engine._last_quarter_processed, 50.0)
+            pred_solar_cloudy = self.learning_engine.predict_solar_for_quarter(self.learning_engine._last_quarter_processed, 100.0)
 
-            # Balcony gets added to predicted solar just like in _build_future_blocks
             if self.config.get(CONF_BALCONY_POWER_SENSOR):
-                pred_balcony = self.learning_engine.predict_balcony_for_quarter(self.learning_engine._last_quarter_processed, cloud_cover)
-                pred_solar_wh += pred_balcony
+                pred_solar_clear += self.learning_engine.predict_balcony_for_quarter(self.learning_engine._last_quarter_processed, 0.0)
+                pred_solar_partly += self.learning_engine.predict_balcony_for_quarter(self.learning_engine._last_quarter_processed, 50.0)
+                pred_solar_cloudy += self.learning_engine.predict_balcony_for_quarter(self.learning_engine._last_quarter_processed, 100.0)
 
-            # If the charge state is absorption/float, true solar potential is hidden.
-            # Do not use this quarter to penalize solar prediction.
+            # Determine the implied cloud cover based on actual production
             is_absorption = charge_state and charge_state.lower() in ("absorption", "float", "ausgleichsladung", "equalization")
-            if is_absorption or actual_solar_wh >= pred_solar_wh or pred_solar_wh == 0:
-                self.pessimistic_solar_factor = 1.0
-            else:
-                self.pessimistic_solar_factor = actual_solar_wh / pred_solar_wh
+            implied_cloud_cover = None
 
-            # Removed pessimistic consumption factor as spikes (e.g. cooking) ruin the daily forecast
+            if not is_absorption and pred_solar_clear > 0:
+                # Calculate differences to the three categories
+                diff_clear = abs(actual_solar_wh - pred_solar_clear)
+                diff_partly = abs(actual_solar_wh - pred_solar_partly)
+                diff_cloudy = abs(actual_solar_wh - pred_solar_cloudy)
+
+                # Find the closest match
+                min_diff = min(diff_clear, diff_partly, diff_cloudy)
+
+                # If production is significantly higher than cloudy, it's not cloudy.
+                # If production is significantly higher than expected, assume clearer skies.
+                if actual_solar_wh > pred_solar_partly and actual_solar_wh > pred_solar_clear * 0.8:
+                    implied_cloud_cover = 0.0 # Clear
+                elif actual_solar_wh < pred_solar_partly * 0.5:
+                    implied_cloud_cover = 100.0 # Cloudy
+                elif min_diff == diff_clear:
+                    implied_cloud_cover = 0.0
+                elif min_diff == diff_partly:
+                    implied_cloud_cover = 50.0
+                else:
+                    implied_cloud_cover = 100.0
+
+            if implied_cloud_cover is not None:
+                # Smooth the transition of implicit cloud cover
+                if not hasattr(self, 'implicit_cloud_cover'):
+                    self.implicit_cloud_cover = implied_cloud_cover
+                else:
+                    # Exponential moving average for cloud cover correction (alpha = 0.3)
+                    self.implicit_cloud_cover = (0.3 * implied_cloud_cover) + (0.7 * self.implicit_cloud_cover)
+
             self.pessimistic_consumption_factor = 1.0
 
             await self.learning_engine.async_save()
 
         self.learning_engine._last_quarter_processed = current_quarter
 
-        # Ensure factors exist if first run
-        if not hasattr(self, 'pessimistic_solar_factor'):
-            self.pessimistic_solar_factor = 1.0
+        # Ensure attributes exist
+        if not hasattr(self, 'implicit_cloud_cover'):
+            self.implicit_cloud_cover = None
         if not hasattr(self, 'pessimistic_consumption_factor'):
             self.pessimistic_consumption_factor = 1.0
 
@@ -658,81 +684,97 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         return False
 
     def _simulate_optimal_threshold(self, now, hourly_forecasts: list[dict], current_batt_pct: float, batt_cap_wh: float, batt_min_pct: float) -> float:
-        """Simulates the future to find the optimal price threshold to discharge the battery."""
+        """Simulates the future to find the optimal price threshold by minimizing total electricity cost."""
         # Use pessimistic blocks for the threshold calculation to ensure safe predictions
         future_blocks = self._build_future_blocks_pessimistic(now, hourly_forecasts)
+
+        if not future_blocks:
+            return -0.5
 
         max_inverter_power_w = float(self.config.get(CONF_MAX_INVERTER_POWER_W, 800))
         max_discharge_wh_per_15min = max_inverter_power_w / 4.0
 
-        low, high = -0.5, 1.0
-        best_threshold = -0.5
-
         batt_eff = float(self.config.get(CONF_BATTERY_EFFICIENCY_PCT, 90)) / 100.0
 
-        for _ in range(15):
-            mid_threshold = (low + high) / 2.0
+        # Unique prices sorted
+        unique_prices = sorted(list(set(b["price"] for b in future_blocks)))
+        lowest_actual_price = unique_prices[0] if unique_prices else 0.0
+        # Add a fallback threshold that discharges everything
+        unique_prices.insert(0, -0.5)
+
+        best_threshold = -0.5
+        min_total_cost = float('inf')
+
+        for candidate_threshold in unique_prices:
             simulated_batt_wh = batt_cap_wh * (current_batt_pct / 100.0)
             min_batt_wh = batt_cap_wh * (batt_min_pct / 100.0)
 
-            failed_due_to_empty = False
-            failed_due_to_full = False
+            total_cost = 0.0
+            overfill_penalty = 0.0
 
             for fb in future_blocks:
-                # Add solar with efficiency loss
-                simulated_batt_wh += fb["solar"] * batt_eff
-
+                price = fb["price"]
+                pred_solar = fb["solar"] * batt_eff
                 pred_cons = max(0.0, fb["house_wh"] - fb["balcony"])
 
-                # Discharge if price > threshold and we have enough battery.
-                # HOWEVER, if price is negative, we explicitly do NOT discharge, because we want to consume grid power.
-                if fb["price"] > mid_threshold and simulated_batt_wh > min_batt_wh and fb["price"] >= 0.0:
-                    # Battery can only discharge at the max inverter output limit (for the house load)
-                    actual_discharge = min(pred_cons, max_discharge_wh_per_15min)
+                simulated_batt_wh += pred_solar
+
+                grid_import_wh = pred_cons
+
+                # If battery has enough energy and price is > candidate threshold, we discharge.
+                # Do NOT discharge if price is negative.
+                if price > candidate_threshold and simulated_batt_wh > min_batt_wh and price >= 0.0:
+                    available_discharge = simulated_batt_wh - min_batt_wh
+                    actual_discharge = min(pred_cons, max_discharge_wh_per_15min, available_discharge)
                     simulated_batt_wh -= actual_discharge
+                    grid_import_wh -= actual_discharge
 
-                    if simulated_batt_wh < min_batt_wh:
-                        failed_due_to_empty = True
-                        break
+                # Add to total cost (Wh -> kWh * price per kWh)
+                total_cost += (grid_import_wh / 1000.0) * price
 
-                # The primary directive: 100% is bad. If we reach ~99%, the threshold is too high (too much saving).
+                # Strictly penalize 100% full battery to prevent wasting solar energy
                 if simulated_batt_wh >= (batt_cap_wh * 0.99):
-                    failed_due_to_full = True
-                    break
+                    # Heavy penalty for every time block we are full, proportional to wasted potential
+                    overfill_penalty += 1000.0
+                    simulated_batt_wh = batt_cap_wh
 
+            total_cost += overfill_penalty
 
+            # If we end up with unused battery at the end of the simulation horizon,
+            # we subtract its value so it's not "lost" in the cost calculation.
+            # Value it at the lowest price in the unique prices list.
+            if simulated_batt_wh > min_batt_wh:
+                residual_value = ((simulated_batt_wh - min_batt_wh) / 1000.0) * lowest_actual_price
+                total_cost -= residual_value
 
-            if failed_due_to_full:
-                # We need to discharge more, lower the threshold so it discharges at cheaper prices
-                high = mid_threshold
-
-
-            elif failed_due_to_empty:
-                # We discharged too much, raise the threshold
-                low = mid_threshold
-            else:
-                # Neither empty nor full, this is a valid threshold.
-                # Try to lower the threshold further to maximize battery usage (offset more grid import)
-                best_threshold = mid_threshold
-                high = mid_threshold
+            if total_cost < min_total_cost:
+                min_total_cost = total_cost
+                best_threshold = candidate_threshold
 
         return best_threshold
 
     def _build_future_blocks_pessimistic(self, now, hourly_forecasts: list[dict]) -> list[dict]:
-        """Builds a pessimistic list of 15-min blocks applying the current daily deviation factors."""
+        """Builds a list of 15-min blocks applying the implicit cloud cover correction."""
         blocks = self._build_future_blocks(now, hourly_forecasts)
 
-        # Determine end of today for the pessimistic daily boundary
+        # Determine end of today for the daily boundary
         end_of_today = now.replace(hour=23, minute=59, second=59, microsecond=999999)
 
-        # Apply the factors only for blocks belonging to today
-        solar_factor = min(1.0, getattr(self, "pessimistic_solar_factor", 1.0))
         cons_factor = max(1.0, getattr(self, "pessimistic_consumption_factor", 1.0))
+        implicit_cloud = getattr(self, "implicit_cloud_cover", None)
 
         for b in blocks:
             if b["dt"] <= end_of_today:
-                b["solar"] = b["solar"] * solar_factor
-                b["balcony"] = b["balcony"] * solar_factor
+                if implicit_cloud is not None:
+                    q = self._get_quarter_index(b["dt"])
+                    b["solar"] = self.learning_engine.predict_solar_for_quarter(q, implicit_cloud)
+                    if self.config.get(CONF_BALCONY_POWER_SENSOR):
+                        b["balcony"] = self.learning_engine.predict_balcony_for_quarter(q, implicit_cloud)
+
+                    # Store original cloud cover for reference, but use implicit for calculation
+                    b["original_cc"] = b["cc"]
+                    b["cc"] = implicit_cloud
+
                 b["house_wh"] = b["house_wh"] * cons_factor
 
         return blocks
@@ -750,7 +792,6 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         min_batt_pct = self.config.get(CONF_BATTERY_MIN_LIMIT_PCT, 10)
         min_batt_wh = batt_cap_wh * (min_batt_pct / 100.0)
-        recovery_mode = getattr(self, "_battery_recovery_mode", False)
 
         for i, fb in enumerate(future_blocks):
             pred_solar = fb["solar"] * batt_eff
@@ -762,38 +803,30 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             # The actual consumption the battery sees is house minus balcony
             pred_cons = max(0.0, raw_house_wh - pred_balcony)
 
-            # Update recovery mode logic for forecast
-            if simulated_batt_wh <= min_batt_wh:
-                recovery_mode = True
-            elif simulated_batt_wh >= (min_batt_wh + (batt_cap_wh * 0.02)):
-                recovery_mode = False
-
-            # The actual battery discharge is capped by the inverter
-            actual_discharge = min(pred_cons, max_discharge_wh_per_15min)
+            available_discharge = max(0.0, simulated_batt_wh - min_batt_wh)
+            actual_discharge = min(pred_cons, max_discharge_wh_per_15min, available_discharge)
 
             # Will overfill check (basic lookahead sum, capped to inverter limit)
             rem_solar = sum(b["solar"] for b in future_blocks[i:])
-
-            # Recalculate remaining dynamic consumption
             rem_cons = sum(min(max(0.0, b["house_wh"] - b["balcony"]), max_discharge_wh_per_15min) for b in future_blocks[i:])
-
             available_cap = batt_cap_wh - simulated_batt_wh
             will_overfill = rem_solar > (rem_cons + available_cap)
 
+            # New precise discharging logic mirroring the threshold calculation
             if price < 0.0:
-                action = f"Negativer Preis ({round(price,3)}€): DTU aus (Netzbezug)"
+                action = f"Negativer Preis ({round(price,3)}€): DTU aus"
                 simulated_batt_wh += pred_solar
             elif simulated_batt_wh >= (batt_cap_wh * 0.99):
                 action = "Batterie 100% voll (DTU An)"
                 simulated_batt_wh += pred_solar - actual_discharge
-            elif recovery_mode:
-                action = "Batterie am Minimum (DTU Aus)"
-                simulated_batt_wh += pred_solar
             elif will_overfill:
                 action = "Überschussvermeidung (DTU An)"
                 simulated_batt_wh += pred_solar - actual_discharge
             elif price <= price_threshold:
                 action = f"Netzbezug (Akku sparen für >{round(price_threshold,3)}€)"
+                simulated_batt_wh += pred_solar
+            elif simulated_batt_wh <= min_batt_wh:
+                action = "Batterie am Minimum (DTU Aus)"
                 simulated_batt_wh += pred_solar
             else:
                 action = "Nulleinspeisung (DTU An)"
@@ -827,9 +860,11 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         # Extend max_dt to end of the last block
         max_dt += timedelta(minutes=15)
 
-        # If no future prices, default to a 24h lookahead to ensure simulation works
-        if max_dt <= now + timedelta(hours=1):
-            max_dt = now + timedelta(hours=24)
+        # Ensure we always simulate at least 24 hours into the future.
+        # If Tibber prices end tonight at 23:45, this forces the simulation to project into tomorrow.
+        min_max_dt = now + timedelta(hours=24)
+        if max_dt < min_max_dt:
+            max_dt = min_max_dt
 
         blocks = []
         eval_dt = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0)
@@ -854,12 +889,25 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 pred_balcony = self.learning_engine.predict_balcony_for_quarter(q, cc)
 
             # Find price for this 15 min block
-            price = 0.0
+            price = None
             for p in self.tibber_prices:
                 p_dt = p.get("datetime")
                 if p_dt and p_dt <= eval_dt < p_dt + timedelta(minutes=15):
                     price = float(p.get("total", 0.0))
                     break
+
+            # Fallback: if no price found (e.g. tomorrow before 13:00), use the price from exactly 24h prior
+            if price is None:
+                fallback_dt = eval_dt - timedelta(hours=24)
+                for p in self.tibber_prices:
+                    p_dt = p.get("datetime")
+                    if p_dt and p_dt <= fallback_dt < p_dt + timedelta(minutes=15):
+                        price = float(p.get("total", 0.0))
+                        break
+
+            # Secondary fallback just in case
+            if price is None:
+                price = 0.0
 
             # Extreme Price Reserve Logic
             if price > self.extreme_price_threshold:
