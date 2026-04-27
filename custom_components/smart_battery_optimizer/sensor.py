@@ -27,6 +27,11 @@ async def async_setup_entry(
         DiagCurrentSolarSensor(coordinator, entry.entry_id),
         DiagCurrentGridConsumptionSensor(coordinator, entry.entry_id),
     ]
+
+    app_entities = coordinator.appliance_entities.get('sensor', [])
+    if app_entities:
+        async_add_entities(app_entities)
+
     async_add_entities(entities)
 
 class CalculatedConsumptionSensor(CoordinatorEntity, SensorEntity):
