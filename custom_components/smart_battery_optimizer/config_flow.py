@@ -21,6 +21,7 @@ from .const import (
     CONF_OPENDTU_TURN_OFF_BUTTON,
     CONF_OPENDTU_PRODUCING_SENSOR,
     CONF_OPENDTU_OUTPUT_SENSOR,
+    CONF_OPENDTU_DPL_MODE_SELECT,
     CONF_WEATHER_ENTITY,
     CONF_SOLAR_CHARGE_STATE_SENSOR,
     CONF_BATTERY_CAPACITY_WH,
@@ -81,6 +82,9 @@ def get_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             ),
             vol.Required(CONF_OPENDTU_OUTPUT_SENSOR, default=defaults.get(CONF_OPENDTU_OUTPUT_SENSOR, vol.UNDEFINED)): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor", device_class="power")
+            ),
+            vol.Optional(CONF_OPENDTU_DPL_MODE_SELECT, default=defaults.get(CONF_OPENDTU_DPL_MODE_SELECT, vol.UNDEFINED)): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain=["select", "number", "input_number", "input_select"])
             ),
             vol.Required(CONF_WEATHER_ENTITY, default=defaults.get(CONF_WEATHER_ENTITY, vol.UNDEFINED)): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="weather")

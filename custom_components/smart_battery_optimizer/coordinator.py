@@ -9,6 +9,7 @@ import homeassistant.util.dt as dt_util
 from .tibber import fetch_tibber_prices
 
 from .const import (
+    CONF_OPENDTU_DPL_MODE_SELECT,
     CONF_SMART_DEVICES,
     DOMAIN,
     CONF_TIBBER_API_TOKEN,
@@ -523,7 +524,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             self.current_operating_mode = "Batterie wird voll/Absorption: Überschussvermeidung aktiv"
             turn_on_inverter = True
 
-        elif virtual_batt_pct >= 100.0:
+        elif virtual_batt_pct >= 99.0:
             self.current_operating_mode = "Batterie 100% voll: DTU an (Nulleinspeisung aktiv)"
             turn_on_inverter = True
 
@@ -535,20 +536,31 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             self.current_operating_mode = "Preis hoch: DTU an (Nulleinspeisung aktiv)"
             turn_on_inverter = True
 
-        producing_sensor = self.config.get(CONF_OPENDTU_PRODUCING_SENSOR)
-        inverter_is_on = True # Default to True to force off if unknown
-        if producing_sensor:
-            producing_state = self.hass.states.get(producing_sensor)
-            if producing_state:
-                # OpenDTU producing sensor is a binary_sensor. It is 'on' when producing, 'off' when not.
-                # However, during initialization or errors, it might be 'unavailable' or 'unknown'.
-                # We also want to fire the button if our logical state changes, even if the sensor hasn't updated yet.
-                inverter_is_on = producing_state.state == "on"
 
-                # Check if the state is something other than "on" or "off" (e.g. string state from older config)
-                if producing_state.state not in ("on", "off"):
-                    # If it's a string like "producing", we map it.
-                    inverter_is_on = str(producing_state.state).lower() in ("on", "true", "1", "producing")
+        dpl_entity = self.config.get(CONF_OPENDTU_DPL_MODE_SELECT)
+
+        inverter_is_on = True # Default to True to force off if unknown
+
+        if dpl_entity:
+            # DPL configured: Use DPL state to check if inverter is "on" (0/0.0) or "off" (1/1.0)
+            dpl_state = self.hass.states.get(dpl_entity)
+            if dpl_state and dpl_state.state not in ("unknown", "unavailable"):
+                try:
+                    dpl_val = float(dpl_state.state)
+                    # DPL mode 0 means DPL is active (inverter is ON and follows DPL limits)
+                    # DPL mode 1 means OFF
+                    inverter_is_on = (dpl_val == 0.0)
+                except ValueError:
+                    pass
+        else:
+            # Fallback to producing sensor
+            producing_sensor = self.config.get(CONF_OPENDTU_PRODUCING_SENSOR)
+            if producing_sensor:
+                producing_state = self.hass.states.get(producing_sensor)
+                if producing_state:
+                    inverter_is_on = producing_state.state == "on"
+                    if producing_state.state not in ("on", "off"):
+                        inverter_is_on = str(producing_state.state).lower() in ("on", "true", "1", "producing")
 
         try:
             turn_on_btn = self.config.get(CONF_OPENDTU_TURN_ON_BUTTON)
@@ -559,13 +571,28 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             # For negative prices, we force the OFF button every time to ensure DPL is definitely set.
             requested_state_str = "on" if turn_on_inverter else "off"
 
+            async def _set_dpl_mode(mode_val: float):
+                if not dpl_entity:
+                    return
+                entity_state = self.hass.states.get(dpl_entity)
+                if not entity_state:
+                    return
+                domain = dpl_entity.split(".")[0]
+                if domain in ("number", "input_number"):
+                    await self.hass.services.async_call(domain, "set_value", {"entity_id": dpl_entity, "value": mode_val}, blocking=False)
+                elif domain in ("select", "input_select"):
+                    # Cast float back to string matching typical OpenDTU options (e.g. "0" or "1")
+                    await self.hass.services.async_call(domain, "select_option", {"entity_id": dpl_entity, "option": str(int(mode_val))}, blocking=False)
+
             if turn_on_inverter and (not inverter_is_on or self._current_inverter_state != "on"):
                 if turn_on_btn and self.hass.states.get(turn_on_btn) is not None:
                     await self.hass.services.async_call("button", "press", {"entity_id": turn_on_btn}, blocking=False)
+                    await _set_dpl_mode(0.0)
                     self._current_inverter_state = "on"
             elif not turn_on_inverter and (inverter_is_on or self._current_inverter_state != "off" or is_negative_price):
                 if turn_off_btn and self.hass.states.get(turn_off_btn) is not None:
                     await self.hass.services.async_call("button", "press", {"entity_id": turn_off_btn}, blocking=False)
+                    await _set_dpl_mode(1.0)
                     self._current_inverter_state = "off"
         except Exception as e:
             _LOGGER.error("Failed to press OpenDTU button: %s", e)
@@ -756,7 +783,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             if price < 0.0:
                 action = f"Negativer Preis ({round(price,3)}€): DTU aus (Netzbezug)"
                 simulated_batt_wh += pred_solar
-            elif simulated_batt_wh >= batt_cap_wh:
+            elif simulated_batt_wh >= (batt_cap_wh * 0.99):
                 action = "Batterie 100% voll (DTU An)"
                 simulated_batt_wh += pred_solar - actual_discharge
             elif recovery_mode:
