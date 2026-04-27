@@ -9,6 +9,7 @@ import homeassistant.util.dt as dt_util
 from .tibber import fetch_tibber_prices
 
 from .const import (
+    CONF_SMART_DEVICES,
     DOMAIN,
     CONF_TIBBER_API_TOKEN,
     CONF_TIBBER_PRICE_SENSOR,
@@ -37,6 +38,7 @@ from .const import (
     CONF_EXCESS_EXTERNAL_INVERTER,
 )
 from .learning import LearningEngine
+from .appliance_manager import SmartApplianceManager, ApplianceStateMachine, ProposalCalculator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -53,6 +55,15 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         )
         self.config = config
         self.learning_engine = LearningEngine(hass, config)
+
+        # Smart Appliances
+        from .appliance_manager import SmartApplianceManager, ProposalCalculator
+        # Note: at __init__, config_entry might not be fully attached in this architecture.
+        # But if it is passed in config, or we can just initialize them dynamically in _async_setup
+        self.appliance_manager = None
+        self.appliance_state_machines = {}
+        self.proposal_calculator = ProposalCalculator(self)
+        self.appliance_entities = {'button': [], 'select': [], 'sensor': [], 'text': []}
 
         # Internal state
         self.is_enabled = True
@@ -111,8 +122,39 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         await self.learning_engine.async_save()
 
     async def _async_setup(self):
+        # Initialize appliance manager with entry_id if not done yet
+        if not self.appliance_manager:
+            from .appliance_manager import SmartApplianceManager
+            self.appliance_manager = SmartApplianceManager(self.hass, self.config_entry.entry_id)
+
         """Set up the coordinator."""
         await self.learning_engine.async_load()
+        await self.appliance_manager.async_load()
+
+        # Init state machines for configured devices
+        smart_devices_str = self.config.get(CONF_SMART_DEVICES, "")
+        if smart_devices_str:
+            devices = [d.strip() for d in smart_devices_str.split(",") if d.strip()]
+            for dev in devices:
+                self.appliance_state_machines[dev] = ApplianceStateMachine(dev, self.appliance_manager)
+
+                # Instantiate UI Entities
+                from .appliance_entities import (
+                    ApplianceRecordButton, ApplianceProgramSelect, ApplianceProposalSelect,
+                    ApplianceConfirmButton, ApplianceRenameText, ApplianceStatusSensor
+                )
+
+                prog_sel = ApplianceProgramSelect(self, self.config_entry.entry_id, dev)
+                prop_sel = ApplianceProposalSelect(self, self.config_entry.entry_id, dev, prog_sel)
+
+                self.appliance_entities['select'].extend([prog_sel, prop_sel])
+                self.appliance_entities['button'].extend([
+                    ApplianceRecordButton(self, self.config_entry.entry_id, dev),
+                    ApplianceConfirmButton(self, self.config_entry.entry_id, dev, prog_sel, prop_sel)
+                ])
+                self.appliance_entities['text'].append(ApplianceRenameText(self, self.config_entry.entry_id, dev, prog_sel))
+                self.appliance_entities['sensor'].append(ApplianceStatusSensor(self, self.config_entry.entry_id, dev))
+
         await self._fetch_tibber_prices()
 
     async def _fetch_tibber_prices(self):
@@ -202,6 +244,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         return (dt.hour * 4) + (dt.minute // 15)
 
     async def _async_update_data(self):
+        now = datetime.now()
+        await self._tick_appliances(now)
         """Update data and apply logic."""
         if not self.is_enabled:
             return None
@@ -807,3 +851,28 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             eval_dt += timedelta(minutes=15)
 
         return blocks
+
+    async def _tick_appliances(self, now):
+        for sensor_id, sm in self.appliance_state_machines.items():
+            state = self.hass.states.get(sensor_id)
+            if state and state.state not in ('unknown', 'unavailable'):
+                try:
+                    power_w = float(state.state)
+                    await sm.async_process_power_reading(power_w, now)
+                except ValueError:
+                    pass
+
+    def get_scheduled_appliance_load_for_minute(self, target_time) -> float:
+        total_w = 0.0
+        for sm in self.appliance_state_machines.values():
+            if sm.planned_run:
+                start = sm.planned_run.scheduled_start
+                prog = self.appliance_manager.get_program_by_id(sm.sensor_id, sm.planned_run.program_id)
+                if prog and prog.power_profile:
+                    duration = len(prog.power_profile)
+                    end = start + timedelta(minutes=duration)
+                    if start <= target_time < end:
+                        min_idx = int((target_time - start).total_seconds() / 60)
+                        if min_idx < len(prog.power_profile):
+                            total_w += prog.power_profile[min_idx]
+        return total_w
