@@ -26,6 +26,8 @@ async def async_setup_entry(
         DiagCurrentBatterySensor(coordinator, entry.entry_id),
         DiagCurrentSolarSensor(coordinator, entry.entry_id),
         DiagCurrentGridConsumptionSensor(coordinator, entry.entry_id),
+        BatteryTotalSavingsSensor(coordinator, entry.entry_id),
+        BatteryVsNoBatterySavingsSensor(coordinator, entry.entry_id),
     ]
 
     app_entities = coordinator.appliance_entities.get('sensor', [])
@@ -277,3 +279,56 @@ class DiagCurrentGridConsumptionSensor(CoordinatorEntity, SensorEntity):
         if self.coordinator.data:
             return self.coordinator.data.get("current_consumption")
         return None
+
+class BatteryTotalSavingsSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for total historical battery savings."""
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_native_unit_of_measurement = "€"
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry_id}_battery_total_savings"
+        self._attr_name = "Batterie Ersparnis (Gesamt)"
+        self._attr_icon = "mdi:piggy-bank"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
+
+    @property
+    def native_value(self):
+        try:
+            val = self.coordinator.learning_engine.data["savings"]["total_battery_savings"]
+            return round(val, 2)
+        except (KeyError, TypeError):
+            return 0.0
+
+class BatteryVsNoBatterySavingsSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for historical battery savings vs a system without a battery."""
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_native_unit_of_measurement = "€"
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry_id}_battery_vs_no_battery_savings"
+        self._attr_name = "Batterie Ersparnis (ggü. ohne Akku)"
+        self._attr_icon = "mdi:piggy-bank-outline"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
+
+    @property
+    def native_value(self):
+        try:
+            val = self.coordinator.learning_engine.data["savings"]["total_battery_savings_vs_no_battery"]
+            return round(val, 2)
+        except (KeyError, TypeError):
+            return 0.0
