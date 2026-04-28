@@ -132,6 +132,10 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         await self.learning_engine.async_load()
         await self.appliance_manager.async_load()
 
+        # Clear any existing entities to prevent double-initialization on reload
+        self.appliance_state_machines.clear()
+        self.appliance_entities = {'button': [], 'select': [], 'sensor': [], 'text': []}
+
         # Init state machines for configured devices
         smart_devices_str = self.config.get(CONF_SMART_DEVICES, "")
         if smart_devices_str:
@@ -358,7 +362,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
             if implied_cloud_cover is not None:
                 # Smooth the transition of implicit cloud cover
-                if not hasattr(self, 'implicit_cloud_cover'):
+                if not hasattr(self, 'implicit_cloud_cover') or self.implicit_cloud_cover is None:
                     self.implicit_cloud_cover = implied_cloud_cover
                 else:
                     # Exponential moving average for cloud cover correction (alpha = 0.3)

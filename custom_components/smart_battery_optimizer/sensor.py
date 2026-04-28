@@ -173,10 +173,21 @@ class ForecastPlanSensor(CoordinatorEntity, SensorEntity):
         """Return the plan as a list in attributes for use in cards like ApexCharts."""
         if self.coordinator.data:
             # Home Assistant imposes a strict 16KB limit on state sizes.
-            # Truncate the plan to the next ~24 hours (96 blocks max) to avoid silent drops.
+            # Truncate the plan to the next ~12 hours (48 blocks max) and strip redundant fields
+            # to avoid silent database drops and warnings.
             plan = self.coordinator.data.get("hourly_plan", [])
-            truncated_plan = plan[:96] if len(plan) > 96 else plan
-            return {"hourly_plan": truncated_plan}
+            truncated_plan = plan[:48] if len(plan) > 48 else plan
+
+            # Remove redundant fields to save space
+            optimized_plan = []
+            for block in truncated_plan:
+                optimized_block = block.copy()
+                optimized_block.pop("balcony_wh", None)
+                optimized_block.pop("house_wh", None)
+                optimized_block.pop("cloud_cover", None)
+                optimized_plan.append(optimized_block)
+
+            return {"hourly_plan": optimized_plan}
         return {}
 
 # ==========================================
@@ -285,7 +296,7 @@ class BatteryTotalSavingsSensor(CoordinatorEntity, SensorEntity):
     _attr_has_entity_name = True
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_native_unit_of_measurement = "€"
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_state_class = SensorStateClass.TOTAL
 
     def __init__(self, coordinator, entry_id):
         super().__init__(coordinator)
@@ -311,7 +322,7 @@ class BatteryVsNoBatterySavingsSensor(CoordinatorEntity, SensorEntity):
     _attr_has_entity_name = True
     _attr_device_class = SensorDeviceClass.MONETARY
     _attr_native_unit_of_measurement = "€"
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_state_class = SensorStateClass.TOTAL
 
     def __init__(self, coordinator, entry_id):
         super().__init__(coordinator)
