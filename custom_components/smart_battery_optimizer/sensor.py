@@ -173,25 +173,42 @@ class ForecastPlanSensor(CoordinatorEntity, SensorEntity):
         """Return the plan as a list in attributes for use in cards like ApexCharts."""
         if self.coordinator.data:
             # Home Assistant imposes a strict 16KB limit on state sizes.
-            # Truncate the plan to 24 hours (96 blocks max). To keep the total payload
-            # under 16KB, we rename keys to short aliases and drop non-essential ones.
+            # Truncate the plan to 24 hours (96 blocks max). To keep the payload
+            # under 16KB while preserving all original keys for user templates, we abbreviate
+            # the planned_action strings and limit decimal precision.
             plan = self.coordinator.data.get("hourly_plan", [])
             truncated_plan = plan[:96] if len(plan) > 96 else plan
 
-            # Compress the dictionary to ensure 96 items stay under 16KB
             optimized_plan = []
             for block in truncated_plan:
-                # Keep original data in data structure but provide a slimmed down
-                # version for the HA database.
-                # Mapping: hour -> t, price -> p, solar_wh -> s, consumption_wh -> c, battery_pct_end -> b, planned_action -> a
-                optimized_plan.append({
-                    "t": block.get("hour"),
-                    "p": block.get("price"),
-                    "s": block.get("solar_wh"),
-                    "c": block.get("consumption_wh"),
-                    "b": block.get("battery_pct_end"),
-                    "a": block.get("planned_action")
-                })
+                optimized_block = block.copy()
+
+                # Abbreviate actions to save significant space
+                action = optimized_block.get("planned_action", "")
+                if "Einspeisen" in action:
+                    short_action = "EIN"
+                elif "Laden/Standby" in action:
+                    short_action = "LAD"
+                elif "Batterie 100% voll" in action:
+                    short_action = "B10"
+                elif "Batterie Leer" in action:
+                    short_action = "B00"
+                elif "Negativer Preis" in action:
+                    short_action = "NEG"
+                elif "Extremer Preis" in action:
+                    short_action = "EXT"
+                elif "Netzbezug" in action:
+                    short_action = "NET"
+                else:
+                    short_action = action[:3].upper() if action else "???"
+
+                optimized_block["planned_action"] = short_action
+
+                # Ensure price is rounded to strictly 2 decimals in the attribute payload to save characters
+                if "price" in optimized_block and isinstance(optimized_block["price"], (int, float)):
+                    optimized_block["price"] = round(float(optimized_block["price"]), 2)
+
+                optimized_plan.append(optimized_block)
 
             return {"hourly_plan": optimized_plan}
         return {}
