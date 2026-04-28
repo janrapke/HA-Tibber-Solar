@@ -575,13 +575,19 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             # DPL configured: Use DPL state to check if inverter is "on" (0/0.0) or "off" (1/1.0)
             dpl_state = self.hass.states.get(dpl_entity)
             if dpl_state and dpl_state.state not in ("unknown", "unavailable"):
-                try:
-                    dpl_val = float(dpl_state.state)
-                    # DPL mode 0 means DPL is active (inverter is ON and follows DPL limits)
-                    # DPL mode 1 means OFF
-                    inverter_is_on = (dpl_val == 0.0)
-                except ValueError:
-                    pass
+                state_str = str(dpl_state.state).strip()
+                if state_str.startswith("0"):
+                    inverter_is_on = True
+                elif state_str.startswith("1"):
+                    inverter_is_on = False
+                else:
+                    try:
+                        dpl_val = float(state_str)
+                        # DPL mode 0 means DPL is active (inverter is ON and follows DPL limits)
+                        # DPL mode 1 means OFF
+                        inverter_is_on = (dpl_val == 0.0)
+                    except ValueError:
+                        pass
         else:
             # Fallback to producing sensor
             producing_sensor = self.config.get(CONF_OPENDTU_PRODUCING_SENSOR)
@@ -611,8 +617,19 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 if domain in ("number", "input_number"):
                     await self.hass.services.async_call(domain, "set_value", {"entity_id": dpl_entity, "value": mode_val}, blocking=False)
                 elif domain in ("select", "input_select"):
-                    # Cast float back to string matching typical OpenDTU options (e.g. "0" or "1")
-                    await self.hass.services.async_call(domain, "select_option", {"entity_id": dpl_entity, "option": str(int(mode_val))}, blocking=False)
+                    target_prefix = str(int(mode_val))
+                    options = entity_state.attributes.get("options", [])
+
+                    target_option = None
+                    for opt in options:
+                        if str(opt).strip().startswith(target_prefix):
+                            target_option = str(opt)
+                            break
+
+                    if target_option is None:
+                        target_option = target_prefix
+
+                    await self.hass.services.async_call(domain, "select_option", {"entity_id": dpl_entity, "option": target_option}, blocking=False)
 
             if turn_on_inverter and (not inverter_is_on or self._current_inverter_state != "on"):
                 if turn_on_btn and self.hass.states.get(turn_on_btn) is not None:
