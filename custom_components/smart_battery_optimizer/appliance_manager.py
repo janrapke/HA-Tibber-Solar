@@ -334,7 +334,8 @@ class ProposalCalculator:
         if not plan:
             return 999.0 # Fallback high cost
 
-        max_inv = self.coordinator.max_inverter_power_w
+        from .const import CONF_MAX_INVERTER_POWER_W
+        max_inv = float(self.coordinator.config.get(CONF_MAX_INVERTER_POWER_W, 800))
 
         for min_idx, watts in enumerate(profile):
             run_minute = start_time + timedelta(minutes=min_idx)
