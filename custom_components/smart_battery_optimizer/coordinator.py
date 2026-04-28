@@ -763,9 +763,11 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
             # If we end up with unused battery at the end of the simulation horizon,
             # we subtract its value so it's not "lost" in the cost calculation.
-            # Value it at the lowest price in the unique prices list.
+            # Value it realistically to avoid panic discharging. We value it at the candidate_threshold
+            # (or 0 if negative) so the simulation feels safe saving energy for this threshold.
             if simulated_batt_wh > min_batt_wh:
-                residual_value = ((simulated_batt_wh - min_batt_wh) / 1000.0) * lowest_actual_price
+                safe_residual_price = max(0.0, candidate_threshold)
+                residual_value = ((simulated_batt_wh - min_batt_wh) / 1000.0) * safe_residual_price
                 total_cost -= residual_value
 
             if total_cost < min_total_cost:
