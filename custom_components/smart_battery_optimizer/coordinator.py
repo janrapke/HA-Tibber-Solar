@@ -9,6 +9,7 @@ import homeassistant.util.dt as dt_util
 from .tibber import fetch_tibber_prices
 
 from .const import (
+    CONF_SOLAR_PEAK_W,
     CONF_OPENDTU_DPL_MODE_SELECT,
     CONF_SMART_DEVICES,
     DOMAIN,
@@ -341,7 +342,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             if not is_absorption and pred_solar_clear > 0:
                 # Fallback to physical peak if the learned clear value is too low or corrupted.
                 # This prevents "good" days from being marked cloudy just because the EMA hasn't caught up.
-                peak_w = float(self.config.get(CONF_SOLAR_PEAK_W, 0.0))
+                peak_w = float(self.config.get(CONF_SOLAR_PEAK_W, 6000.0))
                 # Max Wh possible in 15 mins based on physical peak
                 peak_wh_15min = peak_w / 4.0
 
@@ -382,6 +383,23 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                     # Exponential moving average for cloud cover correction (alpha = 0.3)
                     self.implicit_cloud_cover = (0.3 * implied_cloud_cover) + (0.7 * self.implicit_cloud_cover)
 
+            # Intraday Solar Factor
+            # We track how much better/worse actual yield is compared to what we predict for the *deduced* cloud cover.
+            target_cc = self.implicit_cloud_cover if getattr(self, 'implicit_cloud_cover', None) is not None else cloud_cover
+            target_pred = self.learning_engine.predict_solar_for_quarter(self.learning_engine._last_quarter_processed, target_cc)
+            if self.config.get(CONF_BALCONY_POWER_SENSOR):
+                target_pred += self.learning_engine.predict_balcony_for_quarter(self.learning_engine._last_quarter_processed, target_cc)
+
+            if target_pred > 0 and actual_solar_wh > 0:
+                raw_factor = actual_solar_wh / target_pred
+                # Bound the factor to prevent absurdly huge scaling when target_pred is tiny
+                raw_factor = max(0.5, min(raw_factor, 3.0))
+
+                if not hasattr(self, 'intraday_solar_factor') or getattr(self, 'intraday_solar_factor') is None:
+                    self.intraday_solar_factor = raw_factor
+                else:
+                    self.intraday_solar_factor = (0.3 * raw_factor) + (0.7 * getattr(self, 'intraday_solar_factor', 1.0))
+
             self.pessimistic_consumption_factor = 1.0
 
             await self.learning_engine.async_save()
@@ -391,6 +409,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         # Ensure attributes exist
         if not hasattr(self, 'implicit_cloud_cover'):
             self.implicit_cloud_cover = None
+        if not hasattr(self, 'intraday_solar_factor'):
+            self.intraday_solar_factor = 1.0
         if not hasattr(self, 'pessimistic_consumption_factor'):
             self.pessimistic_consumption_factor = 1.0
 
@@ -805,6 +825,10 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         cons_factor = max(1.0, getattr(self, "pessimistic_consumption_factor", 1.0))
         implicit_cloud = getattr(self, "implicit_cloud_cover", None)
+        solar_factor = getattr(self, "intraday_solar_factor", 1.0)
+
+        peak_w = float(self.config.get(CONF_SOLAR_PEAK_W, 6000.0))
+        peak_wh_15min = peak_w / 4.0
 
         for b in blocks:
             if b["dt"] <= end_of_today:
@@ -817,6 +841,15 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                     # Store original cloud cover for reference, but use implicit for calculation
                     b["original_cc"] = b["cc"]
                     b["cc"] = implicit_cloud
+
+                # Apply intraday scale factor to adapt to conditions faster than the EMA learns
+                b["solar"] = b["solar"] * solar_factor
+                # Hard limit to physical peak just in case factor + clear prediction explodes
+                if b["solar"] > peak_wh_15min:
+                    b["solar"] = peak_wh_15min
+
+                if self.config.get(CONF_BALCONY_POWER_SENSOR) and "balcony" in b:
+                    b["balcony"] = b["balcony"] * solar_factor
 
                 b["house_wh"] = b["house_wh"] * cons_factor
 
