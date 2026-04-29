@@ -371,7 +371,20 @@ class ProposalCalculator:
     def _get_block_index_for_time(self, target_time: datetime, plan: list[dict]) -> int | None:
         """Find the block index in the plan for the given time."""
         for i, block in enumerate(plan):
-            block_time = datetime.fromisoformat(block['time'])
-            if block_time <= target_time < block_time + timedelta(minutes=15):
-                return i
+            # plan contains "hour" key like "14:15", assume today/tomorrow based on target_time
+            time_str = block.get('hour', '00:00')
+            try:
+                # The hour is just HH:MM, so we construct a full datetime for today/tomorrow
+                h, m = map(int, time_str.split(':'))
+                block_time = target_time.replace(hour=h, minute=m, second=0, microsecond=0)
+                # If block_time is far in the past, it might be for tomorrow
+                if target_time.hour < 12 and h > 18:
+                    block_time = block_time - timedelta(days=1)
+                elif target_time.hour > 12 and h < 6:
+                    block_time = block_time + timedelta(days=1)
+
+                if block_time <= target_time < block_time + timedelta(minutes=15):
+                    return i
+            except ValueError:
+                continue
         return None
