@@ -634,13 +634,13 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             if turn_on_inverter and (not inverter_is_on or self._current_inverter_state != "on"):
                 if turn_on_btn and self.hass.states.get(turn_on_btn) is not None:
                     await self.hass.services.async_call("button", "press", {"entity_id": turn_on_btn}, blocking=False)
-                    await _set_dpl_mode(0.0)
-                    self._current_inverter_state = "on"
+                await _set_dpl_mode(0.0)
+                self._current_inverter_state = "on"
             elif not turn_on_inverter and (inverter_is_on or self._current_inverter_state != "off" or is_negative_price):
                 if turn_off_btn and self.hass.states.get(turn_off_btn) is not None:
                     await self.hass.services.async_call("button", "press", {"entity_id": turn_off_btn}, blocking=False)
-                    await _set_dpl_mode(1.0)
-                    self._current_inverter_state = "off"
+                await _set_dpl_mode(1.0)
+                self._current_inverter_state = "off"
         except Exception as e:
             _LOGGER.error("Failed to press OpenDTU button: %s", e)
 
