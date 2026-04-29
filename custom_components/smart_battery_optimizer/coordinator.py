@@ -339,6 +339,14 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             implied_cloud_cover = None
 
             if not is_absorption and pred_solar_clear > 0:
+                # Fallback to physical peak if the learned clear value is too low or corrupted.
+                # This prevents "good" days from being marked cloudy just because the EMA hasn't caught up.
+                peak_w = float(self.config.get(CONF_SOLAR_PEAK_W, 0.0))
+                # Max Wh possible in 15 mins based on physical peak
+                peak_wh_15min = peak_w / 4.0
+
+                effective_clear_target = max(pred_solar_clear, peak_wh_15min * 0.7)
+
                 # Calculate differences to the three categories
                 diff_clear = abs(actual_solar_wh - pred_solar_clear)
                 diff_partly = abs(actual_solar_wh - pred_solar_partly)
@@ -347,9 +355,15 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 # Find the closest match
                 min_diff = min(diff_clear, diff_partly, diff_cloudy)
 
+                # Absolute check against physical potential to override corrupted learning
+                if actual_solar_wh >= peak_wh_15min * 0.6:
+                    implied_cloud_cover = 0.0 # Definitely clear if >60% of physical max
+                elif actual_solar_wh >= peak_wh_15min * 0.3:
+                    implied_cloud_cover = min(50.0, implied_cloud_cover) if implied_cloud_cover is not None else 50.0
+
                 # If production is significantly higher than cloudy, it's not cloudy.
                 # If production is significantly higher than expected, assume clearer skies.
-                if actual_solar_wh > pred_solar_partly and actual_solar_wh > pred_solar_clear * 0.8:
+                elif actual_solar_wh > pred_solar_partly and actual_solar_wh > effective_clear_target * 0.8:
                     implied_cloud_cover = 0.0 # Clear
                 elif actual_solar_wh < pred_solar_partly * 0.5:
                     implied_cloud_cover = 100.0 # Cloudy
