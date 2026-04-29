@@ -403,7 +403,16 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             self.predicted_remaining_solar += block["solar_wh"]
             self.predicted_remaining_consumption += block["consumption_wh"]
 
-        battery_will_overfill = self.predicted_remaining_solar > (self.predicted_remaining_consumption + available_batt_capacity_wh)
+        # Forward simulation to accurately detect if battery will hit 100% before emptying
+        battery_will_overfill = False
+        temp_batt_pct = batt_level_pct
+        for block in self.hourly_plan:
+            temp_batt_pct = block.get("battery_pct_end", temp_batt_pct)
+            if temp_batt_pct >= 99.0:
+                battery_will_overfill = True
+                break
+            if temp_batt_pct <= batt_min_pct:
+                break
 
         turn_on_inverter = True
 
@@ -829,11 +838,21 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             available_discharge = max(0.0, simulated_batt_wh - min_batt_wh)
             actual_discharge = min(pred_cons, max_discharge_wh_per_15min, available_discharge)
 
-            # Will overfill check (basic lookahead sum, capped to inverter limit)
-            rem_solar = sum(b["solar"] for b in future_blocks[i:])
-            rem_cons = sum(min(max(0.0, b["house_wh"] - b["balcony"]), max_discharge_wh_per_15min) for b in future_blocks[i:])
-            available_cap = batt_cap_wh - simulated_batt_wh
-            will_overfill = rem_solar > (rem_cons + available_cap)
+            # Will overfill check: forward simulation to detect if we hit 100% before emptying
+            will_overfill = False
+            temp_batt_wh = simulated_batt_wh
+            for fb_future in future_blocks[i:]:
+                f_solar = fb_future["solar"] * batt_eff
+                f_cons = max(0.0, fb_future["house_wh"] - fb_future["balcony"])
+                f_actual_discharge = min(f_cons, max_discharge_wh_per_15min, max(0.0, temp_batt_wh - min_batt_wh))
+                temp_batt_wh += f_solar - f_actual_discharge
+
+                if temp_batt_wh >= batt_cap_wh * 0.99:
+                    will_overfill = True
+                    break
+                if temp_batt_wh <= min_batt_wh:
+                    # Battery empties before overfilling, so no overfill risk for this energy
+                    break
 
             # New precise discharging logic mirroring the threshold calculation
             if price < 0.0:
