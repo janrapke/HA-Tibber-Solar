@@ -445,11 +445,6 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         # Force all excess consumers ON and ensure OpenDTU (inverter) remains OFF.
         is_negative_price = current_price is not None and current_price < 0.0
 
-# --- Negative Price Override ---
-        # When price is negative, we get paid to consume energy.
-        # Force all excess consumers ON and ensure OpenDTU (inverter) remains OFF.
-        is_negative_price = current_price is not None and current_price < 0.0
-
         # Helper for checking if consumers are on external inverter
         external_inverters = self.config.get(CONF_EXCESS_EXTERNAL_INVERTER, [])
         if isinstance(external_inverters, bool):
@@ -531,7 +526,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                     # Simple ON/OFF logic based on simulation. No explicit hysteresis since simulation recalculates
                     # remaining capacity which acts as a dynamic threshold.
                     # However, to prevent rapid toggling, we check current state.
-                    currently_on = any(self.hass.states.get(e) and self.hass.states.get(e).state == "on" for e in self.config.get(CONF_EARLY_EXCESS_CONSUMERS, []))
+                    currently_on = any(self.hass.states.get(e) and self.hass.states.get(e).state == "on" for e in early_entities)
 
                     if currently_on:
                         # Keep it on unless simulation says we definitely won't overfill anymore
@@ -539,6 +534,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                     else:
                         # Only turn on if simulation says we will still overfill
                         turn_on_early = will_overfill_with_early
+
+            await set_switches(early_entities, turn_on_early)
 
 
         # Update recovery mode
