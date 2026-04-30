@@ -38,6 +38,8 @@ from .const import (
     CONF_EARLY_EXCESS_MIN_BATTERY_PCT,
     CONF_EARLY_EXCESS_EXPECTED_POWER_W,
     CONF_EXCESS_EXTERNAL_INVERTER,
+    CONF_EARLY_EXCESS_MAX_BATTERY_PCT,
+    CONF_EXCESS_MIN_RUN_TIME_MINUTES,
 )
 from .learning import LearningEngine
 from .appliance_manager import SmartApplianceManager, ApplianceStateMachine, ProposalCalculator
@@ -70,6 +72,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         # Internal state
         self.is_enabled = True
         self.manual_zero_export = False
+        self._excess_devices_last_turned_on = {}
         self.tibber_prices = []
         self.last_tibber_fetch = None
 
@@ -451,15 +454,29 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         turn_on_inverter = True
 
         async def set_switches(entities: list, turn_on: bool):
+            min_run_time = int(self.config.get(CONF_EXCESS_MIN_RUN_TIME_MINUTES, 10))
+            current_time = dt_util.now()
+
             for switch_entity in entities:
                 state = self.hass.states.get(switch_entity)
                 if state is None:
                     continue
                 is_on = state and state.state == "on"
-                if turn_on and not is_on:
-                    await self.hass.services.async_call("switch", "turn_on", {"entity_id": switch_entity}, blocking=False)
-                elif not turn_on and is_on:
-                    await self.hass.services.async_call("switch", "turn_off", {"entity_id": switch_entity}, blocking=False)
+
+                if turn_on:
+                    if not is_on:
+                        await self.hass.services.async_call("switch", "turn_on", {"entity_id": switch_entity}, blocking=False)
+                        self._excess_devices_last_turned_on[switch_entity] = current_time
+                else:
+                    if is_on:
+                        last_turned_on = self._excess_devices_last_turned_on.get(switch_entity)
+                        if last_turned_on:
+                            elapsed = (current_time - last_turned_on).total_seconds() / 60.0
+                            if elapsed < min_run_time:
+                                _LOGGER.debug("Switch %s must remain on. Min run time not reached. Elapsed: %.1f, Min: %d", switch_entity, elapsed, min_run_time)
+                                continue
+                        await self.hass.services.async_call("switch", "turn_off", {"entity_id": switch_entity}, blocking=False)
+                        self._excess_devices_last_turned_on.pop(switch_entity, None)
 
         is_absorption = charge_state and charge_state.lower() in ("absorption", "float", "ausgleichsladung", "equalization")
         virtual_batt_pct = 100.0 if is_absorption else batt_level_pct
@@ -553,21 +570,11 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 elif not has_excess_power and cloud_override_off and not early_is_external:
                     turn_on_early = False
                 else:
-                    early_expected_w = float(self.config.get(CONF_EARLY_EXCESS_EXPECTED_POWER_W, 400.0))
-                    # Will battery overfill even if this device is ON?
-                    will_overfill_with_early = self._simulate_early_excess_overfill(now, hourly_forecasts, virtual_batt_pct, batt_cap_wh, early_expected_w)
+                    # Will battery overfill if this device is OFF?
+                    will_overfill_without_early = self._simulate_early_excess_overfill(now, hourly_forecasts, virtual_batt_pct, batt_cap_wh)
 
-                    # Simple ON/OFF logic based on simulation. No explicit hysteresis since simulation recalculates
-                    # remaining capacity which acts as a dynamic threshold.
-                    # However, to prevent rapid toggling, we check current state.
-                    currently_on = any(self.hass.states.get(e) and self.hass.states.get(e).state == "on" for e in early_entities)
-
-                    if currently_on:
-                        # Keep it on unless simulation says we definitely won't overfill anymore
-                        turn_on_early = will_overfill_with_early
-                    else:
-                        # Only turn on if simulation says we will still overfill
-                        turn_on_early = will_overfill_with_early
+                    # Simple ON/OFF logic based on simulation. Minimum run time prevents rapid toggling.
+                    turn_on_early = will_overfill_without_early
 
             await set_switches(early_entities, turn_on_early)
 
@@ -697,49 +704,32 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             "current_consumption": tibber_cons,
         }
 
-    def _simulate_early_excess_overfill(self, now, hourly_forecasts: list[dict], current_batt_pct: float, batt_cap_wh: float, early_expected_w: float) -> bool:
-        """Simulates if the battery will reach 100% using pessimistic data, even if the early excess device runs."""
+    def _simulate_early_excess_overfill(self, now, hourly_forecasts: list[dict], current_batt_pct: float, batt_cap_wh: float) -> bool:
+        """Simulates if the battery will reach the configured limit using pessimistic data, assuming the early excess device is OFF."""
         future_blocks = self._build_future_blocks_pessimistic(now, hourly_forecasts)
 
         simulated_batt_wh = batt_cap_wh * (current_batt_pct / 100.0)
         batt_eff = float(self.config.get(CONF_BATTERY_EFFICIENCY_PCT, 90)) / 100.0
 
-        early_expected_wh_per_15min = early_expected_w / 4.0
         max_inverter_power_w = float(self.config.get(CONF_MAX_INVERTER_POWER_W, 800))
         max_discharge_wh_per_15min = max_inverter_power_w / 4.0
 
-        external_inverters = self.config.get(CONF_EXCESS_EXTERNAL_INVERTER, [])
-        if isinstance(external_inverters, bool):
-            external_inverters = []
-        early_entities = self.config.get(CONF_EARLY_EXCESS_CONSUMERS, [])
-        early_is_external = any(e in external_inverters for e in early_entities)
+        max_batt_pct = float(self.config.get(CONF_EARLY_EXCESS_MAX_BATTERY_PCT, 99.0))
+        max_batt_wh = batt_cap_wh * (max_batt_pct / 100.0)
 
         for fb in future_blocks:
             pred_solar = fb["solar"] * batt_eff
 
             # Real dynamic consumption
-            base_cons = max(0.0, fb["house_wh"] - fb["balcony"])
+            pred_cons = max(0.0, fb["house_wh"] - fb["balcony"])
 
-            if early_is_external:
-                # If external, early cons is drawn directly from battery, independent of DTU
-                pred_cons = base_cons
-                if pred_solar > pred_cons:
-                    simulated_batt_wh += (pred_solar - pred_cons)
-                else:
-                    actual_discharge = min(pred_cons - pred_solar, max_discharge_wh_per_15min)
-                    simulated_batt_wh -= actual_discharge
-
-                # Early consumer unconditionally drains from battery
-                simulated_batt_wh -= early_expected_wh_per_15min
+            if pred_solar > pred_cons:
+                simulated_batt_wh += (pred_solar - pred_cons)
             else:
-                pred_cons = base_cons + early_expected_wh_per_15min
-                if pred_solar > pred_cons:
-                    simulated_batt_wh += (pred_solar - pred_cons)
-                else:
-                    actual_discharge = min(pred_cons - pred_solar, max_discharge_wh_per_15min)
-                    simulated_batt_wh -= actual_discharge
+                actual_discharge = min(pred_cons - pred_solar, max_discharge_wh_per_15min)
+                simulated_batt_wh -= actual_discharge
 
-            if simulated_batt_wh >= batt_cap_wh:
+            if simulated_batt_wh >= max_batt_wh:
                 return True
 
         return False
