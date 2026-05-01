@@ -183,7 +183,7 @@ class LearningModeSwitch(CoordinatorEntity, SwitchEntity):
             "manufacturer": "Custom",
         }
         self._attr_unique_id = f"{entry_id}_learning_mode"
-        self._attr_name = "Lernphase (7 Tage)"
+        self._attr_name = "Lernmodus (Dauerhaft)"
 
     @property
     def is_on(self):
