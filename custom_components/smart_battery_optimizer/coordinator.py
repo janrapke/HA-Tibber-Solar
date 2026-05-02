@@ -106,24 +106,28 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
     @property
     def is_learning_mode_active(self) -> bool:
-        """Check if learning mode is active (within 7 days of start)."""
-        end_time_str = self.learning_engine.data.get("learning_mode_end_time")
-        if not end_time_str:
-            return False
-        try:
-            end_time = datetime.fromisoformat(end_time_str)
-            return datetime.now() < end_time
-        except ValueError:
-            return False
+        """Check if learning mode is active."""
+        return self.learning_engine.data.get("learning_mode_active", False)
+
+    @property
+    def learning_rate_factor(self) -> float:
+        """Get the custom learning rate factor."""
+        return self.learning_engine.data.get("learning_rate_factor", 0.7)
+
+    @learning_rate_factor.setter
+    def learning_rate_factor(self, value: float):
+        """Set the custom learning rate factor."""
+        self.learning_engine.set_learning_rate(value)
+        self.hass.async_create_task(self.learning_engine.async_save())
 
     async def async_start_learning_mode(self):
-        """Start the fast learning mode."""
-        self.learning_engine.reset_learning_counters()
+        """Start the learning mode manually."""
+        self.learning_engine.set_learning_mode(True)
         await self.learning_engine.async_save()
 
     async def async_stop_learning_mode(self):
-        """Stop the fast learning mode manually."""
-        self.learning_engine.data["learning_mode_end_time"] = datetime.now().isoformat()
+        """Stop the learning mode manually."""
+        self.learning_engine.set_learning_mode(False)
         await self.learning_engine.async_save()
 
     async def _async_setup(self):
@@ -894,10 +898,12 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 simulated_batt_wh += pred_solar
             elif simulated_batt_wh >= (batt_cap_wh * 0.99):
                 action = "Batterie 100% voll (DTU An)"
-                simulated_batt_wh += pred_solar - actual_discharge
+                # To prevent forecasting drops, we calculate as if solar goes into battery, then cap it
+                simulated_batt_wh += pred_solar
             elif will_overfill:
                 action = "Überschussvermeidung (DTU An)"
-                simulated_batt_wh += pred_solar - actual_discharge
+                # To prevent forecasting drops, we calculate as if solar goes into battery, then cap it
+                simulated_batt_wh += pred_solar
             elif price <= price_threshold:
                 action = f"Netzbezug (Akku sparen für >{round(price_threshold,3)}€)"
                 simulated_batt_wh += pred_solar

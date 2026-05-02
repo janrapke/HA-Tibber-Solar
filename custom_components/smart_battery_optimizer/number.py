@@ -26,6 +26,7 @@ async def async_setup_entry(
         SecondaryExcessOnThreshold(coordinator, entry.entry_id),
         SecondaryExcessOffThreshold(coordinator, entry.entry_id),
         ExcessCloudToleranceNumber(coordinator, entry.entry_id),
+        LearningRateNumber(coordinator, entry.entry_id),
     ])
 
 
@@ -237,4 +238,35 @@ class ExcessCloudToleranceNumber(CoordinatorEntity, NumberEntity):
     async def async_set_native_value(self, value: float) -> None:
         self._attr_native_value = value
         self.coordinator.excess_cloud_tolerance_mins = value
+        self.async_write_ha_state()
+
+class LearningRateNumber(CoordinatorEntity, NumberEntity):
+    """Number entity to set the custom learning rate factor."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:speedometer"
+    _attr_mode = NumberMode.SLIDER
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
+        self._attr_unique_id = f"{entry_id}_learning_rate_factor"
+        self._attr_name = "Lernrate (Faktor)"
+
+        self._attr_native_min_value = 0.1
+        self._attr_native_max_value = 0.99
+        self._attr_native_step = 0.01
+
+    @property
+    def native_value(self) -> float:
+        """Return the current learning rate factor."""
+        return self.coordinator.learning_rate_factor
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Update the learning rate factor."""
+        self.coordinator.learning_rate_factor = value
         self.async_write_ha_state()

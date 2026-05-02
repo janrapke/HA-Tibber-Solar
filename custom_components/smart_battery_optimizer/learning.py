@@ -31,13 +31,14 @@ class LearningEngine:
                 "solar": {},
                 "balcony": {}
             },
-            "learning_mode_end_time": None
+            "learning_mode_active": False, "learning_rate_factor": 0.7
         }
 
         self._current_quarter_consumption_acc = 0.0
         self._current_quarter_consumption_count = 0
         self._current_quarter_solar_acc = 0.0
         self._current_quarter_solar_count = 0
+        self._current_quarter_solar_throttled = False
         self._current_quarter_balcony_acc = 0.0
         self._current_quarter_balcony_count = 0
         self._last_quarter_processed = -1
@@ -103,8 +104,10 @@ class LearningEngine:
                                 else:
                                     self.data["counters"][category][q] = val
 
-            if "learning_mode_end_time" in stored_data:
-                self.data["learning_mode_end_time"] = stored_data["learning_mode_end_time"]
+            if "learning_mode_active" in stored_data:
+                self.data["learning_mode_active"] = stored_data["learning_mode_active"]
+            if "learning_rate_factor" in stored_data:
+                self.data["learning_rate_factor"] = stored_data["learning_rate_factor"]
 
             _LOGGER.debug("Loaded learning data: %s", self.data)
         else:
@@ -158,23 +161,21 @@ class LearningEngine:
                 "solar": {str(q): {"clear": 0, "partly": 0, "cloudy": 0} for q in range(96)},
                 "balcony": {str(q): {"clear": 0, "partly": 0, "cloudy": 0} for q in range(96)}
             },
-            "learning_mode_end_time": None
+            "learning_mode_active": False, "learning_rate_factor": 0.7
         }
         self._initialize_priors()
         await self.async_save()
         _LOGGER.info("Learning data has been hard-reset to priors.")
 
     def reset_learning_counters(self):
-        """Reset all learning counters to 0 and set learning mode end time to 7 days from now."""
-        for q in range(96):
-            q_str = str(q)
-            self.data["counters"]["consumption"][q_str] = 0
-            for cond in ["clear", "partly", "cloudy"]:
-                self.data["counters"]["solar"][q_str][cond] = 0
-                self.data["counters"]["balcony"][q_str][cond] = 0
+        pass
 
-        self.data["learning_mode_end_time"] = (datetime.now() + timedelta(days=7)).isoformat()
-        _LOGGER.info("Learning mode reset. Counters set to 0. Mode active until %s", self.data["learning_mode_end_time"])
+    def set_learning_mode(self, active: bool):
+        self.data["learning_mode_active"] = active
+        _LOGGER.info("Learning mode set to %s", active)
+
+    def set_learning_rate(self, rate: float):
+        self.data["learning_rate_factor"] = rate
 
     async def async_save(self):
         """Save historical data to storage."""
@@ -205,6 +206,7 @@ class LearningEngine:
         # Do not record solar if the battery is in a state that throttles solar production
         if charge_state and charge_state.lower() in ("absorption", "float", "ausgleichsladung", "equalization"):
             _LOGGER.debug("Skipping solar learning because charge controller is in state: %s", charge_state)
+            self._current_quarter_solar_throttled = True
             return
 
         self._current_quarter_solar_acc += power_w
@@ -219,7 +221,9 @@ class LearningEngine:
         self._current_quarter_balcony_count += 1
 
     def _calculate_alpha(self, counter: int) -> float:
-        """Calculate dynamic alpha based on counter (0=0.7, 1=0.6... 6+=0.1)."""
+        """Calculate dynamic alpha based on counter or fixed if learning mode active."""
+        if self.data.get("learning_mode_active"):
+            return float(self.data.get("learning_rate_factor", 0.7))
         if counter >= 6:
             return 0.1
         return max(0.7 - (0.1 * counter), 0.1)
@@ -258,7 +262,7 @@ class LearningEngine:
             self._current_quarter_consumption_count = 0
 
         # Finalize solar
-        if self._current_quarter_solar_count > 0:
+        if self._current_quarter_solar_count > 0 and not self._current_quarter_solar_throttled:
             condition = self._get_cloud_category(cloud_cover)
             counter = self.data["counters"]["solar"][q_str][condition]
             alpha = self._calculate_alpha(counter)
@@ -272,8 +276,9 @@ class LearningEngine:
             if counter < 6:
                 self.data["counters"]["solar"][q_str][condition] = counter + 1
 
-            self._current_quarter_solar_acc = 0.0
-            self._current_quarter_solar_count = 0
+        self._current_quarter_solar_acc = 0.0
+        self._current_quarter_solar_count = 0
+        self._current_quarter_solar_throttled = False
 
         # Finalize balcony
         if self._current_quarter_balcony_count > 0:
