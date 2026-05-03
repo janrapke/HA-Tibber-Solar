@@ -77,6 +77,14 @@ class SmartApplianceManager:
         return None
 
 
+
+    def delete_program(self, sensor_id: str, program_id: str) -> bool:
+        if sensor_id in self.programs:
+            initial_len = len(self.programs[sensor_id])
+            self.programs[sensor_id] = [p for p in self.programs[sensor_id] if p.id != program_id]
+            return len(self.programs[sensor_id]) < initial_len
+        return False
+
 import uuid
 from enum import Enum
 
@@ -257,6 +265,13 @@ class ApplianceStateMachine:
         self.state = ApplianceState.WAITING_FOR_START
         _LOGGER.info(f"Scheduled {self.sensor_id} prog {program_id} for {start_time}")
 
+
+    def cancel_planned_run(self):
+        if self.state == ApplianceState.WAITING_FOR_START:
+            self.planned_run = None
+            self.state = ApplianceState.IDLE
+            _LOGGER.info(f"Cancelled planned run for {self.sensor_id}")
+
 @dataclass
 class Proposal:
     start_time: datetime
@@ -272,7 +287,8 @@ class ProposalCalculator:
         if not program.power_profile:
             return []
 
-        now = datetime.now()
+        import homeassistant.util.dt as dt_util
+        now = dt_util.now().replace(tzinfo=None)
         # Round up to the next minute
         start_search = now.replace(second=0, microsecond=0) + timedelta(minutes=1)
         end_search = start_search + timedelta(hours=horizon_hours)
@@ -294,17 +310,11 @@ class ProposalCalculator:
         if not proposals:
             return []
 
-        # Sort by lowest cost
+        # Sort strictly by lowest cost. The best price will always be first.
         proposals.sort(key=lambda p: p.cost_estimate)
 
-        # Group 1: Best within the next 3 hours
-        three_hours_from_now = now + timedelta(hours=3)
-        short_term = [p for p in proposals if p.start_time <= three_hours_from_now]
-        best_short = short_term[0] if short_term else proposals[0]
-
-        # Group 2: The next 3 best overall (distinct by at least 1 hour to provide varied options)
-        final_proposals = [best_short]
-        for p in proposals:
+        final_proposals = [proposals[0]]
+        for p in proposals[1:]:
             if len(final_proposals) >= 4:
                 break
             # Ensure it's not too close to already selected proposals
