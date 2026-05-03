@@ -38,6 +38,7 @@ from .const import (
     CONF_EARLY_EXCESS_EXPECTED_POWER_W,
     CONF_EARLY_EXCESS_MIN_BATTERY_PCT,
     CONF_EARLY_EXCESS_MAX_BATTERY_PCT,
+    CONF_BATTERY_MAX_LIMIT_PCT,
     CONF_EXCESS_MIN_RUN_TIME_MINUTES,
     CONF_EXCESS_EXTERNAL_INVERTER,
     CONF_SMART_DEVICES,
@@ -96,6 +97,7 @@ def get_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             ),
             vol.Required(CONF_BATTERY_CAPACITY_WH, default=defaults.get(CONF_BATTERY_CAPACITY_WH, 5000)): int,
             vol.Required(CONF_BATTERY_MIN_LIMIT_PCT, default=defaults.get(CONF_BATTERY_MIN_LIMIT_PCT, 10)): vol.All(int, vol.Range(min=0, max=100)),
+            vol.Required(CONF_BATTERY_MAX_LIMIT_PCT, default=defaults.get(CONF_BATTERY_MAX_LIMIT_PCT, defaults.get(CONF_EARLY_EXCESS_MAX_BATTERY_PCT, 99))): vol.All(int, vol.Range(min=0, max=100)),
             vol.Required(CONF_BATTERY_EFFICIENCY_PCT, default=defaults.get(CONF_BATTERY_EFFICIENCY_PCT, 90)): vol.All(int, vol.Range(min=1, max=100)),
             vol.Required(CONF_BASE_LOAD_W, default=defaults.get(CONF_BASE_LOAD_W, 250)): int,
             vol.Required(CONF_SOLAR_PEAK_W, default=defaults.get(CONF_SOLAR_PEAK_W, 6000)): int,
@@ -115,7 +117,6 @@ def get_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             ),
             vol.Required(CONF_EARLY_EXCESS_EXPECTED_POWER_W, default=defaults.get(CONF_EARLY_EXCESS_EXPECTED_POWER_W, 400)): int,
             vol.Required(CONF_EARLY_EXCESS_MIN_BATTERY_PCT, default=defaults.get(CONF_EARLY_EXCESS_MIN_BATTERY_PCT, 30)): vol.All(int, vol.Range(min=0, max=100)),
-            vol.Required(CONF_EARLY_EXCESS_MAX_BATTERY_PCT, default=defaults.get(CONF_EARLY_EXCESS_MAX_BATTERY_PCT, 99)): vol.All(int, vol.Range(min=0, max=100)),
             vol.Required(CONF_EXCESS_MIN_RUN_TIME_MINUTES, default=defaults.get(CONF_EXCESS_MIN_RUN_TIME_MINUTES, 10)): vol.All(int, vol.Range(min=0, max=120)),
             vol.Optional(CONF_EXCESS_EXTERNAL_INVERTER, default=ext_inv_default): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="switch", multiple=True)

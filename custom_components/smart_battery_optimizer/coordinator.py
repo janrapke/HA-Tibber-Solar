@@ -39,6 +39,7 @@ from .const import (
     CONF_EARLY_EXCESS_EXPECTED_POWER_W,
     CONF_EXCESS_EXTERNAL_INVERTER,
     CONF_EARLY_EXCESS_MAX_BATTERY_PCT,
+    CONF_BATTERY_MAX_LIMIT_PCT,
     CONF_EXCESS_MIN_RUN_TIME_MINUTES,
 )
 from .learning import LearningEngine
@@ -435,6 +436,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         batt_level_pct = self._get_float_state(self.config[CONF_BATTERY_LEVEL_SENSOR])
         batt_cap_wh = self.config.get(CONF_BATTERY_CAPACITY_WH, 5000)
         batt_min_pct = self.config.get(CONF_BATTERY_MIN_LIMIT_PCT, 10)
+        max_batt_pct = float(self.config.get(CONF_BATTERY_MAX_LIMIT_PCT, self.config.get(CONF_EARLY_EXCESS_MAX_BATTERY_PCT, 100.0)))
 
         price_threshold = self._simulate_optimal_threshold(now, hourly_forecasts, batt_level_pct, batt_cap_wh, batt_min_pct)
         self._build_forecast_plan(now, hourly_forecasts, batt_level_pct, batt_cap_wh, price_threshold)
@@ -446,12 +448,12 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             self.predicted_remaining_solar += block["solar_wh"]
             self.predicted_remaining_consumption += block["consumption_wh"]
 
-        # Forward simulation to accurately detect if battery will hit 100% before emptying
+        # Forward simulation to accurately detect if battery will hit max limit before emptying
         battery_will_overfill = False
         temp_batt_pct = batt_level_pct
         for block in self.hourly_plan:
             temp_batt_pct = block.get("battery_pct_end", temp_batt_pct)
-            if temp_batt_pct >= 99.0:
+            if temp_batt_pct >= max_batt_pct:
                 battery_will_overfill = True
                 break
             if temp_batt_pct <= batt_min_pct:
@@ -720,7 +722,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         max_inverter_power_w = float(self.config.get(CONF_MAX_INVERTER_POWER_W, 800))
         max_discharge_wh_per_15min = max_inverter_power_w / 4.0
 
-        max_batt_pct = float(self.config.get(CONF_EARLY_EXCESS_MAX_BATTERY_PCT, 99.0))
+        max_batt_pct = float(self.config.get(CONF_BATTERY_MAX_LIMIT_PCT, self.config.get(CONF_EARLY_EXCESS_MAX_BATTERY_PCT, 100.0)))
         max_batt_wh = batt_cap_wh * (max_batt_pct / 100.0)
 
         for fb in future_blocks:
@@ -762,6 +764,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         best_threshold = -0.5
         min_total_cost = float('inf')
 
+        max_batt_pct = float(self.config.get(CONF_BATTERY_MAX_LIMIT_PCT, self.config.get(CONF_EARLY_EXCESS_MAX_BATTERY_PCT, 100.0)))
+
         for candidate_threshold in unique_prices:
             simulated_batt_wh = batt_cap_wh * (current_batt_pct / 100.0)
             min_batt_wh = batt_cap_wh * (batt_min_pct / 100.0)
@@ -778,9 +782,10 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
                 grid_import_wh = pred_cons
 
-                # If battery has enough energy and price is > candidate threshold, we discharge.
+                # If battery has enough energy and price is >= candidate threshold, we discharge.
+                # This ensures we strictly prioritize the most expensive blocks top-down.
                 # Do NOT discharge if price is negative.
-                if price > candidate_threshold and simulated_batt_wh > min_batt_wh and price >= 0.0:
+                if price >= candidate_threshold and simulated_batt_wh > min_batt_wh and price >= 0.0:
                     available_discharge = simulated_batt_wh - min_batt_wh
                     actual_discharge = min(pred_cons, max_discharge_wh_per_15min, available_discharge)
                     simulated_batt_wh -= actual_discharge
@@ -789,11 +794,11 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 # Add to total cost (Wh -> kWh * price per kWh)
                 total_cost += (grid_import_wh / 1000.0) * price
 
-                # Strictly penalize 100% full battery to prevent wasting solar energy
-                if simulated_batt_wh >= (batt_cap_wh * 0.99):
+                # Strictly penalize hitting max battery limit to prevent wasting solar energy
+                if simulated_batt_wh >= (batt_cap_wh * (max_batt_pct / 100.0)):
                     # Heavy penalty for every time block we are full, proportional to wasted potential
                     overfill_penalty += 1000.0
-                    simulated_batt_wh = batt_cap_wh
+                    simulated_batt_wh = batt_cap_wh * (max_batt_pct / 100.0)
 
             total_cost += overfill_penalty
 
@@ -806,7 +811,9 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 residual_value = ((simulated_batt_wh - min_batt_wh) / 1000.0) * safe_residual_price
                 total_cost -= residual_value
 
-            if total_cost < min_total_cost:
+            # Using <= ensures that if two thresholds yield the exact same cost, we prefer the higher threshold
+            # to be more conservative about discharging.
+            if total_cost <= min_total_cost:
                 min_total_cost = total_cost
                 best_threshold = candidate_threshold
 
@@ -865,6 +872,9 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         min_batt_pct = self.config.get(CONF_BATTERY_MIN_LIMIT_PCT, 10)
         min_batt_wh = batt_cap_wh * (min_batt_pct / 100.0)
 
+        max_batt_pct = float(self.config.get(CONF_BATTERY_MAX_LIMIT_PCT, self.config.get(CONF_EARLY_EXCESS_MAX_BATTERY_PCT, 100.0)))
+        max_batt_wh = batt_cap_wh * (max_batt_pct / 100.0)
+
         for i, fb in enumerate(future_blocks):
             pred_solar = fb["solar"] * batt_eff
             pred_balcony = fb["balcony"]
@@ -887,7 +897,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 f_actual_discharge = min(f_cons, max_discharge_wh_per_15min, max(0.0, temp_batt_wh - min_batt_wh))
                 temp_batt_wh += f_solar - f_actual_discharge
 
-                if temp_batt_wh >= batt_cap_wh * 0.99:
+                if temp_batt_wh >= max_batt_wh:
                     will_overfill = True
                     break
                 if temp_batt_wh <= min_batt_wh:
@@ -898,16 +908,17 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             if price < 0.0:
                 action = f"Negativer Preis ({round(price,3)}€): DTU aus"
                 simulated_batt_wh += pred_solar
-            elif simulated_batt_wh >= (batt_cap_wh * 0.99):
-                action = "Batterie 100% voll (DTU An)"
+            elif simulated_batt_wh >= max_batt_wh:
+                action = f"Batterie {int(max_batt_pct)}% voll (DTU An)"
                 # To prevent forecasting drops, we calculate as if solar goes into battery, then cap it
                 simulated_batt_wh += pred_solar
             elif will_overfill:
+                # If we know the battery will hit the max limit today, never save battery via grid import
+                # Instead, act as Nulleinspeisung (DTU An) to make room for the solar.
                 action = "Überschussvermeidung (DTU An)"
-                # To prevent forecasting drops, we calculate as if solar goes into battery, then cap it
-                simulated_batt_wh += pred_solar
-            elif price <= price_threshold:
-                action = f"Netzbezug (Akku sparen für >{round(price_threshold,3)}€)"
+                simulated_batt_wh += pred_solar - actual_discharge
+            elif price < price_threshold:
+                action = f"Netzbezug (Akku sparen für >={round(price_threshold,3)}€)"
                 simulated_batt_wh += pred_solar
             elif simulated_batt_wh <= min_batt_wh:
                 action = "Batterie am Minimum (DTU Aus)"
