@@ -154,7 +154,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 # Instantiate UI Entities
                 from .appliance_entities import (
                     ApplianceRecordButton, ApplianceProgramSelect, ApplianceProposalSelect,
-                    ApplianceConfirmButton, ApplianceRenameText, ApplianceStatusSensor
+                    ApplianceConfirmButton, ApplianceDeleteButton, ApplianceRenameText, ApplianceStatusSensor, ApplianceTimerSensor
                 )
 
                 prog_sel = ApplianceProgramSelect(self, self.config_entry.entry_id, dev)
@@ -163,10 +163,12 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 self.appliance_entities['select'].extend([prog_sel, prop_sel])
                 self.appliance_entities['button'].extend([
                     ApplianceRecordButton(self, self.config_entry.entry_id, dev),
+                    ApplianceDeleteButton(self, self.config_entry.entry_id, dev, prog_sel),
                     ApplianceConfirmButton(self, self.config_entry.entry_id, dev, prog_sel, prop_sel)
                 ])
                 self.appliance_entities['text'].append(ApplianceRenameText(self, self.config_entry.entry_id, dev, prog_sel))
                 self.appliance_entities['sensor'].append(ApplianceStatusSensor(self, self.config_entry.entry_id, dev))
+                self.appliance_entities['sensor'].append(ApplianceTimerSensor(self, self.config_entry.entry_id, dev))
 
         await self._fetch_tibber_prices()
 

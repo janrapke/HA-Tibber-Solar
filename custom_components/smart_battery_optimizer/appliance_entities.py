@@ -150,6 +150,45 @@ class ApplianceProposalSelect(SmartApplianceBase, SelectEntity):
             return None
 
 
+
+class ApplianceDeleteButton(SmartApplianceBase, ButtonEntity):
+    """Button to delete the currently selected program."""
+    def __init__(self, coordinator, entry_id, sensor_id, prog_select: ApplianceProgramSelect):
+        super().__init__(coordinator, entry_id, sensor_id)
+        self._attr_unique_id = f"{entry_id}_{sensor_id}_delete_btn"
+        self._attr_name = "Programm löschen"
+        self._attr_icon = "mdi:delete"
+        self.prog_select = prog_select
+
+    async def async_press(self) -> None:
+        if not self.sm: return
+
+        prog_name = self.prog_select.current_option
+        if not prog_name: return
+
+        progs = self.sm.manager.get_programs(self.sensor_id)
+        prog = next((p for p in progs if p.name == prog_name), None)
+
+        if prog:
+            # Delete it
+            self.sm.manager.delete_program(self.sensor_id, prog.id)
+            await self.sm.manager.async_save()
+
+            # If this is the active planned program, cancel it
+            if self.sm.planned_run and self.sm.planned_run.program_id == prog.id:
+                self.sm.cancel_planned_run()
+
+            # Reset select option
+            self.prog_select._current_option = None
+
+            # Force proposals to update
+            for entity in self.coordinator.appliance_entities.get('select', []):
+                if isinstance(entity, ApplianceProposalSelect) and entity.sensor_id == self.sensor_id:
+                    entity.force_recalculate()
+
+            await self.coordinator.async_request_refresh()
+
+
 class ApplianceConfirmButton(SmartApplianceBase, ButtonEntity):
     """Confirm the selected proposal and schedule it."""
     def __init__(self, coordinator, entry_id, sensor_id, prog_select: ApplianceProgramSelect, proposal_select: ApplianceProposalSelect):
@@ -203,6 +242,33 @@ class ApplianceRenameText(SmartApplianceBase, TextEntity):
             await self.coordinator.async_request_refresh()
 
 
+
+class ApplianceTimerSensor(SmartApplianceBase, SensorEntity):
+    """Shows the countdown to the planned start time."""
+    def __init__(self, coordinator, entry_id, sensor_id):
+        super().__init__(coordinator, entry_id, sensor_id)
+        self._attr_unique_id = f"{entry_id}_{sensor_id}_timer"
+        self._attr_name = "Timer"
+        self._attr_icon = "mdi:timer-sand"
+
+    @property
+    def native_value(self) -> str:
+        if not self.sm or not self.sm.planned_run:
+            return "Nicht geplant"
+
+        import homeassistant.util.dt as dt_util
+        now = dt_util.now().replace(tzinfo=None)
+        start = self.sm.planned_run.scheduled_start
+
+        if start > now:
+            td = start - now
+            hours, remainder = divmod(int(td.total_seconds()), 3600)
+            minutes, _ = divmod(remainder, 60)
+            return f"{hours}h {minutes}m"
+        else:
+            return "0h 0m"
+
+
 class ApplianceStatusSensor(SmartApplianceBase, SensorEntity):
     """Shows the current status/countdown of the appliance."""
     def __init__(self, coordinator, entry_id, sensor_id):
@@ -223,7 +289,8 @@ class ApplianceStatusSensor(SmartApplianceBase, SensorEntity):
         }
 
         if self.sm.state.value == "waiting_for_start" and self.sm.planned_run:
-            now = datetime.now()
+            import homeassistant.util.dt as dt_util
+            now = dt_util.now().replace(tzinfo=None)
             start = self.sm.planned_run.scheduled_start
             if start > now:
                 td = start - now
