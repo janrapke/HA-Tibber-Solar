@@ -447,9 +447,10 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         # Forward simulation to accurately detect if battery will hit 100% before emptying
         battery_will_overfill = False
         temp_batt_pct = batt_level_pct
+        target_max_pct = float(self.config.get(CONF_EARLY_EXCESS_MAX_BATTERY_PCT, 99.0))
         for block in self.hourly_plan:
             temp_batt_pct = block.get("battery_pct_end", temp_batt_pct)
-            if temp_batt_pct >= 99.0:
+            if temp_batt_pct >= target_max_pct:
                 battery_will_overfill = True
                 break
             if temp_batt_pct <= batt_min_pct:
@@ -605,7 +606,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             self.current_operating_mode = "Batterie wird voll/Absorption: Überschussvermeidung aktiv"
             turn_on_inverter = True
 
-        elif virtual_batt_pct >= 99.0:
+        elif virtual_batt_pct >= float(self.config.get(CONF_EARLY_EXCESS_MAX_BATTERY_PCT, 99.0)):
             self.current_operating_mode = "Batterie 100% voll: DTU an (Nulleinspeisung aktiv)"
             turn_on_inverter = True
 
@@ -879,13 +880,15 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             # Will overfill check: forward simulation to detect if we hit 100% before emptying
             will_overfill = False
             temp_batt_wh = simulated_batt_wh
+            target_max_pct = float(self.config.get(CONF_EARLY_EXCESS_MAX_BATTERY_PCT, 99.0))
+            target_max_wh = batt_cap_wh * (target_max_pct / 100.0)
             for fb_future in future_blocks[i:]:
                 f_solar = fb_future["solar"] * batt_eff
                 f_cons = max(0.0, fb_future["house_wh"] - fb_future["balcony"])
                 f_actual_discharge = min(f_cons, max_discharge_wh_per_15min, max(0.0, temp_batt_wh - min_batt_wh))
                 temp_batt_wh += f_solar - f_actual_discharge
 
-                if temp_batt_wh >= batt_cap_wh * 0.99:
+                if temp_batt_wh >= target_max_wh:
                     will_overfill = True
                     break
                 if temp_batt_wh <= min_batt_wh:
@@ -896,14 +899,12 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             if price < 0.0:
                 action = f"Negativer Preis ({round(price,3)}€): DTU aus"
                 simulated_batt_wh += pred_solar
-            elif simulated_batt_wh >= (batt_cap_wh * 0.99):
+            elif simulated_batt_wh >= target_max_wh:
                 action = "Batterie 100% voll (DTU An)"
-                # To prevent forecasting drops, we calculate as if solar goes into battery, then cap it
-                simulated_batt_wh += pred_solar
+                simulated_batt_wh += pred_solar - actual_discharge
             elif will_overfill:
                 action = "Überschussvermeidung (DTU An)"
-                # To prevent forecasting drops, we calculate as if solar goes into battery, then cap it
-                simulated_batt_wh += pred_solar
+                simulated_batt_wh += pred_solar - actual_discharge
             elif price <= price_threshold:
                 action = f"Netzbezug (Akku sparen für >{round(price_threshold,3)}€)"
                 simulated_batt_wh += pred_solar

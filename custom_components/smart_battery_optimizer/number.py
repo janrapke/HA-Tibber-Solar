@@ -6,7 +6,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import DOMAIN, CONF_EXCESS_MIN_RUN_TIME_MINUTES, CONF_EARLY_EXCESS_MAX_BATTERY_PCT
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -27,6 +27,8 @@ async def async_setup_entry(
         SecondaryExcessOffThreshold(coordinator, entry.entry_id),
         ExcessCloudToleranceNumber(coordinator, entry.entry_id),
         LearningRateNumber(coordinator, entry.entry_id),
+        MinimumRunTimeMinutesNumber(coordinator, entry.entry_id),
+        TargetMaxBatteryPctNumber(coordinator, entry.entry_id),
     ])
 
 
@@ -270,3 +272,78 @@ class LearningRateNumber(CoordinatorEntity, NumberEntity):
         """Update the learning rate factor."""
         self.coordinator.learning_rate_factor = value
         self.async_write_ha_state()
+
+class MinimumRunTimeMinutesNumber(CoordinatorEntity, NumberEntity):
+    """Number entity to set the minimum run time for excess consumers."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:timer-outline"
+    _attr_mode = NumberMode.SLIDER
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
+        self._attr_unique_id = f"{entry_id}_min_run_time_minutes"
+        self._attr_name = "Mindestlaufzeit Geräte (Minuten)"
+
+        self._attr_native_min_value = 1
+        self._attr_native_max_value = 30
+        self._attr_native_step = 1
+
+    @property
+    def native_value(self) -> float:
+        """Return the current minimum run time."""
+        return float(self.coordinator.config.get(CONF_EXCESS_MIN_RUN_TIME_MINUTES, 10))
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Update the minimum run time."""
+        new_config = dict(self.coordinator.config)
+        new_config[CONF_EXCESS_MIN_RUN_TIME_MINUTES] = int(value)
+        self.coordinator.hass.config_entries.async_update_entry(
+            self.coordinator.config_entry, data=new_config
+        )
+        self.coordinator.config = new_config
+        self.async_write_ha_state()
+        await self.coordinator.async_request_refresh()
+
+
+class TargetMaxBatteryPctNumber(CoordinatorEntity, NumberEntity):
+    """Number entity to set the target maximum battery percentage (e.g., 99%)."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:battery-arrow-up"
+    _attr_mode = NumberMode.SLIDER
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
+        self._attr_unique_id = f"{entry_id}_target_max_battery_pct"
+        self._attr_name = "Ziel Maximale Batteriekapazität (%)"
+
+        self._attr_native_min_value = 90
+        self._attr_native_max_value = 100
+        self._attr_native_step = 1
+
+    @property
+    def native_value(self) -> float:
+        """Return the current target max battery percentage."""
+        return float(self.coordinator.config.get(CONF_EARLY_EXCESS_MAX_BATTERY_PCT, 99.0))
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Update the target max battery percentage."""
+        new_config = dict(self.coordinator.config)
+        new_config[CONF_EARLY_EXCESS_MAX_BATTERY_PCT] = float(value)
+        self.coordinator.hass.config_entries.async_update_entry(
+            self.coordinator.config_entry, data=new_config
+        )
+        self.coordinator.config = new_config
+        self.async_write_ha_state()
+        await self.coordinator.async_request_refresh()
