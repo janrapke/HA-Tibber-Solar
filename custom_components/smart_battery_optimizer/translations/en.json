@@ -19,12 +19,12 @@
           "weather_entity": "Weather Entity (for cloud cover)",
           "battery_capacity_wh": "Battery Capacity (Wh)",
           "battery_min_limit_pct": "Minimum Battery Limit (%)",
+          "battery_max_limit_pct": "Battery Max Limit (%)",
           "excluded_power_sensors": "Excluded Power Sensors (e.g., EV Charger)",
           "prioritized_excess_consumers": "Prioritized Consumers (Switches for excess power)",
           "early_excess_consumers": "Early Excess Consumers (Switches)",
           "early_excess_expected_power_w": "Early Excess Expected Power (W)",
           "early_excess_min_battery_pct": "Early Excess Min Battery (%)",
-          "early_excess_max_battery_pct": "Early Excess Max Battery Limit (%)",
           "excess_min_run_time_minutes": "Excess Consumers Minimum Run Time (Minutes)",
           "excess_external_inverter": "Switches connected to External Inverter (Ignore OpenDTU limits)"
         }
@@ -58,12 +58,12 @@
           "weather_entity": "Weather Entity (for cloud cover)",
           "battery_capacity_wh": "Battery Capacity (Wh)",
           "battery_min_limit_pct": "Minimum Battery Limit (%)",
+          "battery_max_limit_pct": "Battery Max Limit (%)",
           "excluded_power_sensors": "Excluded Power Sensors (e.g., EV Charger)",
           "prioritized_excess_consumers": "Prioritized Consumers (Switches for excess power)",
           "early_excess_consumers": "Early Excess Consumers (Switches)",
           "early_excess_expected_power_w": "Early Excess Expected Power (W)",
           "early_excess_min_battery_pct": "Early Excess Min Battery (%)",
-          "early_excess_max_battery_pct": "Early Excess Max Battery Limit (%)",
           "excess_min_run_time_minutes": "Excess Consumers Minimum Run Time (Minutes)",
           "excess_external_inverter": "Switches connected to External Inverter (Ignore OpenDTU limits)"
         }

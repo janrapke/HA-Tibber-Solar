@@ -21,6 +21,7 @@ CONF_SOLAR_CHARGE_STATE_SENSOR = "solar_charge_state_sensor"
 
 CONF_BATTERY_CAPACITY_WH = "battery_capacity_wh"
 CONF_BATTERY_MIN_LIMIT_PCT = "battery_min_limit_pct"
+CONF_BATTERY_MAX_LIMIT_PCT = "battery_max_limit_pct"
 CONF_BATTERY_EFFICIENCY_PCT = "battery_efficiency_pct"
 
 CONF_BASE_LOAD_W = "base_load_w"
@@ -35,7 +36,7 @@ CONF_SECONDARY_EXCESS_CONSUMERS = "secondary_excess_consumers"
 CONF_EARLY_EXCESS_CONSUMERS = "early_excess_consumers"
 CONF_EARLY_EXCESS_EXPECTED_POWER_W = "early_excess_expected_power_w"
 CONF_EARLY_EXCESS_MIN_BATTERY_PCT = "early_excess_min_battery_pct"
-CONF_EARLY_EXCESS_MAX_BATTERY_PCT = "early_excess_max_battery_pct"
+CONF_EARLY_EXCESS_MAX_BATTERY_PCT = "early_excess_max_battery_pct" # Deprecated, use CONF_BATTERY_MAX_LIMIT_PCT
 
 CONF_EXCESS_MIN_RUN_TIME_MINUTES = "excess_min_run_time_minutes"
 
