@@ -765,6 +765,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         min_total_cost = float('inf')
 
         max_batt_pct = float(self.config.get(CONF_BATTERY_MAX_LIMIT_PCT, self.config.get(CONF_EARLY_EXCESS_MAX_BATTERY_PCT, 100.0)))
+        max_batt_wh = batt_cap_wh * (max_batt_pct / 100.0)
 
         for candidate_threshold in unique_prices:
             simulated_batt_wh = batt_cap_wh * (current_batt_pct / 100.0)
@@ -773,19 +774,41 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             total_cost = 0.0
             overfill_penalty = 0.0
 
-            for fb in future_blocks:
+            for i, fb in enumerate(future_blocks):
                 price = fb["price"]
                 pred_solar = fb["solar"] * batt_eff
                 pred_cons = max(0.0, fb["house_wh"] - fb["balcony"])
+
+                # Will overfill check: forward simulation to detect if we hit max limit before emptying
+                will_overfill = False
+                temp_batt_wh = simulated_batt_wh
+                for fb_future in future_blocks[i:]:
+                    f_solar = fb_future["solar"] * batt_eff
+                    f_cons = max(0.0, fb_future["house_wh"] - fb_future["balcony"])
+                    f_actual_discharge = min(f_cons, max_discharge_wh_per_15min, max(0.0, temp_batt_wh - min_batt_wh))
+                    temp_batt_wh += f_solar - f_actual_discharge
+
+                    if temp_batt_wh >= max_batt_wh:
+                        will_overfill = True
+                        break
+                    if temp_batt_wh <= min_batt_wh:
+                        break
 
                 simulated_batt_wh += pred_solar
 
                 grid_import_wh = pred_cons
 
+                # If the battery is destined to overfill today, we MUST discharge to make room,
+                # ignoring the candidate threshold.
+                if will_overfill and simulated_batt_wh > min_batt_wh:
+                    available_discharge = simulated_batt_wh - min_batt_wh
+                    actual_discharge = min(pred_cons, max_discharge_wh_per_15min, available_discharge)
+                    simulated_batt_wh -= actual_discharge
+                    grid_import_wh -= actual_discharge
                 # If battery has enough energy and price is >= candidate threshold, we discharge.
                 # This ensures we strictly prioritize the most expensive blocks top-down.
                 # Do NOT discharge if price is negative.
-                if price >= candidate_threshold and simulated_batt_wh > min_batt_wh and price >= 0.0:
+                elif price >= candidate_threshold and simulated_batt_wh > min_batt_wh and price >= 0.0:
                     available_discharge = simulated_batt_wh - min_batt_wh
                     actual_discharge = min(pred_cons, max_discharge_wh_per_15min, available_discharge)
                     simulated_batt_wh -= actual_discharge
@@ -795,10 +818,10 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 total_cost += (grid_import_wh / 1000.0) * price
 
                 # Strictly penalize hitting max battery limit to prevent wasting solar energy
-                if simulated_batt_wh >= (batt_cap_wh * (max_batt_pct / 100.0)):
+                if simulated_batt_wh >= max_batt_wh:
                     # Heavy penalty for every time block we are full, proportional to wasted potential
                     overfill_penalty += 1000.0
-                    simulated_batt_wh = batt_cap_wh * (max_batt_pct / 100.0)
+                    simulated_batt_wh = max_batt_wh
 
             total_cost += overfill_penalty
 
