@@ -349,21 +349,41 @@ class ProposalCalculator:
 
             block = plan[block_idx]
             price = block.get('price', 0.3)
-            # Rough estimate of available internal power (solar + battery)
-            # In a real deep simulation, we'd adjust the battery level per minute.
-            # Here we approximate: if block is 'Nulleinspeisung', battery is empty.
-            action = block.get('action', '')
+            action = block.get('planned_action', block.get('action', ''))
+
+            # Extract 15-min energy predictions from the block
+            house_wh = block.get('house_wh', 0.0)
+            balcony_wh = block.get('balcony_wh', 0.0)
+
+            # Convert 15-min Wh to average Watts
+            house_w = house_wh * 4.0
+            balcony_w = balcony_wh * 4.0
+
+            # Net house load that the inverter must cover (balcony feeds directly to house)
+            baseline_house_load = max(0.0, house_w - balcony_w)
 
             # How much can we cover?
-            # If battery is empty and no solar -> cover 0
-            # If battery has charge -> cover up to max_inv
-            available_w = max_inv if action != 'Netzbezug (Akku sparen)' and action != 'Netzbezug (Akku leer)' else 0.0
+            # If the action dictates we are drawing from the grid (saving battery or empty)
+            if 'Netzbezug' in action:
+                available_w = 0.0
+            else:
+                # The inverter capacity is shared with the rest of the house
+                available_w = max(0.0, max_inv - baseline_house_load)
 
-            # Solar can bypass inverter limit technically, but let's be conservative
+            # How much of the appliance's load cannot be covered by the inverter?
             uncovered_w = max(0.0, watts - available_w)
 
-            # Wh needed from grid for this minute
-            grid_kwh = (uncovered_w / 60.0) / 1000.0
+            # Safety factor:
+            # Even if we think we can cover 100% from the battery, the user wants us to prefer
+            # times with generally lower grid prices to mitigate risk (e.g. if house load spikes).
+            # We assume a base 5% of the machine's consumption will always fall back to the grid.
+            safety_margin_w = watts * 0.05
+
+            # The effective grid draw for this minute
+            effective_grid_w = max(uncovered_w, safety_margin_w)
+
+            # kWh needed from grid for this minute
+            grid_kwh = (effective_grid_w / 60.0) / 1000.0
             total_cost += grid_kwh * price
 
         return total_cost
