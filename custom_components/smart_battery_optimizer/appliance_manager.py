@@ -344,8 +344,20 @@ class ProposalCalculator:
         if not plan:
             return 999.0 # Fallback high cost
 
-        from .const import CONF_MAX_INVERTER_POWER_W
+        from .const import (
+            CONF_MAX_INVERTER_POWER_W,
+            CONF_BATTERY_CAPACITY_WH,
+            CONF_BATTERY_MIN_LIMIT_PCT
+        )
         max_inv = float(self.coordinator.config.get(CONF_MAX_INVERTER_POWER_W, 800))
+        batt_cap_wh = float(self.coordinator.config.get(CONF_BATTERY_CAPACITY_WH, 5000))
+        min_batt_pct = float(self.coordinator.config.get(CONF_BATTERY_MIN_LIMIT_PCT, 10))
+        min_batt_wh = batt_cap_wh * (min_batt_pct / 100.0)
+
+        # Initialize tracking variables for available battery energy
+        current_batt_wh = None
+        last_block_idx = -1
+        plan_batt_wh = None
 
         for min_idx, watts in enumerate(profile):
             run_minute = start_time + timedelta(minutes=min_idx)
@@ -359,7 +371,32 @@ class ProposalCalculator:
 
             block = plan[block_idx]
             price = block.get('price', 0.3)
-            action = block.get('planned_action', block.get('action', ''))
+            action = str(block.get('planned_action', block.get('action', '')))
+
+            # If we enter a new block, update our simulated battery level estimate
+            if block_idx != last_block_idx:
+                # Use the previous block's end percentage as the starting point, or the current block's if it's the first
+                if block_idx > 0:
+                    start_pct = plan[block_idx - 1].get('battery_pct_end', min_batt_pct)
+                else:
+                    start_pct = getattr(self.coordinator, 'current_battery_pct', plan[0].get('battery_pct_end', min_batt_pct))
+
+                new_plan_batt_wh = batt_cap_wh * (start_pct / 100.0)
+
+                if current_batt_wh is None:
+                    # First initialization
+                    current_batt_wh = new_plan_batt_wh
+                else:
+                    # We crossed into a new 15-minute block.
+                    # The coordinator's plan advanced, adding some solar or drawing some house load.
+                    # We apply the exact same delta to our simulated battery.
+                    delta_wh = new_plan_batt_wh - plan_batt_wh
+                    current_batt_wh += delta_wh
+                    # Ensure we don't go below 0 or above capacity
+                    current_batt_wh = max(0.0, min(batt_cap_wh, current_batt_wh))
+
+                plan_batt_wh = new_plan_batt_wh
+                last_block_idx = block_idx
 
             # Extract 15-min energy predictions from the block
             house_wh = block.get('house_wh', 0.0)
@@ -374,14 +411,30 @@ class ProposalCalculator:
 
             # How much can we cover?
             # If the action dictates we are drawing from the grid (saving battery or empty)
-            if 'Netzbezug' in action:
+            action_lower = action.lower()
+            if 'netzbezug' in action_lower or 'aus' in action_lower or 'batterie am minimum' in action_lower:
                 available_w = 0.0
             else:
                 # The inverter capacity is shared with the rest of the house
                 available_w = max(0.0, max_inv - baseline_house_load)
 
+                # Further limit available_w by actual remaining battery capacity
+                available_wh_reserve = max(0.0, current_batt_wh - min_batt_wh)
+                # Convert available Wh reserve to continuous Watt equivalent for this 1 minute
+                max_batt_w = available_wh_reserve * 60.0
+                available_w = min(available_w, max_batt_w)
+
             # How much of the appliance's load cannot be covered by the inverter?
             uncovered_w = max(0.0, watts - available_w)
+
+            # We use 'available_w' from the battery, subtract this energy from our simulated battery
+            used_from_batt_w = watts - uncovered_w
+            used_batt_wh = used_from_batt_w / 60.0
+            current_batt_wh = max(0.0, current_batt_wh - used_batt_wh)
+
+            # If the price is negative, we WANT grid draw to earn money.
+            # In negative price situations, the action will usually contain 'dtu aus' so available_w is 0.
+            # Thus, uncovered_w will be equal to watts, and grid_kwh * negative_price = negative cost (profit).
 
             # Safety factor:
             # Even if we think we can cover 100% from the battery, the user wants us to prefer
