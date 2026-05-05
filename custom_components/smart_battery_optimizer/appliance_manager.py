@@ -276,6 +276,7 @@ class ApplianceStateMachine:
 class Proposal:
     start_time: datetime
     cost_estimate: float
+    avg_price: float = 0.0
 
 class ProposalCalculator:
     """Calculates optimal start times and costs for appliance programs."""
@@ -301,8 +302,8 @@ class ProposalCalculator:
         # Evaluate every possible minute
         current_eval = start_search
         while current_eval + timedelta(minutes=duration_mins) <= end_search:
-            cost = self._simulate_run_cost(program.power_profile, current_eval)
-            proposals.append(Proposal(current_eval, cost))
+            cost, avg_price = self._simulate_run_cost(program.power_profile, current_eval)
+            proposals.append(Proposal(current_eval, cost, avg_price))
             # Jump by 15 mins to save compute, or 1 min for absolute precision.
             # 15 mins is usually enough for Tibber intervals.
             current_eval += timedelta(minutes=15)
@@ -328,9 +329,10 @@ class ProposalCalculator:
 
         return final_proposals
 
-    def _simulate_run_cost(self, profile: list[float], start_time: datetime) -> float:
-        """Simulate the cost of running the profile at the given start time."""
+    def _simulate_run_cost(self, profile: list[float], start_time: datetime) -> tuple[float, float]:
+        """Simulate the cost of running the profile at the given start time. Returns (total_cost, avg_price)."""
         total_cost = 0.0
+        total_price_sum = 0.0
 
         # For this, we need access to the coordinator's predicted battery and solar state.
         # This is a simplified forward simulation:
@@ -342,7 +344,7 @@ class ProposalCalculator:
         # Get hourly plan from coordinator for context
         plan = self.coordinator.hourly_plan
         if not plan:
-            return 999.0 # Fallback high cost
+            return 999.0, 0.3 # Fallback high cost
 
         from .const import (
             CONF_MAX_INVERTER_POWER_W,
@@ -367,6 +369,7 @@ class ProposalCalculator:
                 # Fallback to current price if beyond horizon
                 price = getattr(self.coordinator, 'current_price', 0.3)
                 total_cost += (watts / 60000.0) * price
+                total_price_sum += price
                 continue
 
             block = plan[block_idx]
@@ -448,8 +451,10 @@ class ProposalCalculator:
             # kWh needed from grid for this minute
             grid_kwh = (effective_grid_w / 60.0) / 1000.0
             total_cost += grid_kwh * price
+            total_price_sum += price
 
-        return total_cost
+        avg_price = total_price_sum / len(profile) if profile else 0.0
+        return total_cost, avg_price
 
     def _get_block_index_for_time(self, target_time: datetime, plan: list[dict]) -> int | None:
         """Find the block index in the plan for the given time."""

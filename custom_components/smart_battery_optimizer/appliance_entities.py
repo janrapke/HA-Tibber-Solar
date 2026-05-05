@@ -121,7 +121,8 @@ class ApplianceProposalSelect(SmartApplianceBase, SelectEntity):
             time_str = p.start_time.strftime("%H:%M")
             day_str = "Heute" if p.start_time.date() == datetime.now().date() else "Morgen"
             cost_str = f"€ {p.cost_estimate:.2f}"
-            opts.append(f"{i+1}. {day_str} {time_str} ({cost_str})")
+            avg_str = f"Ø {int(p.avg_price * 100)}ct"
+            opts.append(f"{i+1}. {day_str} {time_str} ({cost_str} | {avg_str})")
         return opts
 
     @property
@@ -189,29 +190,88 @@ class ApplianceDeleteButton(SmartApplianceBase, ButtonEntity):
             await self.coordinator.async_request_refresh()
 
 
+class ApplianceManualTimeText(SmartApplianceBase, TextEntity):
+    """Text entity to specify a manual start time (HH:MM)."""
+    def __init__(self, coordinator, entry_id, sensor_id):
+        super().__init__(coordinator, entry_id, sensor_id)
+        self._attr_unique_id = f"{entry_id}_{sensor_id}_manual_time"
+        self._attr_name = "Manuelle Startzeit (HH:MM)"
+        self._attr_icon = "mdi:clock-edit-outline"
+        self._attr_native_value = ""
+
+    @property
+    def native_value(self) -> str | None:
+        return self._attr_native_value
+
+    async def async_set_value(self, value: str) -> None:
+        # Validate HH:MM format
+        try:
+            h, m = map(int, value.split(":"))
+            if 0 <= h <= 23 and 0 <= m <= 59:
+                self._attr_native_value = f"{h:02d}:{m:02d}"
+            else:
+                self._attr_native_value = ""
+        except ValueError:
+            self._attr_native_value = ""
+
+        await self.coordinator.async_request_refresh()
+
+
 class ApplianceConfirmButton(SmartApplianceBase, ButtonEntity):
     """Confirm the selected proposal and schedule it."""
-    def __init__(self, coordinator, entry_id, sensor_id, prog_select: ApplianceProgramSelect, proposal_select: ApplianceProposalSelect):
+    def __init__(self, coordinator, entry_id, sensor_id, prog_select: ApplianceProgramSelect, proposal_select: ApplianceProposalSelect, manual_time_text: ApplianceManualTimeText):
         super().__init__(coordinator, entry_id, sensor_id)
         self._attr_unique_id = f"{entry_id}_{sensor_id}_confirm_btn"
         self._attr_name = "Plan bestätigen"
         self._attr_icon = "mdi:check-circle"
         self.prog_select = prog_select
         self.proposal_select = proposal_select
+        self.manual_time_text = manual_time_text
 
     async def async_press(self) -> None:
         if not self.sm: return
 
         prog_name = self.prog_select.current_option
-        proposal = self.proposal_select.get_selected_proposal()
+        progs = self.sm.manager.get_programs(self.sensor_id)
+        prog = next((p for p in progs if p.name == prog_name), None)
 
-        if prog_name and proposal:
-            progs = self.sm.manager.get_programs(self.sensor_id)
-            prog = next((p for p in progs if p.name == prog_name), None)
-            if prog:
-                self.sm.schedule_program(prog.id, proposal.start_time, proposal.cost_estimate)
-                # Force recalculate the overall plan
-                await self.coordinator.async_request_refresh()
+        if not prog: return
+
+        import homeassistant.util.dt as dt_util
+        now = dt_util.now().replace(tzinfo=None)
+
+        manual_time_str = self.manual_time_text.native_value
+        start_time = None
+        cost = 0.0
+
+        if manual_time_str:
+            # Parse the manual time
+            try:
+                h, m = map(int, manual_time_str.split(":"))
+                start_time = now.replace(hour=h, minute=m, second=0, microsecond=0)
+                # If the time has already passed today, schedule for tomorrow
+                if start_time < now:
+                    start_time += timedelta(days=1)
+
+                # Calculate the cost for this custom time
+                cost, _ = self.coordinator.proposal_calculator._simulate_run_cost(prog.power_profile, start_time)
+
+                # Clear the manual input after consumption
+                self.manual_time_text._attr_native_value = ""
+            except ValueError:
+                pass
+
+        if not start_time:
+            # Fall back to proposal select
+            proposal = self.proposal_select.get_selected_proposal()
+            if proposal:
+                start_time = proposal.start_time
+                cost = proposal.cost_estimate
+
+        if start_time:
+            self.sm.schedule_program(prog.id, start_time, cost)
+            # Force recalculate the overall plan
+            await self.coordinator.async_request_refresh()
 
 
 class ApplianceRenameText(SmartApplianceBase, TextEntity):
@@ -301,3 +361,38 @@ class ApplianceStatusSensor(SmartApplianceBase, SensorEntity):
                 return "Wartet auf Start..."
 
         return state_map.get(self.sm.state.value, self.sm.state.value)
+
+class ApplianceProfileSensor(SmartApplianceBase, SensorEntity):
+    """Shows the program duration and exposes the full power profile for charts."""
+    def __init__(self, coordinator, entry_id, sensor_id, prog_select: ApplianceProgramSelect):
+        super().__init__(coordinator, entry_id, sensor_id)
+        self._attr_unique_id = f"{entry_id}_{sensor_id}_profile"
+        self._attr_name = "Profil & Dauer"
+        self._attr_icon = "mdi:chart-line"
+        self.prog_select = prog_select
+
+    @property
+    def native_value(self) -> str:
+        if not self.sm or not self.prog_select.current_option:
+            return "Kein Programm gewählt"
+
+        progs = self.sm.manager.get_programs(self.sensor_id)
+        prog = next((p for p in progs if p.name == self.prog_select.current_option), None)
+        if not prog or not prog.power_profile:
+            return "0 Min"
+
+        return f"{len(prog.power_profile)} Min"
+
+    @property
+    def extra_state_attributes(self):
+        """Return the profile for use in ApexCharts."""
+        if not self.sm or not self.prog_select.current_option:
+            return {"power_profile": []}
+
+        progs = self.sm.manager.get_programs(self.sensor_id)
+        prog = next((p for p in progs if p.name == self.prog_select.current_option), None)
+        if not prog or not prog.power_profile:
+            return {"power_profile": []}
+
+        # Format for charts: e.g. simply list of rounded Watts
+        return {"power_profile": [round(w, 1) for w in prog.power_profile]}
