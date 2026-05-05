@@ -830,11 +830,11 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             total_cost += overfill_penalty
 
             # If we end up with unused battery at the end of the simulation horizon,
-            # we subtract its value so it's not "lost" in the cost calculation.
-            # Value it realistically to avoid panic discharging. We value it at the candidate_threshold
-            # (or 0 if negative) so the simulation feels safe saving energy for this threshold.
+            # we consider its value 0.0 to force the optimizer to use the stored energy
+            # during the available price horizon at the most efficient times, rather than
+            # keeping it completely full forever if prices are low.
             if simulated_batt_wh > min_batt_wh:
-                safe_residual_price = max(0.0, candidate_threshold)
+                safe_residual_price = 0.0
                 residual_value = ((simulated_batt_wh - min_batt_wh) / 1000.0) * safe_residual_price
                 total_cost -= residual_value
 
