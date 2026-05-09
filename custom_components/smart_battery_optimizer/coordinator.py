@@ -1199,8 +1199,6 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                     if temp_batt_wh >= max_batt_wh:
                         will_overfill = True
                         break
-                    if temp_batt_wh <= min_batt_wh:
-                        break
 
                 simulated_batt_wh += pred_solar
 
@@ -1335,9 +1333,6 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 if temp_batt_wh >= max_batt_wh:
                     will_overfill = True
                     break
-                if temp_batt_wh <= min_batt_wh:
-                    # Battery empties before overfilling, so no overfill risk for this energy
-                    break
 
             # Determine if this block would trigger grid charging
             is_charging_block = False
@@ -1356,7 +1351,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             elif simulated_batt_wh >= max_batt_wh:
                 action = f"Batterie {int(max_batt_pct)}% voll (DTU An)"
                 # To prevent forecasting drops, we calculate as if solar goes into battery, then cap it
-                simulated_batt_wh += pred_solar
+                simulated_batt_wh += pred_solar - actual_discharge
             elif will_overfill:
                 # If we know the battery will hit the max limit today, never save battery via grid import
                 # Instead, act as Nulleinspeisung (DTU An) to make room for the solar.
