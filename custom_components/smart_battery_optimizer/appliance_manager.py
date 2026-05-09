@@ -44,22 +44,44 @@ class SmartApplianceManager:
         self.store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}_{entry_id}")
         # sensor_id -> list of ApplianceProgram
         self.programs: dict[str, list[ApplianceProgram]] = {}
+        # sensor_id -> dict of settings
+        self.settings: dict[str, dict] = {}
 
     async def async_load(self):
         """Load stored appliance profiles."""
         data = await self.store.async_load()
         if data:
-            for sensor_id, prog_list in data.items():
-                self.programs[sensor_id] = [ApplianceProgram.from_dict(p) for p in prog_list]
+            if isinstance(data, dict) and "programs" in data:
+                # New format
+                for sensor_id, prog_list in data.get("programs", {}).items():
+                    self.programs[sensor_id] = [ApplianceProgram.from_dict(p) for p in prog_list]
+                self.settings = data.get("settings", {})
+            else:
+                # Old format migration
+                for sensor_id, prog_list in data.items():
+                    self.programs[sensor_id] = [ApplianceProgram.from_dict(p) for p in prog_list]
         _LOGGER.debug(f"Loaded appliance programs: {self.programs}")
 
     async def async_save(self):
         """Save appliance profiles."""
         data_to_save = {
-            sensor_id: [p.to_dict() for p in prog_list]
-            for sensor_id, prog_list in self.programs.items()
+            "programs": {
+                sensor_id: [p.to_dict() for p in prog_list]
+                for sensor_id, prog_list in self.programs.items()
+            },
+            "settings": self.settings
         }
         await self.store.async_save(data_to_save)
+
+    def get_setting(self, sensor_id: str, key: str, default: str) -> str:
+        if sensor_id not in self.settings:
+            return default
+        return self.settings[sensor_id].get(key, default)
+
+    def set_setting(self, sensor_id: str, key: str, value: str):
+        if sensor_id not in self.settings:
+            self.settings[sensor_id] = {}
+        self.settings[sensor_id][key] = value
 
     def get_programs(self, sensor_id: str) -> list[ApplianceProgram]:
         return self.programs.get(sensor_id, [])
@@ -277,36 +299,56 @@ class Proposal:
     start_time: datetime
     cost_estimate: float
     avg_price: float = 0.0
+    uses_solar_excess: bool = False
 
 class ProposalCalculator:
     """Calculates optimal start times and costs for appliance programs."""
     def __init__(self, coordinator):
         self.coordinator = coordinator
 
-    def calculate_proposals(self, program: ApplianceProgram, horizon_hours: int = 24) -> list[Proposal]:
-        """Generate time and cost proposals for the given program."""
+    def calculate_proposals(self, sensor_id: str, program: ApplianceProgram, manager, horizon_hours: int = 24) -> list[Proposal]:
+        """Generate time and cost proposals for the given program, using device specific timer settings."""
         if not program.power_profile:
             return []
 
         import homeassistant.util.dt as dt_util
         now = dt_util.now().replace(tzinfo=None)
-        # Round up to the next minute
-        start_search = now.replace(second=0, microsecond=0) + timedelta(minutes=1)
-        end_search = start_search + timedelta(hours=horizon_hours)
 
-        # Determine duration in minutes
+        # Read the settings for this specific appliance
+        timer_mode = manager.get_setting(sensor_id, "timer_mode", "delay")
+        timer_step_str = manager.get_setting(sensor_id, "timer_step", "15")
+        try:
+            timer_step = int(timer_step_str)
+        except ValueError:
+            timer_step = 15
+
+        # Buffer: The machine shouldn't be scheduled to start in 1 minute. Give the user 1 hour buffer.
+        base_start = now + timedelta(hours=1)
+
+        if timer_mode == "delay":
+            # Steps are relative to NOW (e.g. 1h from now, 2h from now)
+            # Find the next exact multiple of timer_step from now (after the 1 hour buffer)
+            # Actually, delays are just "in X minutes", so we just start at (now + 1h) and jump by timer_step.
+            # Round up base_start to the next minute for clean numbers
+            start_search = now.replace(second=0, microsecond=0) + timedelta(minutes=60)
+        else: # "time"
+            # Steps are absolute clock times (e.g. 14:00, 14:15)
+            # Find the next clock minute that is a multiple of timer_step, at least 1h from now
+            start_search = base_start.replace(second=0, microsecond=0)
+            remainder = start_search.minute % timer_step
+            if remainder != 0:
+                start_search += timedelta(minutes=(timer_step - remainder))
+
+        end_search = now + timedelta(hours=horizon_hours)
         duration_mins = len(program.power_profile)
 
         proposals = []
 
-        # Evaluate every possible minute
         current_eval = start_search
         while current_eval + timedelta(minutes=duration_mins) <= end_search:
-            cost, avg_price = self._simulate_run_cost(program.power_profile, current_eval)
-            proposals.append(Proposal(current_eval, cost, avg_price))
-            # Jump by 15 mins to save compute, or 1 min for absolute precision.
-            # 15 mins is usually enough for Tibber intervals.
-            current_eval += timedelta(minutes=15)
+            cost, avg_price, uses_excess = self._simulate_run_cost(program.power_profile, current_eval)
+            proposals.append(Proposal(current_eval, cost, avg_price, uses_excess))
+            current_eval += timedelta(minutes=timer_step)
 
         if not proposals:
             return []
@@ -329,7 +371,7 @@ class ProposalCalculator:
 
         return final_proposals
 
-    def _simulate_run_cost(self, profile: list[float], start_time: datetime) -> tuple[float, float]:
+    def _simulate_run_cost(self, profile: list[float], start_time: datetime) -> tuple[float, float, bool]:
         """Simulate the cost of running the profile at the given start time. Returns (total_cost, avg_price)."""
         total_cost = 0.0
         total_price_sum = 0.0
@@ -360,6 +402,8 @@ class ProposalCalculator:
         current_batt_wh = None
         last_block_idx = -1
         plan_batt_wh = None
+
+        solar_excess_minutes = 0
 
         for min_idx, watts in enumerate(profile):
             run_minute = start_time + timedelta(minutes=min_idx)
@@ -405,6 +449,10 @@ class ProposalCalculator:
             house_wh = block.get('house_wh', 0.0)
             balcony_wh = block.get('balcony_wh', 0.0)
 
+            # Predict if battery will overfill in this block (meaning we have free solar excess)
+            # The original plan assumes the appliance is NOT running.
+            will_overfill = block.get('will_overfill', False) or block.get('battery_pct_end', 0) >= 99.0
+
             # Convert 15-min Wh to average Watts
             house_w = house_wh * 4.0
             balcony_w = balcony_wh * 4.0
@@ -413,9 +461,11 @@ class ProposalCalculator:
             baseline_house_load = max(0.0, house_w - balcony_w)
 
             # How much can we cover?
-            # If the action dictates we are drawing from the grid (saving battery or empty)
+            # We ignore the planned action here! Even if the inverter is OFF in the plan,
+            # we CAN turn it on to run the appliance, provided we have battery capacity.
+            # The exception is if the battery is completely empty.
             action_lower = action.lower()
-            if 'netzbezug' in action_lower or 'aus' in action_lower or 'batterie am minimum' in action_lower:
+            if 'batterie am minimum' in action_lower and current_batt_wh <= min_batt_wh:
                 available_w = 0.0
             else:
                 # The inverter capacity is shared with the rest of the house
@@ -435,26 +485,39 @@ class ProposalCalculator:
             used_batt_wh = used_from_batt_w / 60.0
             current_batt_wh = max(0.0, current_batt_wh - used_batt_wh)
 
-            # If the price is negative, we WANT grid draw to earn money.
-            # In negative price situations, the action will usually contain 'dtu aus' so available_w is 0.
-            # Thus, uncovered_w will be equal to watts, and grid_kwh * negative_price = negative cost (profit).
-
             # Safety factor:
-            # Even if we think we can cover 100% from the battery, the user wants us to prefer
-            # times with generally lower grid prices to mitigate risk (e.g. if house load spikes).
             # We assume a base 5% of the machine's consumption will always fall back to the grid.
             safety_margin_w = watts * 0.05
-
-            # The effective grid draw for this minute
             effective_grid_w = max(uncovered_w, safety_margin_w)
 
-            # kWh needed from grid for this minute
-            grid_kwh = (effective_grid_w / 60.0) / 1000.0
+            # OPPORTUNITY COST CALCULATION:
+            # Fundamentally, all power used by the appliance (whether from battery or grid)
+            # costs the current grid price. Why? Because if we drain the battery now,
+            # we will likely have to buy grid power later to cover the house load.
+            # The only exception is if we are burning SOLAR EXCESS that would otherwise overfill
+            # the battery and be exported/wasted.
+
+            effective_cost_w = watts # By default, the whole load is priced at Tibber price
+
+            if will_overfill and used_from_batt_w > 0:
+                # We are pulling from the "battery" (actually the inverter feeding direct solar)
+                # AND the battery was going to overfill anyway. This energy is essentially FREE.
+                # We subtract the battery-covered portion from our cost basis.
+                effective_cost_w = effective_grid_w
+                if watts > 100: # Only count significant power draw minutes as "using excess"
+                    solar_excess_minutes += 1
+
+            # kWh needed from grid (or battery opportunity cost) for this minute
+            grid_kwh = (effective_cost_w / 60.0) / 1000.0
             total_cost += grid_kwh * price
             total_price_sum += price
 
         avg_price = total_price_sum / len(profile) if profile else 0.0
-        return total_cost, avg_price
+
+        # Consider it using solar excess if at least 20% of its run time uses free excess
+        uses_excess = solar_excess_minutes >= (len(profile) * 0.20)
+
+        return total_cost, avg_price, uses_excess
 
     def _get_block_index_for_time(self, target_time: datetime, plan: list[dict]) -> int | None:
         """Find the block index in the plan for the given time."""

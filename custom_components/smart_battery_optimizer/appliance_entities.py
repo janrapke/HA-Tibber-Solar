@@ -76,6 +76,74 @@ class ApplianceProgramSelect(SmartApplianceBase, SelectEntity):
         await self.coordinator.async_request_refresh()
 
 
+
+
+class ApplianceTimerModeSelect(SmartApplianceBase, SelectEntity):
+    """Select the timer mode for the appliance."""
+    def __init__(self, coordinator, entry_id, sensor_id):
+        super().__init__(coordinator, entry_id, sensor_id)
+        self._attr_unique_id = f"{entry_id}_{sensor_id}_timer_mode"
+        self._attr_name = "Timer Modus"
+        self._attr_icon = "mdi:timer-cog-outline"
+        self._options = ["Start-Verzögerung (Delay)", "Feste Startzeit (Time)"]
+
+    @property
+    def options(self) -> list[str]:
+        return self._options
+
+    @property
+    def current_option(self) -> str | None:
+        if not self.sm: return self._options[0]
+        val = self.sm.manager.get_setting(self.sensor_id, "timer_mode", "delay")
+        return self._options[0] if val == "delay" else self._options[1]
+
+    async def async_select_option(self, option: str) -> None:
+        if not self.sm: return
+        val = "delay" if option == self._options[0] else "time"
+        self.sm.manager.set_setting(self.sensor_id, "timer_mode", val)
+        await self.sm.manager.async_save()
+
+        # Force recalculate proposals
+        for entity in self.coordinator.appliance_entities.get('select', []):
+            if isinstance(entity, ApplianceProposalSelect) and entity.sensor_id == self.sensor_id:
+                entity.force_recalculate()
+
+        await self.coordinator.async_request_refresh()
+
+
+class ApplianceTimerStepSelect(SmartApplianceBase, SelectEntity):
+    """Select the timer step interval for the appliance."""
+    def __init__(self, coordinator, entry_id, sensor_id):
+        super().__init__(coordinator, entry_id, sensor_id)
+        self._attr_unique_id = f"{entry_id}_{sensor_id}_timer_step"
+        self._attr_name = "Timer Raster"
+        self._attr_icon = "mdi:step-forward"
+        self._options = ["1 Min", "15 Min", "30 Min", "60 Min"]
+
+    @property
+    def options(self) -> list[str]:
+        return self._options
+
+    @property
+    def current_option(self) -> str | None:
+        if not self.sm: return self._options[1] # default 15 Min
+        val = self.sm.manager.get_setting(self.sensor_id, "timer_step", "15")
+        mapping = {"1": "1 Min", "15": "15 Min", "30": "30 Min", "60": "60 Min"}
+        return mapping.get(str(val), "15 Min")
+
+    async def async_select_option(self, option: str) -> None:
+        if not self.sm: return
+        val = option.split(" ")[0]
+        self.sm.manager.set_setting(self.sensor_id, "timer_step", val)
+        await self.sm.manager.async_save()
+
+        # Force recalculate proposals
+        for entity in self.coordinator.appliance_entities.get('select', []):
+            if isinstance(entity, ApplianceProposalSelect) and entity.sensor_id == self.sensor_id:
+                entity.force_recalculate()
+
+        await self.coordinator.async_request_refresh()
+
 class ApplianceProposalSelect(SmartApplianceBase, SelectEntity):
     """Select one of the proposed times."""
     def __init__(self, coordinator, entry_id, sensor_id, prog_select: ApplianceProgramSelect):
@@ -103,7 +171,7 @@ class ApplianceProposalSelect(SmartApplianceBase, SelectEntity):
             self._proposals = []
             return
 
-        self._proposals = self.coordinator.proposal_calculator.calculate_proposals(prog)
+        self._proposals = self.coordinator.proposal_calculator.calculate_proposals(self.sensor_id, prog, self.sm.manager)
 
     def force_recalculate(self):
         self._proposals = []
@@ -116,13 +184,42 @@ class ApplianceProposalSelect(SmartApplianceBase, SelectEntity):
         if not self._proposals:
             return ["Keine Vorschläge"]
 
+        import homeassistant.util.dt as dt_util
+        now = dt_util.now().replace(tzinfo=None)
+
+        timer_mode = self.sm.manager.get_setting(self.sensor_id, "timer_mode", "delay")
+
         opts = []
         for i, p in enumerate(self._proposals):
             time_str = p.start_time.strftime("%H:%M")
-            day_str = "Heute" if p.start_time.date() == datetime.now().date() else "Morgen"
-            cost_str = f"€ {p.cost_estimate:.2f}"
-            avg_str = f"Ø {int(p.avg_price * 100)}ct"
-            opts.append(f"{i+1}. {day_str} {time_str} ({cost_str} | {avg_str})")
+
+            # Calculate delay string (e.g., "in 2h 15m")
+            td = p.start_time - now
+            hours, remainder = divmod(int(td.total_seconds()), 3600)
+            minutes, _ = divmod(remainder, 60)
+
+            if hours > 0 and minutes > 0:
+                delay_str = f"in {hours}h {minutes}m"
+            elif hours > 0:
+                delay_str = f"in {hours}h"
+            elif minutes > 0:
+                delay_str = f"in {minutes}m"
+            else:
+                delay_str = "jetzt"
+
+            # Format depending on mode
+            if timer_mode == "delay":
+                label_str = f"{delay_str} ({time_str})"
+            else:
+                label_str = f"{time_str} Uhr ({delay_str})"
+
+            cost_cents = round(p.cost_estimate * 100)
+            avg_price_cents = round(p.avg_price * 100, 1)
+
+            # Solar excess indicator
+            solar_indicator = " (☀️ Solar)" if getattr(p, 'uses_solar_excess', False) else ""
+
+            opts.append(f"{i+1}. {label_str} - {cost_cents}ct (~{avg_price_cents}ct/kWh){solar_indicator}")
         return opts
 
     @property
@@ -254,7 +351,7 @@ class ApplianceConfirmButton(SmartApplianceBase, ButtonEntity):
                     start_time += timedelta(days=1)
 
                 # Calculate the cost for this custom time
-                cost, _ = self.coordinator.proposal_calculator._simulate_run_cost(prog.power_profile, start_time)
+                cost, _, _ = self.coordinator.proposal_calculator._simulate_run_cost(prog.power_profile, start_time)
 
                 # Clear the manual input after consumption
                 self.manual_time_text._attr_native_value = ""
