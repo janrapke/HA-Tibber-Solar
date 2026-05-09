@@ -600,13 +600,190 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         if virtual_batt_pct < max_batt_pct - 5.0:
             self._battery_full_hysteresis = False
 
+        price_threshold = self._simulate_optimal_threshold(now, hourly_forecasts, batt_level_pct, batt_cap_wh, batt_min_pct)
+        charge_price_threshold = self._simulate_optimal_charge_threshold(now, hourly_forecasts, batt_level_pct, batt_cap_wh)
+
         # Evaluate grid charging
         is_grid_charging = False
-        if current_price is not None:
-            is_grid_charging = self._should_grid_charge(now, current_price, virtual_batt_pct, batt_cap_wh, hourly_forecasts)
+        if current_price is not None and charge_price_threshold is not None:
+            if current_price <= charge_price_threshold:
+                # We still need to pass the safety checks (overfill & excess devices limits)
+                is_grid_charging = self._check_grid_charge_safety(now, current_price, virtual_batt_pct, batt_cap_wh, hourly_forecasts)
+
+        self._build_forecast_plan(now, hourly_forecasts, batt_level_pct, batt_cap_wh, price_threshold, charge_price_threshold)
+
+        available_batt_capacity_wh = batt_cap_wh * (1.0 - (batt_level_pct / 100.0))
+
+        # Re-calc 24h sum
+        for block in self.hourly_plan:
+            self.predicted_remaining_solar += block["solar_wh"]
+            self.predicted_remaining_consumption += block["consumption_wh"]
+
+        # Forward simulation to accurately detect if battery will hit max limit before emptying
+        battery_will_overfill = False
+        temp_batt_pct = batt_level_pct
+        for block in self.hourly_plan:
+            temp_batt_pct = block.get("battery_pct_end", temp_batt_pct)
+            if temp_batt_pct >= max_batt_pct:
+                battery_will_overfill = True
+                break
+            if temp_batt_pct <= batt_min_pct:
+                break
+
+        turn_on_inverter = True
+
+        async def set_switches(entities: list, turn_on: bool):
+            min_run_time = int(self.config.get(CONF_EXCESS_MIN_RUN_TIME_MINUTES, 10))
+            current_time = dt_util.now()
+
+            for switch_entity in entities:
+                state = self.hass.states.get(switch_entity)
+                if state is None:
+                    continue
+                is_on = state and state.state == "on"
+
+                # Check minimum run time
+                if is_on and not turn_on:
+                    last_turned_on = self._excess_devices_last_turned_on.get(switch_entity)
+                    if last_turned_on:
+                        elapsed = (current_time - last_turned_on).total_seconds() / 60.0
+                        if elapsed < min_run_time:
+                            _LOGGER.debug("Switch %s must remain on. Min run time not reached. Elapsed: %.1f, Min: %d", switch_entity, elapsed, min_run_time)
+                            continue
+                    await self.hass.services.async_call("switch", "turn_off", {"entity_id": switch_entity}, blocking=False)
+                    self._excess_devices_last_turned_on.pop(switch_entity, None)
+                elif not is_on and turn_on:
+                    await self.hass.services.async_call("switch", "turn_on", {"entity_id": switch_entity}, blocking=False)
+                    self._excess_devices_last_turned_on[switch_entity] = current_time
+
+        # If a switch is manually turned off, we also remove it from the tracking dict
+        # This prevents it from being stuck "on" due to run time check if it's turned back on rapidly
+        for entity_list in [self.config.get(CONF_PRIMARY_EXCESS_CONSUMERS, []), self.config.get(CONF_SECONDARY_EXCESS_CONSUMERS, []), self.config.get(CONF_EARLY_EXCESS_CONSUMERS, [])]:
+            if not isinstance(entity_list, list):
+                continue
+            for switch_entity in entity_list:
+                state = self.hass.states.get(switch_entity)
+                if state and state.state == "off" and switch_entity in self._excess_devices_last_turned_on:
+                    # Switch is off, but our tracking thinks it might still be running.
+                    # See if someone else turned it off manually, if so, we can clear the timer.
+                    last_turned_on = self._excess_devices_last_turned_on[switch_entity]
+                    elapsed = (current_time - last_turned_on).total_seconds() / 60.0
+                    if elapsed < min_run_time:
+                        pass # Hasn't been min time, maybe user turned it off, we leave tracking to allow it to be turned back on instantly if needed, or we pop it? Let's pop it to reset timer.
+                    self._excess_devices_last_turned_on.pop(switch_entity, None)
+
+        is_absorption = charge_state and charge_state.lower() in ("absorption", "float", "ausgleichsladung", "equalization")
+        virtual_batt_pct = 100.0 if is_absorption else batt_level_pct
+        has_excess_power = (current_solar > self.calculated_house_consumption) or is_absorption
+
+        # Timer logic for cloud tolerance
+        if not has_excess_power:
+            self._low_solar_minutes += 1
+        else:
+            self._low_solar_minutes = 0
+
+        cloud_tolerance_mins = getattr(self, "excess_cloud_tolerance_mins", 5.0)
+        cloud_override_off = self._low_solar_minutes >= cloud_tolerance_mins
+
+        # --- Negative Price Override ---
+        # When price is negative, we get paid to consume energy.
+        # Force all excess consumers ON and ensure OpenDTU (inverter) remains OFF.
+        is_negative_price = current_price is not None and current_price < 0.0
+
+        # Helper for checking if consumers are on external inverter
+        external_inverters = self.config.get(CONF_EXCESS_EXTERNAL_INVERTER, [])
+        if isinstance(external_inverters, bool):
+            external_inverters = []
+        def _any_external(entities):
+            return any(e in external_inverters for e in entities)
+
+        # Primary Hysteresis Logic
+        primary_entities = self.config.get(CONF_PRIMARY_EXCESS_CONSUMERS, [])
+        primary_is_external = _any_external(primary_entities)
+
+        if self.primary_excess_auto:
+            if is_negative_price:
+                turn_on_primary = True
+            else:
+                turn_on_primary = False
+                if primary_is_external:
+                    # External inverter: strict battery percentage logic, ignore solar/cloud
+                    if virtual_batt_pct >= getattr(self, "primary_excess_on", 95.0):
+                        turn_on_primary = True
+                    elif virtual_batt_pct <= getattr(self, "primary_excess_off", 90.0):
+                        turn_on_primary = False
+                    else:
+                        turn_on_primary = any(self.hass.states.get(e) and self.hass.states.get(e).state == "on" for e in primary_entities)
+                else:
+                    if virtual_batt_pct >= getattr(self, "primary_excess_on", 95.0) and has_excess_power and battery_will_overfill:
+                        turn_on_primary = True
+                    elif virtual_batt_pct <= getattr(self, "primary_excess_off", 90.0) or cloud_override_off:
+                        turn_on_primary = False
+                    else:
+                        turn_on_primary = any(self.hass.states.get(e) and self.hass.states.get(e).state == "on" for e in primary_entities)
+
+            await set_switches(primary_entities, turn_on_primary)
+
+        # Secondary Hysteresis Logic
+        secondary_entities = self.config.get(CONF_SECONDARY_EXCESS_CONSUMERS, [])
+        secondary_is_external = _any_external(secondary_entities)
+
+        if self.secondary_excess_auto:
+            if is_negative_price:
+                turn_on_secondary = True
+            else:
+                turn_on_secondary = False
+                if secondary_is_external:
+                    if virtual_batt_pct >= getattr(self, "secondary_excess_on", 98.0):
+                        turn_on_secondary = True
+                    elif virtual_batt_pct <= getattr(self, "secondary_excess_off", 95.0):
+                        turn_on_secondary = False
+                    else:
+                        turn_on_secondary = any(self.hass.states.get(e) and self.hass.states.get(e).state == "on" for e in secondary_entities)
+                else:
+                    if virtual_batt_pct >= getattr(self, "secondary_excess_on", 98.0) and has_excess_power and battery_will_overfill:
+                        turn_on_secondary = True
+                    elif virtual_batt_pct <= getattr(self, "secondary_excess_off", 95.0) or cloud_override_off:
+                        turn_on_secondary = False
+                    else:
+                        turn_on_secondary = any(self.hass.states.get(e) and self.hass.states.get(e).state == "on" for e in secondary_entities)
+
+            await set_switches(secondary_entities, turn_on_secondary)
+
+        # Early Excess Logic
+        early_entities = self.config.get(CONF_EARLY_EXCESS_CONSUMERS, [])
+        early_is_external = _any_external(early_entities)
+
+        if getattr(self, "early_excess_auto", True):
+            if is_negative_price:
+                turn_on_early = True
+            else:
+                early_excess_min_batt = float(self.config.get(CONF_EARLY_EXCESS_MIN_BATTERY_PCT, 30.0))
+                if virtual_batt_pct < early_excess_min_batt:
+                    turn_on_early = False
+                elif not has_excess_power and cloud_override_off and not early_is_external:
+                    turn_on_early = False
+                else:
+                    # Will battery overfill if this device is OFF?
+                    will_overfill_without_early = self._simulate_early_excess_overfill(now, hourly_forecasts, virtual_batt_pct, batt_cap_wh)
+
+                    # Simple ON/OFF logic based on simulation. Minimum run time prevents rapid toggling.
+                    turn_on_early = will_overfill_without_early
+
+            await set_switches(early_entities, turn_on_early)
+
+
+        # Update recovery mode
+        if batt_level_pct <= batt_min_pct and not is_absorption:
+            self._battery_recovery_mode = True
+        elif batt_level_pct >= (batt_min_pct + 2.0) or is_absorption:
+            self._battery_recovery_mode = False
+
+        if virtual_batt_pct < max_batt_pct - 5.0:
+            self._battery_full_hysteresis = False
 
         if is_grid_charging:
-            self.current_operating_mode = "Netzladen aktiv: DTU aus"
+            self.current_operating_mode = f"Netzladen aktiv (<={round(charge_price_threshold, 3)}€): DTU aus"
             turn_on_inverter = False
         elif is_negative_price:
             self.current_operating_mode = f"Negativer Preis ({round(current_price,3)}€): DTU aus (Netzbezug maximieren)"
@@ -741,15 +918,103 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             "current_consumption": tibber_cons,
         }
 
-    def _should_grid_charge(self, now, current_price: float, current_batt_pct: float, batt_cap_wh: float, hourly_forecasts: list[dict]) -> bool:
-        """Determines if we should charge from the grid right now."""
+    def _simulate_optimal_charge_threshold(self, now, hourly_forecasts: list[dict], current_batt_pct: float, batt_cap_wh: float) -> float | None:
+        """Simulates the future to find the most expensive shortages and matches them with the cheapest charging blocks."""
         if not getattr(self, "grid_charge_enabled", False):
-            return False
+            return None
 
         grid_charger_switch = self.config.get("grid_charger_switch")
         if not grid_charger_switch:
-            return False
+            return None
 
+        future_blocks = self._build_future_blocks_pessimistic(now, hourly_forecasts)
+        if not future_blocks:
+            return None
+
+        grid_charge_eff = getattr(self, "grid_charge_efficiency", 80) / 100.0
+        batt_eff = float(self.config.get("battery_efficiency_pct", 90)) / 100.0
+
+        max_inverter_power_w = float(self.config.get("max_inverter_power_w", 800))
+        max_discharge_wh_per_15min = max_inverter_power_w / 4.0
+
+        charger_power_w = float(self.config.get("grid_charger_power_w", 1000))
+        max_charge_wh_per_15min = (charger_power_w / 4.0) * grid_charge_eff
+
+        # Simulate natural battery flow to identify shortages
+        simulated_batt_wh = batt_cap_wh * (current_batt_pct / 100.0)
+        temp_batt_wh = simulated_batt_wh
+        max_batt_wh = batt_cap_wh * (float(self.config.get("battery_max_limit_pct", 100.0)) / 100.0)
+
+        shortages = []
+        for i, fb in enumerate(future_blocks):
+            f_solar = fb["solar"] * batt_eff
+            f_cons = max(0.0, fb["house_wh"] - fb["balcony"])
+
+            if f_solar > f_cons:
+                temp_batt_wh += (f_solar - f_cons)
+            else:
+                needed = f_cons - f_solar
+                available_from_batt = min(temp_batt_wh, max_discharge_wh_per_15min)
+
+                # If we need more than the battery has, that's a shortage we might want to prevent by charging earlier
+                if needed > available_from_batt:
+                    uncovered = needed - available_from_batt
+                    shortages.append({
+                        "index": i,
+                        "price": fb["price"],
+                        "wh": min(uncovered, max_discharge_wh_per_15min - available_from_batt) # We can only discharge up to inverter limit anyway
+                    })
+
+                temp_batt_wh -= min(needed, max_discharge_wh_per_15min)
+
+            temp_batt_wh = max(0.0, min(max_batt_wh, temp_batt_wh))
+
+        if not shortages:
+            return None
+
+        # Sort shortages by price descending (we want to cover the most expensive ones first)
+        shortages.sort(key=lambda x: x["price"], reverse=True)
+
+        # Sort potential charging blocks by price ascending
+        charge_candidates = [{"index": i, "price": fb["price"], "used_wh": 0.0} for i, fb in enumerate(future_blocks)]
+        charge_candidates.sort(key=lambda x: x["price"])
+
+        highest_approved_charge_price = -0.5
+
+        # Try to match the most expensive shortages with the cheapest charging blocks that occur *before* them
+        for shortage in shortages:
+            shortage_wh_remaining = shortage["wh"]
+
+            for candidate in charge_candidates:
+                if shortage_wh_remaining <= 0:
+                    break
+
+                # We can only charge BEFORE the shortage occurs
+                if candidate["index"] >= shortage["index"]:
+                    continue
+
+                # Is it profitable?
+                # (cost to charge now + round trip losses) vs (cost to buy from grid during shortage)
+                required_shortage_price = candidate["price"] / (grid_charge_eff * batt_eff)
+
+                if shortage["price"] > required_shortage_price:
+                    # Profit! Let's schedule this candidate block to charge
+                    available_charge_capacity = max_charge_wh_per_15min - candidate["used_wh"]
+                    if available_charge_capacity > 0:
+                        charge_amount = min(shortage_wh_remaining, available_charge_capacity)
+                        candidate["used_wh"] += charge_amount
+                        shortage_wh_remaining -= charge_amount
+
+                        if candidate["price"] > highest_approved_charge_price:
+                            highest_approved_charge_price = candidate["price"]
+
+        if highest_approved_charge_price > -0.5:
+            return highest_approved_charge_price
+
+        return None
+
+    def _check_grid_charge_safety(self, now, current_price: float, current_batt_pct: float, batt_cap_wh: float, hourly_forecasts: list[dict]) -> bool:
+        """Runs the upper limit and buffer safety checks before allowing a grid charge."""
         grid_charge_eff = getattr(self, "grid_charge_efficiency", 80) / 100.0
         grid_charge_buffer_pct = getattr(self, "grid_charge_buffer", 25)
 
@@ -1020,7 +1285,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         return blocks
 
-    def _build_forecast_plan(self, now, hourly_forecasts: list[dict], current_batt_pct: float, batt_cap_wh: float, price_threshold: float):
+    def _build_forecast_plan(self, now, hourly_forecasts: list[dict], current_batt_pct: float, batt_cap_wh: float, price_threshold: float, charge_price_threshold: float | None = None):
         """Generate a forecast plan for the dynamic horizon using the dynamic threshold."""
         plan = []
         simulated_batt_wh = batt_cap_wh * (current_batt_pct / 100.0)
@@ -1036,6 +1301,10 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         max_batt_pct = float(self.config.get(CONF_BATTERY_MAX_LIMIT_PCT, self.config.get(CONF_EARLY_EXCESS_MAX_BATTERY_PCT, 100.0)))
         max_batt_wh = batt_cap_wh * (max_batt_pct / 100.0)
+
+        charger_power_w = float(self.config.get("grid_charger_power_w", 1000))
+        grid_charge_eff = getattr(self, "grid_charge_efficiency", 80) / 100.0
+        max_charge_wh_per_15min = (charger_power_w / 4.0) * grid_charge_eff
 
         for i, fb in enumerate(future_blocks):
             pred_solar = fb["solar"] * batt_eff
@@ -1066,8 +1335,18 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                     # Battery empties before overfilling, so no overfill risk for this energy
                     break
 
+            # Determine if this block would trigger grid charging
+            is_charging_block = False
+            if charge_price_threshold is not None and price <= charge_price_threshold:
+                # If it passes safety bounds, we simulate charging
+                current_temp_pct = (simulated_batt_wh / batt_cap_wh) * 100.0
+                is_charging_block = self._check_grid_charge_safety(now, price, current_temp_pct, batt_cap_wh, hourly_forecasts[i:])
+
             # New precise discharging logic mirroring the threshold calculation
-            if price < 0.0:
+            if is_charging_block:
+                action = f"Netzladen (LAD) für <={round(charge_price_threshold,3)}€"
+                simulated_batt_wh += pred_solar + max_charge_wh_per_15min
+            elif price < 0.0:
                 action = f"Negativer Preis ({round(price,3)}€): DTU aus"
                 simulated_batt_wh += pred_solar
             elif simulated_batt_wh >= max_batt_wh:
