@@ -980,6 +980,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         charge_candidates.sort(key=lambda x: x["price"])
 
         highest_approved_charge_price = -0.5
+        grid_charge_margin_eur = getattr(self, "grid_charge_margin", 2.0) / 100.0
 
         # Try to match the most expensive shortages with the cheapest charging blocks that occur *before* them
         for shortage in shortages:
@@ -997,7 +998,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 # (cost to charge now + round trip losses) vs (cost to buy from grid during shortage)
                 required_shortage_price = candidate["price"] / (grid_charge_eff * batt_eff)
 
-                if shortage["price"] > required_shortage_price:
+                # Must be profitable enough to cover the configured minimum profit margin
+                if shortage["price"] > (required_shortage_price + grid_charge_margin_eur):
                     # Profit! Let's schedule this candidate block to charge
                     available_charge_capacity = max_charge_wh_per_15min - candidate["used_wh"]
                     if available_charge_capacity > 0:
