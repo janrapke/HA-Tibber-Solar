@@ -154,16 +154,18 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
                 # Instantiate UI Entities
                 from .appliance_entities import (
-                    ApplianceRecordButton, ApplianceProgramSelect, ApplianceProposalSelect,
+                    ApplianceRecordButton, ApplianceProgramSelect, ApplianceProposalSelect, ApplianceTimerModeSelect, ApplianceTimerStepSelect,
                     ApplianceConfirmButton, ApplianceDeleteButton, ApplianceRenameText, ApplianceStatusSensor, ApplianceTimerSensor,
                     ApplianceProfileSensor, ApplianceManualTimeText
                 )
 
                 prog_sel = ApplianceProgramSelect(self, self.config_entry.entry_id, dev)
                 prop_sel = ApplianceProposalSelect(self, self.config_entry.entry_id, dev, prog_sel)
+                timer_mode_sel = ApplianceTimerModeSelect(self, self.config_entry.entry_id, dev)
+                timer_step_sel = ApplianceTimerStepSelect(self, self.config_entry.entry_id, dev)
                 manual_time_txt = ApplianceManualTimeText(self, self.config_entry.entry_id, dev)
 
-                self.appliance_entities['select'].extend([prog_sel, prop_sel])
+                self.appliance_entities['select'].extend([prog_sel, prop_sel, timer_mode_sel, timer_step_sel])
                 self.appliance_entities['button'].extend([
                     ApplianceRecordButton(self, self.config_entry.entry_id, dev),
                     ApplianceDeleteButton(self, self.config_entry.entry_id, dev, prog_sel),
