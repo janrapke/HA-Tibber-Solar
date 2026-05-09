@@ -751,17 +751,27 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             return False
 
         grid_charge_eff = getattr(self, "grid_charge_efficiency", 80) / 100.0
-        grid_charge_buffer = getattr(self, "grid_charge_buffer", 25) / 100.0
+        grid_charge_buffer_pct = getattr(self, "grid_charge_buffer", 25)
 
         # 1. Upper Limit Check
-        # Current battery percentage must remain strictly below the lowest "turn-off" threshold
-        # of the primary/secondary excess consumers to prevent them from activating.
+        # Calculate the absolute maximum allowed battery percentage for grid charging.
+        # It must be strictly below the lowest "turn-off" threshold of the primary/secondary excess consumers
+        # AND it must leave at least the configured 'grid_charge_buffer_pct' empty.
         primary_off = getattr(self, "primary_excess_off", 90.0)
         secondary_off = getattr(self, "secondary_excess_off", 95.0)
         lowest_excess_off = min(primary_off, secondary_off)
 
-        # Add a 2% safety margin below the lowest turn-off threshold
-        if current_batt_pct >= (lowest_excess_off - 2.0):
+        # Max allowed by excess devices (with 2% safety margin)
+        max_allowed_by_excess = lowest_excess_off - 2.0
+
+        # Max allowed by safety buffer (e.g., 100 - 20 = 80%)
+        # Note: We cap it against the general battery_max_limit_pct
+        global_max_pct = float(self.config.get("battery_max_limit_pct", 100.0))
+        max_allowed_by_buffer = global_max_pct - grid_charge_buffer_pct
+
+        target_max_charge_pct = min(max_allowed_by_excess, max_allowed_by_buffer)
+
+        if current_batt_pct >= target_max_charge_pct:
             return False
 
         future_blocks = self._build_future_blocks_pessimistic(now, hourly_forecasts)
@@ -773,8 +783,12 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         max_inverter_power_w = float(self.config.get("max_inverter_power_w", 800))
         max_discharge_wh_per_15min = max_inverter_power_w / 4.0
-        max_batt_pct = float(self.config.get("battery_max_limit_pct", 100.0))
-        max_batt_wh = batt_cap_wh * (max_batt_pct / 100.0)
+
+        # This is the physical maximum the battery can hold, used for general bounds
+        max_batt_wh = batt_cap_wh * (global_max_pct / 100.0)
+
+        # This is the maximum we are allowed to reach during simulation to approve grid charging
+        target_max_charge_wh = batt_cap_wh * (target_max_charge_pct / 100.0)
 
         # First pass: Check if charging is profitable by finding future high prices
         # We need future prices to be > current_price / (grid_charge_eff * batt_eff)
@@ -807,27 +821,32 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         if profitable_wh < 50.0:
             return False
 
-        # Second pass: Safety Buffer Check
-        # Will the battery overfill if we apply the safety buffer to solar?
-        temp_batt_wh_buffered = simulated_batt_wh
+        # Second pass: Forward Simulation Check
+        # Will the natural solar forecast push the battery beyond our strict target limit?
+        temp_batt_wh_future = simulated_batt_wh
 
-        # Assume we add one block of grid charge now
+        # Assume we add one block of grid charge right now
         charger_power_w = float(self.config.get("grid_charger_power_w", 1000))
         charge_added_wh = (charger_power_w / 4.0) * grid_charge_eff
-        temp_batt_wh_buffered += charge_added_wh
+        temp_batt_wh_future += charge_added_wh
+
+        # We immediately check if this single charge block puts us over the limit
+        if temp_batt_wh_future >= target_max_charge_wh:
+            return False
 
         for fb in future_blocks:
-            # Apply safety buffer to predicted solar
-            buffered_solar = fb["solar"] * (1.0 + grid_charge_buffer) * batt_eff
+            f_solar = fb["solar"] * batt_eff
             f_cons = max(0.0, fb["house_wh"] - fb["balcony"])
 
-            if buffered_solar > f_cons:
-                temp_batt_wh_buffered += (buffered_solar - f_cons)
+            if f_solar > f_cons:
+                temp_batt_wh_future += (f_solar - f_cons)
             else:
-                f_actual_discharge = min(f_cons - buffered_solar, max_discharge_wh_per_15min)
-                temp_batt_wh_buffered -= f_actual_discharge
+                f_actual_discharge = min(f_cons - f_solar, max_discharge_wh_per_15min)
+                temp_batt_wh_future -= f_actual_discharge
 
-            if temp_batt_wh_buffered >= max_batt_wh:
+            # If at any point the simulated future (including our 1 grid charge block now)
+            # exceeds our strict buffer limit, we abort charging.
+            if temp_batt_wh_future >= target_max_charge_wh:
                 return False
 
         return True
