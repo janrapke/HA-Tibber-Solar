@@ -29,7 +29,40 @@ async def async_setup_entry(
         LearningRateNumber(coordinator, entry.entry_id),
         GridChargeEfficiencyNumber(coordinator, entry.entry_id),
         GridChargeBufferNumber(coordinator, entry.entry_id),
+        GridChargeMarginNumber(coordinator, entry.entry_id),
     ])
+
+class GridChargeMarginNumber(CoordinatorEntity, NumberEntity):
+    """Number entity to set the minimum profit margin for grid charging in cents."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:currency-eur"
+    _attr_mode = NumberMode.SLIDER
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
+        self._attr_unique_id = f"{entry_id}_grid_charge_margin"
+        self._attr_name = "Netzladen Mindestgewinn (Cent/kWh)"
+
+        self._attr_native_min_value = 0.0
+        self._attr_native_max_value = 25.0
+        self._attr_native_step = 0.5
+        self._attr_native_value = getattr(coordinator, "grid_charge_margin", 2.0)
+        self.coordinator.grid_charge_margin = self._attr_native_value
+
+    @property
+    def native_value(self) -> float:
+        return self._attr_native_value
+
+    async def async_set_native_value(self, value: float) -> None:
+        self._attr_native_value = value
+        self.coordinator.grid_charge_margin = value
+        self.async_write_ha_state()
 
 class GridChargeEfficiencyNumber(CoordinatorEntity, NumberEntity):
     """Number entity to set the grid charging efficiency."""
