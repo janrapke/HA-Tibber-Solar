@@ -597,6 +597,9 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         elif batt_level_pct >= (batt_min_pct + 2.0) or is_absorption:
             self._battery_recovery_mode = False
 
+        if virtual_batt_pct < max_batt_pct - 5.0:
+            self._battery_full_hysteresis = False
+
         if is_negative_price:
             self.current_operating_mode = f"Negativer Preis ({round(current_price,3)}€): DTU aus (Netzbezug maximieren)"
             turn_on_inverter = False
@@ -613,8 +616,13 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             self.current_operating_mode = "Batterie wird voll/Absorption: Überschussvermeidung aktiv"
             turn_on_inverter = True
 
-        elif virtual_batt_pct >= 99.0:
-            self.current_operating_mode = "Batterie 100% voll: DTU an (Nulleinspeisung aktiv)"
+        elif virtual_batt_pct >= max_batt_pct - 1.0:
+            self._battery_full_hysteresis = True
+            self.current_operating_mode = "Batterie voll (DTU An)"
+            turn_on_inverter = True
+
+        elif getattr(self, "_battery_full_hysteresis", False) and virtual_batt_pct >= max_batt_pct - 5.0:
+            self.current_operating_mode = "Batterie voll (Hysterese, DTU An)"
             turn_on_inverter = True
 
         elif current_price is not None and current_price <= price_threshold:
@@ -830,11 +838,11 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             total_cost += overfill_penalty
 
             # If we end up with unused battery at the end of the simulation horizon,
-            # we subtract its value so it's not "lost" in the cost calculation.
-            # Value it realistically to avoid panic discharging. We value it at the candidate_threshold
-            # (or 0 if negative) so the simulation feels safe saving energy for this threshold.
+            # we value it at the lowest available price to force the optimizer to use the stored energy
+            # during the available price horizon at the most efficient times, rather than
+            # keeping it completely full forever if prices are low.
             if simulated_batt_wh > min_batt_wh:
-                safe_residual_price = max(0.0, candidate_threshold)
+                safe_residual_price = max(0.0, min(candidate_threshold, lowest_actual_price))
                 residual_value = ((simulated_batt_wh - min_batt_wh) / 1000.0) * safe_residual_price
                 total_cost -= residual_value
 
