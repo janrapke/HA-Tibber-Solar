@@ -21,8 +21,37 @@ async def async_setup_entry(
         SecondaryExcessAutoSwitch(coordinator, entry.entry_id),
         EarlyExcessAutoSwitch(coordinator, entry.entry_id),
         LearningModeSwitch(coordinator, entry.entry_id),
+        GridChargeEnableSwitch(coordinator, entry.entry_id),
     ]
     async_add_entities(entities)
+
+class GridChargeEnableSwitch(CoordinatorEntity, SwitchEntity):
+    """Switch to globally enable/disable charging battery from grid."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:battery-charging-high"
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
+        self._attr_unique_id = f"{entry_id}_grid_charge_enable"
+        self._attr_name = "Aus Netz laden aktiv"
+
+    @property
+    def is_on(self):
+        return getattr(self.coordinator, "grid_charge_enabled", False)
+
+    async def async_turn_on(self, **kwargs):
+        self.coordinator.grid_charge_enabled = True
+        await self.coordinator.async_request_refresh()
+
+    async def async_turn_off(self, **kwargs):
+        self.coordinator.grid_charge_enabled = False
+        await self.coordinator.async_request_refresh()
 
 class OptimizerEnableSwitch(CoordinatorEntity, SwitchEntity):
     """Switch to enable/disable the entire automation."""

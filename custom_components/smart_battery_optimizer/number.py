@@ -27,8 +27,73 @@ async def async_setup_entry(
         SecondaryExcessOffThreshold(coordinator, entry.entry_id),
         ExcessCloudToleranceNumber(coordinator, entry.entry_id),
         LearningRateNumber(coordinator, entry.entry_id),
+        GridChargeEfficiencyNumber(coordinator, entry.entry_id),
+        GridChargeBufferNumber(coordinator, entry.entry_id),
     ])
 
+class GridChargeEfficiencyNumber(CoordinatorEntity, NumberEntity):
+    """Number entity to set the grid charging efficiency."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:percent"
+    _attr_mode = NumberMode.SLIDER
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
+        self._attr_unique_id = f"{entry_id}_grid_charge_efficiency"
+        self._attr_name = "Netzladen Wirkungsgrad (%)"
+
+        self._attr_native_min_value = 50
+        self._attr_native_max_value = 100
+        self._attr_native_step = 1
+        self._attr_native_value = getattr(coordinator, "grid_charge_efficiency", 80)
+        self.coordinator.grid_charge_efficiency = self._attr_native_value
+
+    @property
+    def native_value(self) -> float:
+        return self._attr_native_value
+
+    async def async_set_native_value(self, value: float) -> None:
+        self._attr_native_value = value
+        self.coordinator.grid_charge_efficiency = value
+        self.async_write_ha_state()
+
+class GridChargeBufferNumber(CoordinatorEntity, NumberEntity):
+    """Number entity to set the solar safety buffer for grid charging."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:shield-sun"
+    _attr_mode = NumberMode.SLIDER
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
+        self._attr_unique_id = f"{entry_id}_grid_charge_buffer"
+        self._attr_name = "Netzladen Solar-Sicherheitspuffer (%)"
+
+        self._attr_native_min_value = 10
+        self._attr_native_max_value = 50
+        self._attr_native_step = 1
+        self._attr_native_value = getattr(coordinator, "grid_charge_buffer", 25)
+        self.coordinator.grid_charge_buffer = self._attr_native_value
+
+    @property
+    def native_value(self) -> float:
+        return self._attr_native_value
+
+    async def async_set_native_value(self, value: float) -> None:
+        self._attr_native_value = value
+        self.coordinator.grid_charge_buffer = value
+        self.async_write_ha_state()
 
 class ExtremePriceThresholdNumber(CoordinatorEntity, NumberEntity):
     """Number entity to set the extreme price threshold."""

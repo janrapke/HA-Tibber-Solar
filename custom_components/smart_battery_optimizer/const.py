@@ -42,3 +42,6 @@ CONF_EXCESS_MIN_RUN_TIME_MINUTES = "excess_min_run_time_minutes"
 
 CONF_EXCESS_EXTERNAL_INVERTER = "excess_external_inverter"
 CONF_SMART_DEVICES = "smart_devices"
+
+CONF_GRID_CHARGER_SWITCH = "grid_charger_switch"
+CONF_GRID_CHARGER_POWER_W = "grid_charger_power_w"

@@ -42,6 +42,8 @@ from .const import (
     CONF_EXCESS_MIN_RUN_TIME_MINUTES,
     CONF_EXCESS_EXTERNAL_INVERTER,
     CONF_SMART_DEVICES,
+    CONF_GRID_CHARGER_SWITCH,
+    CONF_GRID_CHARGER_POWER_W,
 )
 
 def get_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
@@ -122,6 +124,10 @@ def get_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
                 selector.EntitySelectorConfig(domain="switch", multiple=True)
             ),
             vol.Optional(CONF_SMART_DEVICES, default=defaults.get(CONF_SMART_DEVICES, "")): str,
+            vol.Optional(CONF_GRID_CHARGER_SWITCH, default=defaults.get(CONF_GRID_CHARGER_SWITCH, vol.UNDEFINED)): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="switch")
+            ),
+            vol.Required(CONF_GRID_CHARGER_POWER_W, default=defaults.get(CONF_GRID_CHARGER_POWER_W, 1000)): int,
         }
     )
 
