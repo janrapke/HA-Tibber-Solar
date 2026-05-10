@@ -1199,6 +1199,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                     if temp_batt_wh >= max_batt_wh:
                         will_overfill = True
                         break
+                    if temp_batt_wh <= min_batt_wh:
+                        break
 
                 simulated_batt_wh += pred_solar
 
@@ -1332,6 +1334,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
                 if temp_batt_wh >= max_batt_wh:
                     will_overfill = True
+                    break
+                if temp_batt_wh <= min_batt_wh:
                     break
 
             # Determine if this block would trigger grid charging
