@@ -76,6 +76,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         self._excess_devices_last_turned_on = {}
         self.tibber_prices = []
         self.last_tibber_fetch = None
+        self._last_inverter_command_time = None
+        self._inverter_command_debounce_minutes = 5
 
         # Number entity states
         self.extreme_price_threshold = config.get(CONF_EXTREME_PRICE_THRESHOLD, 0.40)
@@ -736,16 +738,29 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
                     await self.hass.services.async_call(domain, "select_option", {"entity_id": dpl_entity, "option": target_option}, blocking=False)
 
-            if turn_on_inverter and (not inverter_is_on or self._current_inverter_state != "on"):
-                if turn_on_btn and self.hass.states.get(turn_on_btn) is not None:
-                    await self.hass.services.async_call("button", "press", {"entity_id": turn_on_btn}, blocking=False)
-                await _set_dpl_mode(0.0)
-                self._current_inverter_state = "on"
-            elif not turn_on_inverter and (inverter_is_on or self._current_inverter_state != "off" or is_negative_price):
-                if turn_off_btn and self.hass.states.get(turn_off_btn) is not None:
-                    await self.hass.services.async_call("button", "press", {"entity_id": turn_off_btn}, blocking=False)
-                await _set_dpl_mode(1.0)
-                self._current_inverter_state = "off"
+            debounce_active = False
+            if self._last_inverter_command_time is not None:
+                elapsed_mins = (now - self._last_inverter_command_time).total_seconds() / 60.0
+                if elapsed_mins < self._inverter_command_debounce_minutes:
+                    debounce_active = True
+                    _LOGGER.debug(
+                        "Inverter commands debounced. Elapsed: %.1f mins, required: %d mins",
+                        elapsed_mins, self._inverter_command_debounce_minutes
+                    )
+
+            if not debounce_active:
+                if turn_on_inverter and (not inverter_is_on or self._current_inverter_state != "on"):
+                    if turn_on_btn and self.hass.states.get(turn_on_btn) is not None:
+                        await self.hass.services.async_call("button", "press", {"entity_id": turn_on_btn}, blocking=False)
+                    await _set_dpl_mode(0.0)
+                    self._current_inverter_state = "on"
+                    self._last_inverter_command_time = now
+                elif not turn_on_inverter and (inverter_is_on or self._current_inverter_state != "off"):
+                    if turn_off_btn and self.hass.states.get(turn_off_btn) is not None:
+                        await self.hass.services.async_call("button", "press", {"entity_id": turn_off_btn}, blocking=False)
+                    await _set_dpl_mode(1.0)
+                    self._current_inverter_state = "off"
+                    self._last_inverter_command_time = now
         except Exception as e:
             _LOGGER.error("Failed to press OpenDTU button: %s", e)
 
