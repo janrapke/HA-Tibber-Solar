@@ -71,7 +71,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         self.appliance_manager = None
         self.appliance_state_machines = {}
         self.proposal_calculator = ProposalCalculator(self)
-        self.appliance_entities = {'button': [], 'select': [], 'sensor': [], 'text': [], 'number': []}
+        self.appliance_entities = {'button': [], 'select': [], 'sensor': [], 'text': [], 'number': [], 'switch': []}
 
         # Internal state
         self.is_enabled = True
@@ -175,7 +175,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         # Clear any existing entities to prevent double-initialization on reload
         self.appliance_state_machines.clear()
-        self.appliance_entities = {'button': [], 'select': [], 'sensor': [], 'text': [], 'number': []}
+        self.appliance_entities = {'button': [], 'select': [], 'sensor': [], 'text': [], 'number': [], 'switch': []}
 
         # Init state machines for configured devices
         smart_devices_str = self.config.get(CONF_SMART_DEVICES, "")

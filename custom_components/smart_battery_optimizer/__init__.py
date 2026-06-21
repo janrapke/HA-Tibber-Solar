@@ -2,8 +2,6 @@
 import logging
 import pathlib
 
-from homeassistant.components.frontend import add_extra_js_url
-from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceEntry
@@ -17,24 +15,71 @@ PLATFORMS: list[str] = ["sensor", "switch", "number", "button", "select", "text"
 from .coordinator import SmartBatteryOptimizerCoordinator
 
 _WWW = pathlib.Path(__file__).parent / "www"
-_CARDS = [
+_CARD_FILES = [
     ("appliance-card.js", "/smart_battery_optimizer/appliance-card.js"),
     ("battery-forecast-card.js", "/smart_battery_optimizer/battery-forecast-card.js"),
 ]
+_CARD_RESOURCE_URLS = [url for _, url in _CARD_FILES]
+
+
+async def _register_static_paths(hass: HomeAssistant) -> None:
+    """Register static file paths, compatible with old and new HA APIs."""
+    try:
+        from homeassistant.components.http import StaticPathConfig
+        await hass.http.async_register_static_paths([
+            StaticPathConfig(url, str(_WWW / filename), cache_headers=False)
+            for filename, url in _CARD_FILES
+        ])
+    except (ImportError, AttributeError):
+        for filename, url in _CARD_FILES:
+            hass.http.register_static_path(url, str(_WWW / filename), cache_headers=False)
+
+
+async def _ensure_lovelace_resources(hass: HomeAssistant) -> None:
+    """Register card JS as Lovelace resources (like HACS — survives restarts, reliable)."""
+    try:
+        from homeassistant.components.lovelace.resources import ResourceStorageCollection
+
+        # Reuse HA's already-loaded collection if available (avoids duplicate store handles)
+        resources = hass.data.get("lovelace", {}).get("resources")
+        if not isinstance(resources, ResourceStorageCollection):
+            try:
+                resources = ResourceStorageCollection(hass, "core")
+            except TypeError:
+                resources = ResourceStorageCollection(hass)
+            await resources.async_load()
+
+        existing = {item["url"] for item in resources.async_items()}
+        for url in _CARD_RESOURCE_URLS:
+            if url not in existing:
+                await resources.async_create_item({"res_type": "module", "url": url})
+                _LOGGER.info("Lovelace resource registered: %s", url)
+            else:
+                _LOGGER.debug("Lovelace resource already present: %s", url)
+    except Exception as err:
+        _LOGGER.warning(
+            "Auto-registration of Lovelace resources failed (%s). "
+            "Falling back to add_extra_js_url. If cards still don't load, add manually in "
+            "Settings → Dashboards → Resources (type JavaScript-Modul): %s",
+            err,
+            ", ".join(_CARD_RESOURCE_URLS),
+        )
+        try:
+            from homeassistant.components.frontend import add_extra_js_url
+            for url in _CARD_RESOURCE_URLS:
+                add_extra_js_url(hass, url)
+        except Exception:
+            pass
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Smart Battery Optimizer from a config entry."""
     hass.data.setdefault(DOMAIN, {})
 
-    # Register custom Lovelace cards (once per HA instance)
+    # Register custom Lovelace cards (once per HA instance, not once per config entry reload)
     if not hass.data[DOMAIN].get("_cards_registered"):
-        await hass.http.async_register_static_paths([
-            StaticPathConfig(url, str(_WWW / filename), cache_headers=False)
-            for filename, url in _CARDS
-        ])
-        for _, url in _CARDS:
-            add_extra_js_url(hass, url)
+        await _register_static_paths(hass)
+        await _ensure_lovelace_resources(hass)
         hass.data[DOMAIN]["_cards_registered"] = True
 
     # Store config entry data
