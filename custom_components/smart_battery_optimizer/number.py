@@ -412,11 +412,12 @@ class LearningRateNumber(CoordinatorEntity, NumberEntity):
 
 
 class ClimateManualWNumber(CoordinatorEntity, NumberEntity):
-    """Rated power (W) of a climate device slot when running.
+    """Electrical power consumption (W) of a climate device slot when running.
 
-    Set this to the device's nameplate wattage. The system uses it as a starting
-    estimate (bootstrap) until real data from a smart-plug sensor takes over.
-    Set to 0 to indicate 'no manual value — smart-plug only'.
+    Enter the device's actual electrical draw — NOT the heating/cooling output capacity.
+    For heat pumps: use Leistungsaufnahme (e.g. 2500 W), not Heizleistung (e.g. 9000 W).
+    The system uses this as a bootstrap estimate until a smart-plug sensor takes over.
+    Set to 0 if using a power sensor only.
     """
 
     _attr_has_entity_name = True
@@ -435,7 +436,7 @@ class ClimateManualWNumber(CoordinatorEntity, NumberEntity):
             "manufacturer": "Custom",
         }
         self._attr_unique_id = f"{entry_id}_climate_slot_{slot_number}_manual_w"
-        self._attr_name = f"Klimagerät {slot_number} Nennleistung (W)"
+        self._attr_name = f"Klimagerät {slot_number} Leistungsaufnahme (W)"
         if not hasattr(coordinator, "climate_slots_manual_w"):
             coordinator.climate_slots_manual_w = {}
         coordinator.climate_slots_manual_w.setdefault(f"slot_{slot_number}", 0.0)
