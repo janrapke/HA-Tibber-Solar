@@ -37,11 +37,7 @@ class BatteryForecastCard extends HTMLElement {
   // ── HA Card API ────────────────────────────────────────────────
 
   static getStubConfig() {
-    return {};  // Alles wird auto-discovered
-  }
-
-  static getConfigElement() {
-    return document.createElement('battery-forecast-card-editor');
+    return {};
   }
 
   setConfig(config) {
@@ -52,7 +48,6 @@ class BatteryForecastCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     this._render();
-    // Historie alle 5 Minuten neu laden
     const now = Date.now();
     if (!this._fetchPending && now - this._lastFetch > 4 * 60 * 1000) {
       this._scheduleFetch(0);
@@ -122,12 +117,20 @@ class BatteryForecastCard extends HTMLElement {
 
   _render() {
     const hass = this._hass;
-    if (!hass) return;
+    if (!hass) {
+      this.shadowRoot.innerHTML = `<ha-card><div style="padding:16px;color:var(--secondary-text-color)">⚡ Batterie Prognose wird geladen…</div></ha-card>`;
+      return;
+    }
 
     const planId = this._findPlanSensor();
     const battId = this._findBattSensor();
     const planState = planId ? hass.states[planId] : null;
     const plan = planState?.attributes?.hourly_plan || [];
+
+    if (!planId || !planState) {
+      this.shadowRoot.innerHTML = `<ha-card><div style="padding:16px;color:var(--error-color)">⚠️ Kein Smart Battery Optimizer Sensor gefunden.<br><small>Integration läuft?</small></div></ha-card>`;
+      return;
+    }
     const history = this._history || [];
     const currentBatt = battId ? parseFloat(hass.states[battId]?.state) : null;
     const currentMode = hass.states['sensor.' + (planId || '').replace('sensor.', '').replace('_tagesplan_vorhersage', '_current_operating_mode')]?.state || '';
@@ -369,7 +372,5 @@ if (!window.customCards.find(c => c.type === 'battery-forecast-card')) {
     type: 'battery-forecast-card',
     name: 'Smart Battery Optimizer — Prognose',
     description: 'Batterie Ist & Prognose, Tibber-Preis und Dispatch-Plan mit Verlauf',
-    preview: false,
-    documentationURL: '',
   });
 }
