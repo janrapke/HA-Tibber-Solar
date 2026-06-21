@@ -1,11 +1,12 @@
 """Switch platform for Smart Battery Optimizer."""
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, CLIMATE_MAX_SLOTS
+from .const import DOMAIN, CLIMATE_MAX_SLOTS, CONF_PRESUNNY_SOLAR_MARGIN_PCT
 from .coordinator import SmartBatteryOptimizerCoordinator
 
 async def async_setup_entry(
@@ -23,6 +24,7 @@ async def async_setup_entry(
         LearningModeSwitch(coordinator, entry.entry_id),
         GridChargeEnableSwitch(coordinator, entry.entry_id),
         VacationModeSwitch(coordinator, entry.entry_id),
+        PresunnyDischargeSwitch(coordinator, entry.entry_id),
     ]
     for i in range(1, CLIMATE_MAX_SLOTS + 1):
         entities.append(ClimateDeviceEnabledSwitch(coordinator, entry.entry_id, i))
@@ -70,7 +72,7 @@ class OptimizerEnableSwitch(CoordinatorEntity, SwitchEntity):
             "manufacturer": "Custom",
         }
         self._attr_unique_id = f"{entry_id}_enable"
-        self._attr_name = "Smart Battery Optimizer Enabled"
+        self._attr_name = "Optimizer aktiv"
 
     @property
     def is_on(self):
@@ -100,7 +102,7 @@ class ManualZeroExportSwitch(CoordinatorEntity, SwitchEntity):
             "manufacturer": "Custom",
         }
         self._attr_unique_id = f"{entry_id}_manual_zero_export"
-        self._attr_name = "Force Zero Export"
+        self._attr_name = "Kein Export erzwingen"
 
     @property
     def is_on(self):
@@ -205,6 +207,7 @@ class LearningModeSwitch(CoordinatorEntity, SwitchEntity):
     """Switch to start/stop the fast learning mode."""
 
     _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:brain"
 
     def __init__(self, coordinator, entry_id):
@@ -215,7 +218,7 @@ class LearningModeSwitch(CoordinatorEntity, SwitchEntity):
             "manufacturer": "Custom",
         }
         self._attr_unique_id = f"{entry_id}_learning_mode"
-        self._attr_name = "Lernmodus (Dauerhaft)"
+        self._attr_name = "Lernmodus aktiv"
 
     @property
     def is_on(self):
@@ -279,6 +282,47 @@ class VacationModeSwitch(CoordinatorEntity, SwitchEntity):
         self.async_write_ha_state()
 
 
+class PresunnyDischargeSwitch(CoordinatorEntity, SwitchEntity):
+    """Aktiviert die proaktive Laderaum-Vorbereitung vor sonnigen Tagen.
+
+    Wenn aktiv: entlädt die Batterie nachts auf den berechneten Morgen-SOC
+    um Platz für den Solar-Ertrag des nächsten Tages zu schaffen.
+    """
+
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_icon = "mdi:weather-sunny-off"
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
+        self._attr_unique_id = f"{entry_id}_presunny_discharge_enabled"
+        self._attr_name = "Laderaum-Vorbereitung (Sonniger Tag)"
+
+    @property
+    def is_on(self):
+        return getattr(self.coordinator, "presunny_discharge_enabled", False)
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "ziel_soc_pct": getattr(self.coordinator, "target_morning_soc_pct", None),
+            "solar_prognose_morgen_wh": round(getattr(self.coordinator, "tomorrow_net_solar_wh", 0.0), 0),
+        }
+
+    async def async_turn_on(self, **kwargs):
+        self.coordinator.presunny_discharge_enabled = True
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs):
+        self.coordinator.presunny_discharge_enabled = False
+        self.async_write_ha_state()
+
+
 class ClimateDeviceEnabledSwitch(CoordinatorEntity, SwitchEntity):
     """Enable/disable a climate device slot in consumption predictions.
 
@@ -288,6 +332,7 @@ class ClimateDeviceEnabledSwitch(CoordinatorEntity, SwitchEntity):
     """
 
     _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:heat-pump"
 
     def __init__(self, coordinator, entry_id, slot_number: int):

@@ -2,11 +2,12 @@
 import logging
 from homeassistant.components.number import NumberEntity, NumberDeviceClass, NumberMode
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, CONF_MIN_SWITCH_INTERVAL_MINUTES, CLIMATE_MAX_SLOTS
+from .const import DOMAIN, CONF_MIN_SWITCH_INTERVAL_MINUTES, CLIMATE_MAX_SLOTS, CONF_PRESUNNY_SOLAR_MARGIN_PCT
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -40,6 +41,7 @@ async def async_setup_entry(
         GridChargeEfficiencyNumber(coordinator, entry.entry_id),
         GridChargeBufferNumber(coordinator, entry.entry_id),
         GridChargeMarginNumber(coordinator, entry.entry_id),
+        PresunnySolarMarginNumber(coordinator, entry.entry_id),
         *climate_entities,
         *app_numbers,
     ])
@@ -48,6 +50,7 @@ class GridChargeMarginNumber(CoordinatorEntity, NumberEntity):
     """Number entity to set the minimum profit margin for grid charging in cents."""
 
     _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:currency-eur"
     _attr_mode = NumberMode.SLIDER
 
@@ -59,7 +62,7 @@ class GridChargeMarginNumber(CoordinatorEntity, NumberEntity):
             "manufacturer": "Custom",
         }
         self._attr_unique_id = f"{entry_id}_grid_charge_margin"
-        self._attr_name = "Netzladen Mindestgewinn (Cent/kWh)"
+        self._attr_name = "Netzladen: Mindestgewinn (ct/kWh)"
 
         self._attr_native_min_value = 0.0
         self._attr_native_max_value = 25.0
@@ -80,6 +83,7 @@ class GridChargeEfficiencyNumber(CoordinatorEntity, NumberEntity):
     """Number entity to set the grid charging efficiency."""
 
     _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:percent"
     _attr_mode = NumberMode.SLIDER
 
@@ -91,7 +95,7 @@ class GridChargeEfficiencyNumber(CoordinatorEntity, NumberEntity):
             "manufacturer": "Custom",
         }
         self._attr_unique_id = f"{entry_id}_grid_charge_efficiency"
-        self._attr_name = "Netzladen Wirkungsgrad (%)"
+        self._attr_name = "Netzladen: Wirkungsgrad (%)"
 
         self._attr_native_min_value = 50
         self._attr_native_max_value = 100
@@ -112,6 +116,7 @@ class GridChargeBufferNumber(CoordinatorEntity, NumberEntity):
     """Number entity to set the solar safety buffer for grid charging."""
 
     _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:shield-sun"
     _attr_mode = NumberMode.SLIDER
 
@@ -123,7 +128,7 @@ class GridChargeBufferNumber(CoordinatorEntity, NumberEntity):
             "manufacturer": "Custom",
         }
         self._attr_unique_id = f"{entry_id}_grid_charge_buffer"
-        self._attr_name = "Netzladen Solar-Sicherheitspuffer (%)"
+        self._attr_name = "Netzladen: Solar-Sicherheitspuffer (%)"
 
         self._attr_native_min_value = 10
         self._attr_native_max_value = 50
@@ -144,6 +149,8 @@ class ExtremePriceThresholdNumber(CoordinatorEntity, NumberEntity):
     """Number entity to set the extreme price threshold."""
 
     _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_icon = "mdi:lightning-bolt-circle"
     _attr_mode = NumberMode.BOX
     _attr_native_min_value = 0.0
     _attr_native_max_value = 1.0
@@ -158,7 +165,7 @@ class ExtremePriceThresholdNumber(CoordinatorEntity, NumberEntity):
             "manufacturer": "Custom",
         }
         self._attr_unique_id = f"{entry_id}_extreme_price_threshold"
-        self._attr_name = "Extrem-Preis Schwelle (€)"
+        self._attr_name = "Extrempreisgrenze (€/kWh)"
         self._attr_native_value = coordinator.extreme_price_threshold
 
     @property
@@ -177,6 +184,8 @@ class ExtremePriceFactorNumber(CoordinatorEntity, NumberEntity):
     """Number entity to set the solar reserve factor for extreme prices."""
 
     _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_icon = "mdi:solar-power"
     _attr_mode = NumberMode.SLIDER
     _attr_native_min_value = 0
     _attr_native_max_value = 100
@@ -191,7 +200,7 @@ class ExtremePriceFactorNumber(CoordinatorEntity, NumberEntity):
             "manufacturer": "Custom",
         }
         self._attr_unique_id = f"{entry_id}_extreme_price_factor"
-        self._attr_name = "Extrem-Preis Solar-Reserve Faktor (%)"
+        self._attr_name = "Extrempreis: Solar-Reserve (%)"
         self._attr_native_value = coordinator.extreme_price_factor * 100.0
 
     @property
@@ -208,6 +217,8 @@ class ExtremePriceFactorNumber(CoordinatorEntity, NumberEntity):
 
 class PrimaryExcessOnThreshold(CoordinatorEntity, NumberEntity):
     _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_icon = "mdi:battery-arrow-up"
     _attr_mode = NumberMode.SLIDER
     _attr_native_min_value = 0
     _attr_native_max_value = 100
@@ -221,7 +232,7 @@ class PrimaryExcessOnThreshold(CoordinatorEntity, NumberEntity):
             "manufacturer": "Custom",
         }
         self._attr_unique_id = f"{entry_id}_primary_excess_on"
-        self._attr_name = "Primär Überschuss Ein (%)"
+        self._attr_name = "Überschuss primär: Einschalten ab (%)"
         self._attr_native_value = getattr(coordinator, "primary_excess_on", 95.0)
         self.coordinator.primary_excess_on = self._attr_native_value
 
@@ -237,6 +248,8 @@ class PrimaryExcessOnThreshold(CoordinatorEntity, NumberEntity):
 
 class PrimaryExcessOffThreshold(CoordinatorEntity, NumberEntity):
     _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_icon = "mdi:battery-arrow-down"
     _attr_mode = NumberMode.SLIDER
     _attr_native_min_value = 0
     _attr_native_max_value = 100
@@ -250,7 +263,7 @@ class PrimaryExcessOffThreshold(CoordinatorEntity, NumberEntity):
             "manufacturer": "Custom",
         }
         self._attr_unique_id = f"{entry_id}_primary_excess_off"
-        self._attr_name = "Primär Überschuss Aus (%)"
+        self._attr_name = "Überschuss primär: Ausschalten unter (%)"
         self._attr_native_value = getattr(coordinator, "primary_excess_off", 90.0)
         self.coordinator.primary_excess_off = self._attr_native_value
 
@@ -266,6 +279,8 @@ class PrimaryExcessOffThreshold(CoordinatorEntity, NumberEntity):
 
 class SecondaryExcessOnThreshold(CoordinatorEntity, NumberEntity):
     _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_icon = "mdi:battery-arrow-up"
     _attr_mode = NumberMode.SLIDER
     _attr_native_min_value = 0
     _attr_native_max_value = 100
@@ -279,7 +294,7 @@ class SecondaryExcessOnThreshold(CoordinatorEntity, NumberEntity):
             "manufacturer": "Custom",
         }
         self._attr_unique_id = f"{entry_id}_secondary_excess_on"
-        self._attr_name = "Sekundär Überschuss Ein (%)"
+        self._attr_name = "Überschuss sekundär: Einschalten ab (%)"
         self._attr_native_value = getattr(coordinator, "secondary_excess_on", 98.0)
         self.coordinator.secondary_excess_on = self._attr_native_value
 
@@ -295,6 +310,8 @@ class SecondaryExcessOnThreshold(CoordinatorEntity, NumberEntity):
 
 class SecondaryExcessOffThreshold(CoordinatorEntity, NumberEntity):
     _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_icon = "mdi:battery-arrow-down"
     _attr_mode = NumberMode.SLIDER
     _attr_native_min_value = 0
     _attr_native_max_value = 100
@@ -308,7 +325,7 @@ class SecondaryExcessOffThreshold(CoordinatorEntity, NumberEntity):
             "manufacturer": "Custom",
         }
         self._attr_unique_id = f"{entry_id}_secondary_excess_off"
-        self._attr_name = "Sekundär Überschuss Aus (%)"
+        self._attr_name = "Überschuss sekundär: Ausschalten unter (%)"
         self._attr_native_value = getattr(coordinator, "secondary_excess_off", 95.0)
         self.coordinator.secondary_excess_off = self._attr_native_value
 
@@ -324,6 +341,8 @@ class SecondaryExcessOffThreshold(CoordinatorEntity, NumberEntity):
 
 class ExcessCloudToleranceNumber(CoordinatorEntity, NumberEntity):
     _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_icon = "mdi:weather-cloudy"
     _attr_mode = NumberMode.BOX
     _attr_native_min_value = 0
     _attr_native_max_value = 60
@@ -337,7 +356,7 @@ class ExcessCloudToleranceNumber(CoordinatorEntity, NumberEntity):
             "manufacturer": "Custom",
         }
         self._attr_unique_id = f"{entry_id}_excess_cloud_tolerance"
-        self._attr_name = "Überschuss Wolken-Toleranz (Minuten)"
+        self._attr_name = "Überschuss: Wolken-Toleranz (min)"
         self._attr_native_value = getattr(coordinator, "excess_cloud_tolerance_mins", 5.0)
         self.coordinator.excess_cloud_tolerance_mins = self._attr_native_value
 
@@ -354,6 +373,7 @@ class MinSwitchIntervalNumber(CoordinatorEntity, NumberEntity):
     """Minimum time between any ON/OFF state change for consumers and inverter."""
 
     _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:timer-outline"
     _attr_mode = NumberMode.SLIDER
     _attr_native_min_value = 1
@@ -368,7 +388,7 @@ class MinSwitchIntervalNumber(CoordinatorEntity, NumberEntity):
             "manufacturer": "Custom",
         }
         self._attr_unique_id = f"{entry_id}_min_switch_interval"
-        self._attr_name = "Min. Schaltintervall (Minuten)"
+        self._attr_name = "Mindest-Schaltpause (min)"
         default = coordinator.config.get(CONF_MIN_SWITCH_INTERVAL_MINUTES, 15)
         self._attr_native_value = float(default)
 
@@ -386,6 +406,7 @@ class LearningRateNumber(CoordinatorEntity, NumberEntity):
     """Number entity to set the custom learning rate factor."""
 
     _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:speedometer"
     _attr_mode = NumberMode.SLIDER
 
@@ -397,7 +418,7 @@ class LearningRateNumber(CoordinatorEntity, NumberEntity):
             "manufacturer": "Custom",
         }
         self._attr_unique_id = f"{entry_id}_learning_rate_factor"
-        self._attr_name = "Lernrate (Faktor)"
+        self._attr_name = "Lerngeschwindigkeit (Faktor)"
 
         self._attr_native_min_value = 0.1
         self._attr_native_max_value = 0.99
@@ -414,6 +435,43 @@ class LearningRateNumber(CoordinatorEntity, NumberEntity):
         self.async_write_ha_state()
 
 
+class PresunnySolarMarginNumber(CoordinatorEntity, NumberEntity):
+    """Sicherheitspuffer für Solar-Prognose bei der Laderaum-Vorbereitung.
+
+    20% bedeutet: nutze nur 80% der vorhergesagten Solar-Energie für die Berechnung.
+    Höherer Puffer = mehr Reserve = Batterie-Ziel liegt etwas höher (sicherer, weniger Raum).
+    Niedrigerer Puffer = aggressivere Entladung = mehr Platz für Solar.
+    """
+
+    _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_icon = "mdi:shield-sun"
+    _attr_mode = NumberMode.SLIDER
+    _attr_native_min_value = 0
+    _attr_native_max_value = 60
+    _attr_native_step = 5
+    _attr_native_unit_of_measurement = "%"
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
+        self._attr_unique_id = f"{entry_id}_presunny_solar_margin_pct"
+        self._attr_name = "Laderaum-Vorbereitung: Solar-Puffer (%)"
+        coordinator.config.setdefault(CONF_PRESUNNY_SOLAR_MARGIN_PCT, 20)
+
+    @property
+    def native_value(self) -> float:
+        return float(self.coordinator.config.get(CONF_PRESUNNY_SOLAR_MARGIN_PCT, 20))
+
+    async def async_set_native_value(self, value: float) -> None:
+        self.coordinator.config[CONF_PRESUNNY_SOLAR_MARGIN_PCT] = int(value)
+        self.async_write_ha_state()
+
+
 class ClimateManualWNumber(CoordinatorEntity, NumberEntity):
     """Electrical power consumption (W) of a climate device slot when running.
 
@@ -424,6 +482,7 @@ class ClimateManualWNumber(CoordinatorEntity, NumberEntity):
     """
 
     _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:lightning-bolt"
     _attr_mode = NumberMode.BOX
     _attr_native_min_value = 0
@@ -469,6 +528,7 @@ class ClimateSolltemperaturNumber(CoordinatorEntity, NumberEntity):
     """
 
     _attr_has_entity_name = True
+    _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:thermometer"
     _attr_mode = NumberMode.SLIDER
     _attr_native_min_value = 10
