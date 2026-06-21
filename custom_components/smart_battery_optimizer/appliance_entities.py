@@ -308,9 +308,10 @@ class ApplianceScheduleSelect(SmartApplianceBase, SelectEntity):
     """Select the time-slot granularity matching the appliance's delay timer."""
 
     _OPTIONS = {
-        "Exakt (15 Min-Schritte)": 15,
-        "Halbstunden (30 Min-Schritte)": 30,
-        "Stunden (1h-Schritte)": 60,
+        "Uhrzeit (direkte Eingabe)": 15,
+        "Verzögerung: 15 Min-Schritte": 15,
+        "Verzögerung: 30 Min-Schritte": 30,
+        "Verzögerung: Stunden": 60,
     }
 
     def __init__(self, coordinator, entry_id, sensor_id):
