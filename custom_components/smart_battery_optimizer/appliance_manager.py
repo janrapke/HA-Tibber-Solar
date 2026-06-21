@@ -1,4 +1,5 @@
 import logging
+import math
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -104,8 +105,8 @@ class SmartApplianceManager:
         })
 
     def get_schedule_granularity(self, sensor_id: str) -> int:
-        """Return proposal slot granularity in minutes (15, 30, or 60)."""
-        return self.device_settings.get(sensor_id, {}).get("schedule_granularity_minutes", 15)
+        """Return proposal slot granularity in minutes (0=exact clock time, 15/30/60=delay steps)."""
+        return self.device_settings.get(sensor_id, {}).get("schedule_granularity_minutes", 0)
 
     def set_device_setting(self, sensor_id: str, key: str, value) -> None:
         if sensor_id not in self.device_settings:
@@ -377,14 +378,22 @@ class ProposalCalculator:
             is_bootstrap = True
 
         granularity = self.coordinator.appliance_manager.get_schedule_granularity(sensor_id)
-
-        start_search = now.replace(second=0, microsecond=0) + timedelta(hours=1)
-        # Snap to next valid slot for this device's granularity
-        remainder = start_search.minute % granularity
-        if remainder != 0:
-            start_search += timedelta(minutes=(granularity - remainder))
-
+        base = now.replace(second=0, microsecond=0)
         end_search = now + timedelta(hours=48)
+
+        if granularity == 0:
+            # Uhrzeit mode: absolute 15-min clock slots (14:00, 14:15, 14:30...)
+            step = 15
+            start_search = base + timedelta(hours=1)
+            remainder = start_search.minute % step
+            if remainder != 0:
+                start_search += timedelta(minutes=(step - remainder))
+        else:
+            # Delay mode: slots anchored to now (now+step, now+2*step, ...)
+            step = granularity
+            min_lead = max(step, 30)
+            steps_needed = math.ceil(min_lead / step)
+            start_search = base + timedelta(minutes=steps_needed * step)
 
         all_slots: list[Proposal] = []
         current_eval = start_search
@@ -400,7 +409,7 @@ class ProposalCalculator:
                 uses_solar_excess=solar_pct >= 20.0,
                 is_bootstrap=is_bootstrap,
             ))
-            current_eval += timedelta(minutes=granularity)
+            current_eval += timedelta(minutes=step)
 
         if not all_slots:
             return []

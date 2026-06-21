@@ -308,7 +308,7 @@ class ApplianceScheduleSelect(SmartApplianceBase, SelectEntity):
     """Select the time-slot granularity matching the appliance's delay timer."""
 
     _OPTIONS = {
-        "Uhrzeit (direkte Eingabe)": 15,
+        "Uhrzeit (direkte Eingabe)": 0,
         "Verzögerung: 15 Min-Schritte": 15,
         "Verzögerung: 30 Min-Schritte": 30,
         "Verzögerung: Stunden": 60,
