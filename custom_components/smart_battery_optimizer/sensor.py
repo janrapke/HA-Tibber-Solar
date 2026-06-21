@@ -191,20 +191,24 @@ class ForecastPlanSensor(CoordinatorEntity, SensorEntity):
 
                 # Abbreviate actions to save significant space
                 action = optimized_block.get("planned_action", "")
-                if "Einspeisen" in action:
-                    short_action = "EIN"
-                elif "Laden/Standby" in action:
+                if "Dispatch" in action:
+                    short_action = "DIS"
+                elif "Netzladen" in action:
                     short_action = "LAD"
-                elif "Batterie 100% voll" in action:
-                    short_action = "B10"
-                elif "Batterie Leer" in action:
-                    short_action = "B00"
                 elif "Negativer Preis" in action:
                     short_action = "NEG"
-                elif "Extremer Preis" in action:
-                    short_action = "EXT"
-                elif "Netzbezug" in action:
-                    short_action = "NET"
+                elif "Überschussvermeidung" in action or "Batterie wird voll" in action:
+                    short_action = "OVF"
+                elif "voll" in action.lower():
+                    short_action = "FUL"
+                elif "Minimum" in action:
+                    short_action = "MIN"
+                elif "Laderaum" in action:
+                    short_action = "PRE"
+                elif "Akku sparen" in action:
+                    short_action = "SAV"
+                elif "Manueller" in action:
+                    short_action = "MAN"
                 else:
                     short_action = action[:3].upper() if action else "???"
 
@@ -216,7 +220,8 @@ class ForecastPlanSensor(CoordinatorEntity, SensorEntity):
 
                 optimized_plan.append(optimized_block)
 
-            return {"hourly_plan": optimized_plan}
+            battery_sensor = self.coordinator.config.get("battery_level_sensor", "")
+            return {"hourly_plan": optimized_plan, "battery_sensor": battery_sensor}
         return {}
 
 # ==========================================
