@@ -405,6 +405,23 @@ class ProposalCalculator:
         if not all_slots:
             return []
 
+        # Apply optional time-window constraints
+        settings = self.coordinator.appliance_manager.device_settings.get(sensor_id, {})
+        earliest_h = int(settings.get("earliest_start_hour", 0))
+        latest_end_h = int(settings.get("latest_end_hour", 23))
+
+        if earliest_h > 0 or latest_end_h < 23:
+            filtered = []
+            for slot in all_slots:
+                if slot.start_time.hour < earliest_h:
+                    continue
+                end_time = slot.start_time + timedelta(minutes=duration_minutes)
+                # latest_end_h means "must be done by HH:59" — allow any minute within that hour
+                if end_time.hour > latest_end_h or (end_time.hour == latest_end_h and end_time.minute > 59):
+                    continue
+                filtered.append(slot)
+            all_slots = filtered if filtered else all_slots  # never leave user with zero options
+
         cheapest = min(all_slots, key=lambda p: p.cost_estimate)
         cheapest.category = "cheapest"
         cheapest.label = "Günstigster"

@@ -1,6 +1,7 @@
 from datetime import datetime
 import logging
 from homeassistant.components.button import ButtonEntity
+from homeassistant.components.number import NumberEntity
 from homeassistant.components.select import SelectEntity
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.components.text import TextEntity
@@ -249,6 +250,58 @@ class ApplianceTimerSensor(SmartApplianceBase, SensorEntity):
             minutes, _ = divmod(rem, 60)
             return f"{hours}h {minutes}m"
         return "0h 0m"
+
+
+class _ApplianceHourNumber(SmartApplianceBase, NumberEntity):
+    """Generic hour-of-day number (0–23) stored in device_settings."""
+
+    def __init__(self, coordinator, entry_id, sensor_id, key, name, icon, default):
+        super().__init__(coordinator, entry_id, sensor_id)
+        self._attr_unique_id = f"{entry_id}_{sensor_id}_{key}"
+        self._attr_name = name
+        self._attr_icon = icon
+        self._attr_native_min_value = 0
+        self._attr_native_max_value = 23
+        self._attr_native_step = 1
+        self._attr_native_unit_of_measurement = "h"
+        self._key = key
+        self._default = default
+
+    @property
+    def native_value(self) -> float:
+        return float(
+            self.coordinator.appliance_manager.device_settings
+            .get(self.sensor_id, {})
+            .get(self._key, self._default)
+        )
+
+    async def async_set_native_value(self, value: float) -> None:
+        self.coordinator.appliance_manager.set_device_setting(
+            self.sensor_id, self._key, int(value)
+        )
+        await self.coordinator.appliance_manager.async_save()
+        self.coordinator.proposal_calculator.invalidate(self.sensor_id)
+        self.async_write_ha_state()
+
+
+def ApplianceEarliestStartNumber(coordinator, entry_id, sensor_id):
+    return _ApplianceHourNumber(
+        coordinator, entry_id, sensor_id,
+        key="earliest_start_hour",
+        name="Frühester Start (Stunde)",
+        icon="mdi:clock-start",
+        default=0,
+    )
+
+
+def ApplianceLatestEndNumber(coordinator, entry_id, sensor_id):
+    return _ApplianceHourNumber(
+        coordinator, entry_id, sensor_id,
+        key="latest_end_hour",
+        name="Späteste Fertigstellung (Stunde)",
+        icon="mdi:clock-end",
+        default=23,
+    )
 
 
 class ApplianceScheduleSelect(SmartApplianceBase, SelectEntity):

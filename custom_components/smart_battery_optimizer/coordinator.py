@@ -187,7 +187,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 from .appliance_entities import (
                     ApplianceProposalSelect, ApplianceConfirmButton, ApplianceCancelButton,
                     ApplianceStatusSensor, ApplianceTimerSensor, ApplianceProgramNameText,
-                    ApplianceScheduleSelect,
+                    ApplianceScheduleSelect, ApplianceEarliestStartNumber, ApplianceLatestEndNumber,
                 )
 
                 prop_sel = ApplianceProposalSelect(self, self.config_entry.entry_id, dev)
@@ -195,6 +195,10 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 self.appliance_entities['select'].extend([
                     prop_sel,
                     ApplianceScheduleSelect(self, self.config_entry.entry_id, dev),
+                ])
+                self.appliance_entities['number'].extend([
+                    ApplianceEarliestStartNumber(self, self.config_entry.entry_id, dev),
+                    ApplianceLatestEndNumber(self, self.config_entry.entry_id, dev),
                 ])
                 self.appliance_entities['button'].extend([
                     ApplianceConfirmButton(self, self.config_entry.entry_id, dev, prop_sel),
@@ -470,10 +474,10 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         await self.learning_engine.record_balcony(current_quarter, current_balcony, cloud_cover)
 
         # Record climate device power (smart-plug sensor or 0 if not configured)
-        for slot_id, enabled in self.climate_slots_enabled.items():
-            if not enabled:
+        for device_id, state in self.climate_device_states.items():
+            if not state.get("enabled", False):
                 continue
-            sensor_entity_id = self.climate_slots_power_sensor.get(slot_id, "")
+            sensor_entity_id = state.get("power_sensor", "")
             power_w = 0.0
             if sensor_entity_id:
                 sensor_state = self.hass.states.get(sensor_entity_id)
@@ -482,7 +486,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                         power_w = float(sensor_state.state)
                     except (ValueError, TypeError):
                         pass
-            await self.learning_engine.record_climate_power(slot_id, power_w)
+            await self.learning_engine.record_climate_power(device_id, power_w)
 
         if current_quarter != self.learning_engine._last_quarter_processed and self.learning_engine._last_quarter_processed != -1:
             # Get price from that quarter to pass to finalize_quarter
@@ -501,18 +505,16 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 ghi=current_ghi, dow=now.weekday()
             )
 
-            # Finalize climate quarters for active slots
+            # Finalize climate quarters for active devices
             current_outdoor_temp = self._get_current_outdoor_temp()
-            for slot_id, enabled in self.climate_slots_enabled.items():
-                if not enabled:
+            for device_id, state in self.climate_device_states.items():
+                if not state.get("enabled", False):
                     continue
-                device_type = self.climate_slots_type.get(slot_id, "disabled")
-                if device_type == "disabled":
-                    continue
-                setpoint = self.climate_slots_setpoint.get(slot_id, 20.0)
+                device_type = state.get("device_type", "heating")
+                setpoint = state.get("setpoint", 20.0)
                 await self.learning_engine.finalize_climate_quarter(
                     self.learning_engine._last_quarter_processed,
-                    slot_id, device_type, current_outdoor_temp, setpoint,
+                    device_id, device_type, current_outdoor_temp, setpoint,
                     dow=now.weekday(),
                 )
 
@@ -1300,109 +1302,6 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         return dispatch_plan, effective_threshold
 
-    def _simulate_optimal_threshold(self, now, hourly_forecasts: list[dict], current_batt_pct: float, batt_cap_wh: float, batt_min_pct: float) -> float:
-        """Simulates the future to find the optimal price threshold by minimizing total electricity cost."""
-        # Use pessimistic blocks for the threshold calculation to ensure safe predictions
-        future_blocks = self._build_future_blocks_pessimistic(now, hourly_forecasts)
-        # Real blocks (no extreme_price_factor) for overfill detection — solar is always physical reality
-        real_blocks = self._build_future_blocks_pessimistic(now, hourly_forecasts, apply_extreme_price_factor=False)
-
-        if not future_blocks:
-            return -0.5
-
-        max_inverter_power_w = float(self.config.get(CONF_MAX_INVERTER_POWER_W, 800))
-        max_discharge_wh_per_15min = max_inverter_power_w / 4.0
-
-        batt_eff = float(self.config.get(CONF_BATTERY_EFFICIENCY_PCT, 90)) / 100.0
-
-        # Unique prices sorted
-        unique_prices = sorted(list(set(b["price"] for b in future_blocks)))
-        lowest_actual_price = unique_prices[0] if unique_prices else 0.0
-        # Add a fallback threshold that discharges everything
-        unique_prices.insert(0, -0.5)
-
-        best_threshold = -0.5
-        min_total_cost = float('inf')
-
-        max_batt_pct = float(self.config.get(CONF_BATTERY_MAX_LIMIT_PCT, self.config.get(CONF_EARLY_EXCESS_MAX_BATTERY_PCT, 100.0)))
-        max_batt_wh = batt_cap_wh * (max_batt_pct / 100.0)
-
-        for candidate_threshold in unique_prices:
-            simulated_batt_wh = batt_cap_wh * (current_batt_pct / 100.0)
-            min_batt_wh = batt_cap_wh * (batt_min_pct / 100.0)
-
-            total_cost = 0.0
-            overfill_penalty = 0.0
-
-            for i, fb in enumerate(future_blocks):
-                price = fb["price"]
-                pred_solar = fb["solar"] * batt_eff
-                pred_cons = max(0.0, fb["house_wh"] - fb["balcony"])
-
-                # Will overfill check: use real_blocks (no extreme_price_factor) so solar
-                # during expensive hours is not artificially zeroed in the physical simulation
-                will_overfill = False
-                temp_batt_wh = simulated_batt_wh
-                for rb_future in real_blocks[i:]:
-                    f_solar = rb_future["solar"] * batt_eff
-                    f_cons = max(0.0, rb_future["house_wh"] - rb_future["balcony"])
-                    f_actual_discharge = min(f_cons, max_discharge_wh_per_15min, max(0.0, temp_batt_wh - min_batt_wh))
-                    temp_batt_wh += f_solar - f_actual_discharge
-
-                    if temp_batt_wh >= max_batt_wh:
-                        will_overfill = True
-                        break
-                    if temp_batt_wh <= min_batt_wh:
-                        break
-
-                simulated_batt_wh += pred_solar
-
-                grid_import_wh = pred_cons
-
-                # If the battery is destined to overfill today, we MUST discharge to make room,
-                # ignoring the candidate threshold.
-                if will_overfill and simulated_batt_wh > min_batt_wh:
-                    available_discharge = simulated_batt_wh - min_batt_wh
-                    actual_discharge = min(pred_cons, max_discharge_wh_per_15min, available_discharge)
-                    simulated_batt_wh -= actual_discharge
-                    grid_import_wh -= actual_discharge
-                # If battery has enough energy and price is >= candidate threshold, we discharge.
-                # This ensures we strictly prioritize the most expensive blocks top-down.
-                # Do NOT discharge if price is negative.
-                elif price >= candidate_threshold and simulated_batt_wh > min_batt_wh and price >= 0.0:
-                    available_discharge = simulated_batt_wh - min_batt_wh
-                    actual_discharge = min(pred_cons, max_discharge_wh_per_15min, available_discharge)
-                    simulated_batt_wh -= actual_discharge
-                    grid_import_wh -= actual_discharge
-
-                # Add to total cost (Wh -> kWh * price per kWh)
-                total_cost += (grid_import_wh / 1000.0) * price
-
-                # Strictly penalize hitting max battery limit to prevent wasting solar energy
-                if simulated_batt_wh >= max_batt_wh:
-                    # Heavy penalty for every time block we are full, proportional to wasted potential
-                    overfill_penalty += 1000.0
-                    simulated_batt_wh = max_batt_wh
-
-            total_cost += overfill_penalty
-
-            # If we end up with unused battery at the end of the simulation horizon,
-            # we value it at the lowest available price to force the optimizer to use the stored energy
-            # during the available price horizon at the most efficient times, rather than
-            # keeping it completely full forever if prices are low.
-            if simulated_batt_wh > min_batt_wh:
-                safe_residual_price = max(0.0, min(candidate_threshold, lowest_actual_price))
-                residual_value = ((simulated_batt_wh - min_batt_wh) / 1000.0) * safe_residual_price
-                total_cost -= residual_value
-
-            # Using <= ensures that if two thresholds yield the exact same cost, we prefer the higher threshold
-            # to be more conservative about discharging.
-            if total_cost <= min_total_cost:
-                min_total_cost = total_cost
-                best_threshold = candidate_threshold
-
-        return best_threshold
-
     def _build_future_blocks_pessimistic(self, now, hourly_forecasts: list[dict], apply_extreme_price_factor: bool = True) -> list[dict]:
         """Builds a list of 15-min blocks applying the implicit cloud cover correction."""
         blocks = self._build_future_blocks(now, hourly_forecasts, apply_extreme_price_factor=apply_extreme_price_factor)
@@ -1704,24 +1603,22 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             if self.config.get(CONF_BALCONY_POWER_SENSOR):
                 pred_balcony = self.learning_engine.predict_balcony_for_quarter(q, cc, ghi=ghi)
 
-            # Add climate device load prediction per active slot
+            # Add climate device load prediction per active device
             forecast_temp = self._get_outdoor_temp_for_dt(eval_dt)
             if forecast_temp is None:
                 forecast_temp = self._get_current_outdoor_temp()
-            for slot_id, enabled in self.climate_slots_enabled.items():
-                if not enabled:
+            for device_id, state in self.climate_device_states.items():
+                if not state.get("enabled", False):
                     continue
-                device_type = self.climate_slots_type.get(slot_id, "disabled")
-                if device_type == "disabled":
-                    continue
+                device_type = state.get("device_type", "heating")
                 pred_cons += self.learning_engine.predict_climate_for_quarter(
-                    slot_id=slot_id,
+                    slot_id=device_id,
                     device_type=device_type,
                     quarter=q,
                     outdoor_temp=forecast_temp,
-                    setpoint=self.climate_slots_setpoint.get(slot_id, 20.0),
+                    setpoint=state.get("setpoint", 20.0),
                     dow=eval_dt.weekday(),
-                    manual_w=self.climate_slots_manual_w.get(slot_id, 0.0),
+                    manual_w=state.get("manual_w", 0.0),
                     device_enabled=True,
                 )
 

@@ -154,19 +154,6 @@ class ApplianceCard extends HTMLElement {
 
         .divider { height: 1px; background: var(--divider-color); margin: 12px 0; }
 
-        /* Schedule setting row */
-        .setting-row {
-          display: flex; align-items: center; gap: 10px;
-          padding-top: 12px; margin-top: 2px;
-          border-top: 1px solid var(--divider-color);
-        }
-        .setting-label { font-size: 0.83em; color: var(--secondary-text-color); flex-shrink: 0; }
-        .setting-select {
-          flex: 1; padding: 5px 8px; border-radius: 6px;
-          border: 1px solid var(--divider-color);
-          background: var(--card-background-color); color: var(--primary-text-color);
-          font-size: 0.83em; cursor: pointer;
-        }
       </style>
 
       <ha-card>
@@ -181,14 +168,6 @@ class ApplianceCard extends HTMLElement {
           ${!isRunning && !isWaiting
             ? this._renderIdle(hint, selectOptions, currentOption, hasProposals)
             : ''}
-          ${scheduleOptions.length > 0 && !isRunning ? `
-            <div class="setting-row">
-              <span class="setting-label">Zeitsteuerung:</span>
-              <select class="setting-select" id="schedule-sel">
-                ${scheduleOptions.map(o => `<option ${o === scheduleOption ? 'selected' : ''}>${o}</option>`).join('')}
-              </select>
-            </div>
-          ` : ''}
         </div>
       </ha-card>
     `;
@@ -196,9 +175,6 @@ class ApplianceCard extends HTMLElement {
     // Events
     this.shadowRoot.querySelector('#proposal-sel')?.addEventListener('change', e =>
       this._selectOption(ents.select, e.target.value));
-
-    this.shadowRoot.querySelector('#schedule-sel')?.addEventListener('change', e =>
-      this._selectOption(ents.scheduleSelect, e.target.value));
 
     this.shadowRoot.querySelector('.btn-confirm')?.addEventListener('click', () =>
       this._pressButton(ents.confirm));
