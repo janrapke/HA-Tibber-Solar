@@ -75,6 +75,7 @@ class SmartApplianceManager:
         self.entry_id = entry_id
         self.store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}_{entry_id}")
         self.programs: dict[str, list[ApplianceProgram]] = {}
+        self.device_settings: dict[str, dict] = {}
 
     async def async_load(self):
         data = await self.store.async_load()
@@ -82,6 +83,7 @@ class SmartApplianceManager:
             raw = {}
             if isinstance(data, dict) and "programs" in data:
                 raw = data["programs"]
+                self.device_settings = data.get("device_settings", {})
             else:
                 raw = data  # very old format
 
@@ -89,7 +91,6 @@ class SmartApplianceManager:
                 if isinstance(val, list):
                     self.programs[sensor_id] = [ApplianceProgram.from_dict(p) for p in val]
                 elif isinstance(val, dict):
-                    # Was single-program format — wrap in list
                     self.programs[sensor_id] = [ApplianceProgram.from_dict(val)]
         _LOGGER.debug("Loaded appliance programs: %s", {k: len(v) for k, v in self.programs.items()})
 
@@ -98,8 +99,18 @@ class SmartApplianceManager:
             "programs": {
                 sensor_id: [p.to_dict() for p in prog_list]
                 for sensor_id, prog_list in self.programs.items()
-            }
+            },
+            "device_settings": self.device_settings,
         })
+
+    def get_schedule_granularity(self, sensor_id: str) -> int:
+        """Return proposal slot granularity in minutes (15, 30, or 60)."""
+        return self.device_settings.get(sensor_id, {}).get("schedule_granularity_minutes", 15)
+
+    def set_device_setting(self, sensor_id: str, key: str, value) -> None:
+        if sensor_id not in self.device_settings:
+            self.device_settings[sensor_id] = {}
+        self.device_settings[sensor_id][key] = value
 
     def get_programs(self, sensor_id: str) -> list[ApplianceProgram]:
         return self.programs.get(sensor_id, [])
@@ -365,10 +376,13 @@ class ProposalCalculator:
             flat_power_w = 1000.0  # placeholder — real cost unknown
             is_bootstrap = True
 
+        granularity = self.coordinator.appliance_manager.get_schedule_granularity(sensor_id)
+
         start_search = now.replace(second=0, microsecond=0) + timedelta(hours=1)
-        remainder = start_search.minute % 15
+        # Snap to next valid slot for this device's granularity
+        remainder = start_search.minute % granularity
         if remainder != 0:
-            start_search += timedelta(minutes=(15 - remainder))
+            start_search += timedelta(minutes=(granularity - remainder))
 
         end_search = now + timedelta(hours=48)
 
@@ -386,7 +400,7 @@ class ProposalCalculator:
                 uses_solar_excess=solar_pct >= 20.0,
                 is_bootstrap=is_bootstrap,
             ))
-            current_eval += timedelta(minutes=15)
+            current_eval += timedelta(minutes=granularity)
 
         if not all_slots:
             return []

@@ -251,6 +251,40 @@ class ApplianceTimerSensor(SmartApplianceBase, SensorEntity):
         return "0h 0m"
 
 
+class ApplianceScheduleSelect(SmartApplianceBase, SelectEntity):
+    """Select the time-slot granularity matching the appliance's delay timer."""
+
+    _OPTIONS = {
+        "Exakt (15 Min-Schritte)": 15,
+        "Halbstunden (30 Min-Schritte)": 30,
+        "Stunden (1h-Schritte)": 60,
+    }
+
+    def __init__(self, coordinator, entry_id, sensor_id):
+        super().__init__(coordinator, entry_id, sensor_id)
+        self._attr_unique_id = f"{entry_id}_{sensor_id}_schedule_granularity"
+        self._attr_name = "Zeitsteuerung"
+        self._attr_icon = "mdi:timer-cog-outline"
+        self._attr_options = list(self._OPTIONS.keys())
+
+    @property
+    def current_option(self) -> str:
+        g = self.coordinator.appliance_manager.get_schedule_granularity(self.sensor_id)
+        for label, minutes in self._OPTIONS.items():
+            if minutes == g:
+                return label
+        return self._attr_options[0]
+
+    async def async_select_option(self, option: str) -> None:
+        minutes = self._OPTIONS.get(option, 15)
+        self.coordinator.appliance_manager.set_device_setting(
+            self.sensor_id, "schedule_granularity_minutes", minutes
+        )
+        await self.coordinator.appliance_manager.async_save()
+        self.coordinator.proposal_calculator.invalidate(self.sensor_id)
+        self.async_write_ha_state()
+
+
 class ApplianceProgramNameText(SmartApplianceBase, TextEntity):
     """Optional: rename an auto-detected program by its index."""
 

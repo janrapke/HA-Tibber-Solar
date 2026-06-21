@@ -43,6 +43,7 @@ from .const import (
     CONF_EARLY_EXCESS_MAX_BATTERY_PCT,
     CONF_BATTERY_MAX_LIMIT_PCT,
     CONF_EXCESS_MIN_RUN_TIME_MINUTES,
+    CONF_PRESUNNY_SOLAR_MARGIN_PCT,
 )
 from .learning import LearningEngine
 from .appliance_manager import SmartApplianceManager, ApplianceStateMachine, ApplianceState, ProposalCalculator
@@ -117,12 +118,24 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         self._low_solar_minutes = 0
         self._battery_recovery_mode = False
 
-        # Climate device slot state (populated by switch/number/select/text entities)
-        self.climate_slots_enabled: dict = {}    # slot_id -> bool
-        self.climate_slots_type: dict = {}       # slot_id -> "heating"|"cooling"|"heat_pump"|"disabled"
-        self.climate_slots_manual_w: dict = {}   # slot_id -> float (W nameplate)
-        self.climate_slots_setpoint: dict = {}   # slot_id -> float (°C Solltemperatur)
-        self.climate_slots_power_sensor: dict = {}  # slot_id -> HA entity_id for power reading
+        # Overfill emergency tracking
+        self._overfill_emergency_active = False
+        self._overfill_emergency_start = None
+        self._overfill_emergency_batt_wh_start = 0.0
+
+        # Block-by-block dispatch plan: [{dt, discharge_wh, price}]
+        self._dispatch_plan: list[dict] = []
+        self.overfill_absorption_last_wh = 0.0
+
+        # Laderaum-Vorbereitung (proactive night discharge before sunny day)
+        self.presunny_discharge_enabled = False
+        self.target_morning_soc_pct: float | None = None
+        self.tomorrow_net_solar_wh: float = 0.0
+        self._last_morning_soc_calc: datetime | None = None
+
+        # Climate device state — keyed by device_id, populated by climate_entities on init
+        # Each entry: {enabled, device_type, setpoint, manual_w, power_sensor}
+        self.climate_device_states: dict = {}
 
     @property
     def is_learning_mode_active(self) -> bool:
@@ -174,11 +187,15 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 from .appliance_entities import (
                     ApplianceProposalSelect, ApplianceConfirmButton, ApplianceCancelButton,
                     ApplianceStatusSensor, ApplianceTimerSensor, ApplianceProgramNameText,
+                    ApplianceScheduleSelect,
                 )
 
                 prop_sel = ApplianceProposalSelect(self, self.config_entry.entry_id, dev)
 
-                self.appliance_entities['select'].append(prop_sel)
+                self.appliance_entities['select'].extend([
+                    prop_sel,
+                    ApplianceScheduleSelect(self, self.config_entry.entry_id, dev),
+                ])
                 self.appliance_entities['button'].extend([
                     ApplianceConfirmButton(self, self.config_entry.entry_id, dev, prop_sel),
                     ApplianceCancelButton(self, self.config_entry.entry_id, dev),
@@ -197,6 +214,21 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         for entity_id in self.config.get(CONF_EXCLUDED_POWER_SENSORS, []):
             if entity_id not in self.appliance_state_machines:
                 self.appliance_state_machines[entity_id] = ApplianceStateMachine(entity_id, self.appliance_manager)
+
+        # Create per-device entities for configured climate devices
+        from .climate_entities import (
+            ClimateDeviceEnabledSwitch, ClimateDeviceTypeSelect,
+            ClimateManualWNumber, ClimateSolltemperaturNumber, ClimatePowerSensorText,
+        )
+        from .const import CONF_CLIMATE_DEVICES
+        climate_devices = self.config.get(CONF_CLIMATE_DEVICES, [])
+        for device_config in climate_devices:
+            eid = self.config_entry.entry_id
+            self.appliance_entities['switch'].append(ClimateDeviceEnabledSwitch(self, eid, device_config))
+            self.appliance_entities['select'].append(ClimateDeviceTypeSelect(self, eid, device_config))
+            self.appliance_entities['number'].append(ClimateManualWNumber(self, eid, device_config))
+            self.appliance_entities['number'].append(ClimateSolltemperaturNumber(self, eid, device_config))
+            self.appliance_entities['text'].append(ClimatePowerSensorText(self, eid, device_config))
 
         await self._fetch_tibber_prices()
         await self._fetch_open_meteo_ghi()
@@ -377,6 +409,11 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         await self._fetch_tibber_prices()
         await self._fetch_open_meteo_ghi()
+
+        # Stündliche Neuberechnung des Morgen-SOC-Ziels (Laderaum-Vorbereitung)
+        if self._last_morning_soc_calc is None or (now - self._last_morning_soc_calc).total_seconds() >= 3600:
+            self.target_morning_soc_pct = self._calculate_target_morning_soc(now)
+            self._last_morning_soc_calc = now
 
         tibber_cons = self._get_float_state(self.config[CONF_TIBBER_CONSUMPTION_SENSOR])
         tibber_exp = self._get_float_state(self.config[CONF_TIBBER_EXPORT_SENSOR])
@@ -588,7 +625,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         # Device switching is controlled separately by min_switch_interval_minutes.
         hourly_forecasts = await self._get_hourly_forecasts()
 
-        price_threshold = self._simulate_optimal_threshold(now, hourly_forecasts, batt_level_pct, batt_cap_wh, batt_min_pct)
+        self._dispatch_plan, price_threshold = self._calculate_optimal_dispatch(now, hourly_forecasts, batt_level_pct, batt_cap_wh, batt_min_pct)
         charge_price_threshold = self._simulate_optimal_charge_threshold(now, hourly_forecasts, batt_level_pct, batt_cap_wh)
 
         self._build_forecast_plan(now, hourly_forecasts, batt_level_pct, batt_cap_wh, price_threshold, charge_price_threshold)
@@ -598,15 +635,26 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             self.predicted_remaining_solar += block["solar_wh"]
             self.predicted_remaining_consumption += block["consumption_wh"]
 
-        # Forward simulation — will battery hit max?
+        # Forward simulation — will battery hit max? (use real solar forecast, no extreme_price_factor)
         battery_will_overfill = False
-        temp_batt_pct = batt_level_pct
-        for block in self.hourly_plan:
-            temp_batt_pct = block.get("battery_pct_end", temp_batt_pct)
-            if temp_batt_pct >= max_batt_pct:
+        _real_blocks_overfill = self._build_future_blocks_pessimistic(now, hourly_forecasts, apply_extreme_price_factor=False)
+        _batt_eff_check = float(self.config.get(CONF_BATTERY_EFFICIENCY_PCT, 90)) / 100.0
+        _max_dis_wh_check = float(self.config.get(CONF_MAX_INVERTER_POWER_W, 800)) / 4.0
+        _min_batt_wh_check = batt_cap_wh * (batt_min_pct / 100.0)
+        _max_batt_wh_check = batt_cap_wh * (max_batt_pct / 100.0)
+        _temp_batt_wh_check = batt_cap_wh * (batt_level_pct / 100.0)
+        for _rb in _real_blocks_overfill:
+            _sol = _rb["solar"] * _batt_eff_check
+            _con = max(0.0, _rb["house_wh"] - _rb.get("balcony", 0.0))
+            if _sol > _con:
+                _temp_batt_wh_check += (_sol - _con)
+            else:
+                _temp_batt_wh_check -= min(_con - _sol, _max_dis_wh_check)
+            _temp_batt_wh_check = max(_min_batt_wh_check, _temp_batt_wh_check)
+            if _temp_batt_wh_check >= _max_batt_wh_check:
                 battery_will_overfill = True
                 break
-            if temp_batt_pct <= batt_min_pct:
+            if _temp_batt_wh_check <= _min_batt_wh_check:
                 break
 
         # Evaluate grid charging
@@ -730,6 +778,32 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
             await set_switches(early_entities, turn_on_early)
 
+        # Überfüll-Notfall: wenn Simulation Überfüllung zeigt, ALLE Verbraucher sofort einschalten
+        # unabhängig von individuellen Hysterese-Schwellen — verhindert Solarabschneidung
+        if battery_will_overfill and not is_negative_price:
+            emergency_entities = (
+                (primary_entities if self.primary_excess_auto else []) +
+                (secondary_entities if self.secondary_excess_auto else []) +
+                (early_entities if getattr(self, "early_excess_auto", True) else [])
+            )
+            if emergency_entities:
+                await set_switches(emergency_entities, True)
+
+        # Absorption-Tracking: misst ob Verbraucher die Überfüllung tatsächlich verhindern
+        _current_batt_wh = batt_cap_wh * (batt_level_pct / 100.0)
+        if battery_will_overfill:
+            if not self._overfill_emergency_active:
+                self._overfill_emergency_start = now
+                self._overfill_emergency_batt_wh_start = _current_batt_wh
+            self._overfill_emergency_active = True
+        else:
+            if self._overfill_emergency_active and self._overfill_emergency_start is not None:
+                elapsed_min = (now - self._overfill_emergency_start).total_seconds() / 60.0
+                if elapsed_min >= 1.0:
+                    # Positive = Batterie gefallen = Verbraucher haben absorbiert (gut)
+                    # Negativ = Batterie trotzdem gestiegen = Verbraucher reichten nicht aus
+                    self.overfill_absorption_last_wh = self._overfill_emergency_batt_wh_start - _current_batt_wh
+            self._overfill_emergency_active = False
 
         # Update recovery mode
         if batt_level_pct <= batt_min_pct and not is_absorption:
@@ -739,6 +813,18 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         if virtual_batt_pct < max_batt_pct - 5.0:
             self._battery_full_hysteresis = False
+
+        # Dispatch lookup: check if current 15-min block should discharge
+        _now_ts = now
+        _current_dispatch_wh = 0.0
+        _next_dispatch_info = ""
+        for _dp in self._dispatch_plan:
+            _dp_dt = _dp["dt"]
+            if _dp_dt <= _now_ts < _dp_dt + timedelta(minutes=15):
+                _current_dispatch_wh = _dp["discharge_wh"]
+            elif _dp_dt > _now_ts and _dp["discharge_wh"] > 0.5 and not _next_dispatch_info:
+                _next_dispatch_info = f" (nächste Entladung ~{dt_util.as_local(_dp_dt).strftime('%H:%M')}, {round(_dp['price'], 3)}€)"
+        should_discharge_now = _current_dispatch_wh > 0.5
 
         if is_grid_charging:
             self.current_operating_mode = f"Netzladen aktiv (<={round(charge_price_threshold, 3)}€): DTU aus"
@@ -768,12 +854,24 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             self.current_operating_mode = "Batterie voll (Hysterese, DTU An)"
             turn_on_inverter = True
 
-        elif current_price is not None and current_price <= price_threshold:
-            self.current_operating_mode = f"Strom günstig (<{round(price_threshold,3)}€): DTU aus (Akku wird gespart)"
+        elif (
+            getattr(self, "presunny_discharge_enabled", False)
+            and self.target_morning_soc_pct is not None
+            and batt_level_pct > self.target_morning_soc_pct + 5.0
+            and (dt_util.as_local(now).hour >= 20 or dt_util.as_local(now).hour < 6)
+        ):
+            self.current_operating_mode = (
+                f"Laderaum vorbereiten: Ziel {self.target_morning_soc_pct:.0f}% "
+                f"(aktuell {batt_level_pct:.0f}%) — DTU An"
+            )
+            turn_on_inverter = True
+
+        elif not should_discharge_now:
+            self.current_operating_mode = f"Akku sparen{_next_dispatch_info}: DTU aus"
             turn_on_inverter = False
 
         else:
-            self.current_operating_mode = "Preis hoch: DTU an (Nulleinspeisung aktiv)"
+            self.current_operating_mode = f"Dispatch aktiv ({round(current_price, 3) if current_price else '?'}€): DTU an"
             turn_on_inverter = True
 
         # Toggle grid charger switch
@@ -1013,7 +1111,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         if current_batt_pct >= target_max_charge_pct:
             return False
 
-        future_blocks = self._build_future_blocks_pessimistic(now, hourly_forecasts)
+        future_blocks = self._build_future_blocks_pessimistic(now, hourly_forecasts, apply_extreme_price_factor=False)
         if not future_blocks:
             return False
 
@@ -1092,7 +1190,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
     def _simulate_early_excess_overfill(self, now, hourly_forecasts: list[dict], current_batt_pct: float, batt_cap_wh: float) -> bool:
         """Simulates if the battery will reach the configured limit using pessimistic data, assuming the early excess device is OFF."""
-        future_blocks = self._build_future_blocks_pessimistic(now, hourly_forecasts)
+        future_blocks = self._build_future_blocks_pessimistic(now, hourly_forecasts, apply_extreme_price_factor=False)
 
         simulated_batt_wh = batt_cap_wh * (current_batt_pct / 100.0)
         batt_eff = float(self.config.get(CONF_BATTERY_EFFICIENCY_PCT, 90)) / 100.0
@@ -1120,10 +1218,94 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         return False
 
+    def _calculate_optimal_dispatch(self, now, hourly_forecasts: list[dict], current_batt_pct: float, batt_cap_wh: float, batt_min_pct: float) -> tuple[list[dict], float]:
+        """Greedy zwei-Pass Dispatch: weist Batterie-Entladung den teuersten Blöcken zuerst zu.
+
+        Pass 1: Vorwärtssimulation ohne strategische Entladung — erfasst Batterie-Verlauf
+                und erzwingt Entladung nur wenn Überfüllung droht.
+        Pass 2: Greedy-Zuteilung — verarbeitet Blöcke nach Preis absteigend und weist
+                verfügbare Batteriekapazität dem teuersten verbleibenden Verbrauch zu.
+
+        Gibt zurück: (dispatch_plan, effective_threshold)
+          dispatch_plan: Liste von {dt, discharge_wh, price} pro 15-min-Block
+          effective_threshold: niedrigster Preis bei dem entladen wird (für Rückwärts-Kompatibilität)
+        """
+        real_blocks = self._build_future_blocks_pessimistic(now, hourly_forecasts, apply_extreme_price_factor=False)
+
+        if not real_blocks:
+            return [], -0.5
+
+        batt_eff = float(self.config.get(CONF_BATTERY_EFFICIENCY_PCT, 90)) / 100.0
+        max_discharge_wh = float(self.config.get(CONF_MAX_INVERTER_POWER_W, 800)) / 4.0
+        min_batt_wh = batt_cap_wh * (batt_min_pct / 100.0)
+        max_batt_pct_val = float(self.config.get(CONF_BATTERY_MAX_LIMIT_PCT, self.config.get(CONF_EARLY_EXCESS_MAX_BATTERY_PCT, 100.0)))
+        max_batt_wh = batt_cap_wh * (max_batt_pct_val / 100.0)
+
+        n = len(real_blocks)
+        discharge_decisions = [0.0] * n
+
+        # Pass 1: Vorwärtssimulation — nur erzwungene Entladung (Überfüll-Schutz)
+        running_batt_wh = [0.0] * n
+        temp_batt = batt_cap_wh * (current_batt_pct / 100.0)
+        for i, rb in enumerate(real_blocks):
+            running_batt_wh[i] = temp_batt
+            sol = rb["solar"] * batt_eff
+            con = max(0.0, rb["house_wh"] - rb.get("balcony", 0.0))
+            temp_batt += sol
+            if temp_batt > max_batt_wh:
+                forced = min(con, max_discharge_wh, temp_batt - max_batt_wh)
+                discharge_decisions[i] += forced
+                temp_batt -= forced
+            temp_batt = max(min_batt_wh, min(max_batt_wh, temp_batt))
+
+        # Pass 2: Greedy-Zuteilung — teuerste Blöcke zuerst
+        sortable = [(i, rb["price"]) for i, rb in enumerate(real_blocks) if rb["price"] > 0]
+        sortable.sort(key=lambda x: x[1], reverse=True)
+
+        for idx, price in sortable:
+            rb = real_blocks[idx]
+            sol = rb["solar"] * batt_eff
+            con = max(0.0, rb["house_wh"] - rb.get("balcony", 0.0))
+
+            # Wieviel Verbrauch ist noch ungedeckt (über erzwungene Entladung hinaus)?
+            cons_uncovered = max(0.0, con - sol - discharge_decisions[idx])
+            max_additional = min(cons_uncovered, max_discharge_wh - discharge_decisions[idx])
+            if max_additional <= 0:
+                continue
+
+            # Wieviel Batterie ist zu diesem Zeitpunkt verfügbar?
+            # running_batt_wh[idx] = Akkustand VOR diesem Block (inkl. Kaskaden aus früheren Zuteilungen)
+            # + sol: Solar lädt den Akku in diesem Block auf, bevor wir entladen
+            # - discharge_decisions[idx]: bereits reservierte Entladung (Pass-1-Zwangsentladung)
+            available = max(0.0, running_batt_wh[idx] + sol - min_batt_wh - discharge_decisions[idx])
+            extra = min(max_additional, available)
+            if extra <= 0:
+                continue
+
+            discharge_decisions[idx] += extra
+
+            # Kaskade: Batterie-Stand für alle nachfolgenden Blöcke reduzieren
+            for j in range(idx + 1, n):
+                running_batt_wh[j] = max(min_batt_wh, running_batt_wh[j] - extra)
+
+        # Ergebnis-Liste aufbauen
+        dispatch_plan = [
+            {"dt": rb["dt"], "discharge_wh": discharge_decisions[i], "price": rb["price"]}
+            for i, rb in enumerate(real_blocks)
+        ]
+
+        # Effektiver Schwellenwert für Rückwärts-Kompatibilität (z.B. Plandarstellung)
+        dispatch_prices = [d["price"] for d in dispatch_plan if d["discharge_wh"] > 0.5]
+        effective_threshold = min(dispatch_prices) if dispatch_prices else -0.5
+
+        return dispatch_plan, effective_threshold
+
     def _simulate_optimal_threshold(self, now, hourly_forecasts: list[dict], current_batt_pct: float, batt_cap_wh: float, batt_min_pct: float) -> float:
         """Simulates the future to find the optimal price threshold by minimizing total electricity cost."""
         # Use pessimistic blocks for the threshold calculation to ensure safe predictions
         future_blocks = self._build_future_blocks_pessimistic(now, hourly_forecasts)
+        # Real blocks (no extreme_price_factor) for overfill detection — solar is always physical reality
+        real_blocks = self._build_future_blocks_pessimistic(now, hourly_forecasts, apply_extreme_price_factor=False)
 
         if not future_blocks:
             return -0.5
@@ -1157,12 +1339,13 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 pred_solar = fb["solar"] * batt_eff
                 pred_cons = max(0.0, fb["house_wh"] - fb["balcony"])
 
-                # Will overfill check: forward simulation to detect if we hit max limit before emptying
+                # Will overfill check: use real_blocks (no extreme_price_factor) so solar
+                # during expensive hours is not artificially zeroed in the physical simulation
                 will_overfill = False
                 temp_batt_wh = simulated_batt_wh
-                for fb_future in future_blocks[i:]:
-                    f_solar = fb_future["solar"] * batt_eff
-                    f_cons = max(0.0, fb_future["house_wh"] - fb_future["balcony"])
+                for rb_future in real_blocks[i:]:
+                    f_solar = rb_future["solar"] * batt_eff
+                    f_cons = max(0.0, rb_future["house_wh"] - rb_future["balcony"])
                     f_actual_discharge = min(f_cons, max_discharge_wh_per_15min, max(0.0, temp_batt_wh - min_batt_wh))
                     temp_batt_wh += f_solar - f_actual_discharge
 
@@ -1220,9 +1403,9 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         return best_threshold
 
-    def _build_future_blocks_pessimistic(self, now, hourly_forecasts: list[dict]) -> list[dict]:
+    def _build_future_blocks_pessimistic(self, now, hourly_forecasts: list[dict], apply_extreme_price_factor: bool = True) -> list[dict]:
         """Builds a list of 15-min blocks applying the implicit cloud cover correction."""
-        blocks = self._build_future_blocks(now, hourly_forecasts)
+        blocks = self._build_future_blocks(now, hourly_forecasts, apply_extreme_price_factor=apply_extreme_price_factor)
 
         # Determine end of today for the daily boundary
         end_of_today = now.replace(hour=23, minute=59, second=59, microsecond=999999)
@@ -1265,6 +1448,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         plan = []
         simulated_batt_wh = batt_cap_wh * (current_batt_pct / 100.0)
         future_blocks = self._build_future_blocks_pessimistic(now, hourly_forecasts)
+        # Real blocks for overfill detection: solar not zeroed by extreme_price_factor
+        real_blocks = self._build_future_blocks_pessimistic(now, hourly_forecasts, apply_extreme_price_factor=False)
 
         batt_eff = float(self.config.get(CONF_BATTERY_EFFICIENCY_PCT, 90)) / 100.0
 
@@ -1292,14 +1477,21 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             pred_cons = max(0.0, raw_house_wh - pred_balcony)
 
             available_discharge = max(0.0, simulated_batt_wh - min_batt_wh)
-            actual_discharge = min(pred_cons, max_discharge_wh_per_15min, available_discharge)
+            available_discharge = min(available_discharge, max_discharge_wh_per_15min)
 
-            # Will overfill check: forward simulation to detect if we hit 100% before emptying
+            # Use dispatch plan for this block: how much should we discharge?
+            dispatch_wh = 0.0
+            if i < len(self._dispatch_plan):
+                dispatch_wh = self._dispatch_plan[i]["discharge_wh"]
+            sim_discharge = min(dispatch_wh, available_discharge)
+            dispatching_this_block = dispatch_wh > 0.5
+
+            # Will overfill check: use real_blocks so solar during expensive hours is not zeroed
             will_overfill = False
             temp_batt_wh = simulated_batt_wh
-            for fb_future in future_blocks[i:]:
-                f_solar = fb_future["solar"] * batt_eff
-                f_cons = max(0.0, fb_future["house_wh"] - fb_future["balcony"])
+            for rb_future in real_blocks[i:]:
+                f_solar = rb_future["solar"] * batt_eff
+                f_cons = max(0.0, rb_future["house_wh"] - rb_future["balcony"])
                 f_actual_discharge = min(f_cons, max_discharge_wh_per_15min, max(0.0, temp_batt_wh - min_batt_wh))
                 temp_batt_wh += f_solar - f_actual_discharge
 
@@ -1312,11 +1504,9 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             # Determine if this block would trigger grid charging
             is_charging_block = False
             if charge_price_threshold is not None and price <= charge_price_threshold:
-                # If it passes safety bounds, we simulate charging
                 current_temp_pct = (simulated_batt_wh / batt_cap_wh) * 100.0
                 is_charging_block = self._check_grid_charge_safety(now, price, current_temp_pct, batt_cap_wh, hourly_forecasts[i:])
 
-            # New precise discharging logic mirroring the threshold calculation
             if is_charging_block:
                 action = f"Netzladen (LAD) für <={round(charge_price_threshold,3)}€"
                 simulated_batt_wh += pred_solar + max_charge_wh_per_15min
@@ -1325,22 +1515,19 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 simulated_batt_wh += pred_solar
             elif simulated_batt_wh >= max_batt_wh:
                 action = f"Batterie {int(max_batt_pct)}% voll (DTU An)"
-                # To prevent forecasting drops, we calculate as if solar goes into battery, then cap it
-                simulated_batt_wh += pred_solar - actual_discharge
+                simulated_batt_wh += pred_solar - sim_discharge
             elif will_overfill:
-                # If we know the battery will hit the max limit today, never save battery via grid import
-                # Instead, act as Nulleinspeisung (DTU An) to make room for the solar.
                 action = "Überschussvermeidung (DTU An)"
-                simulated_batt_wh += pred_solar - actual_discharge
-            elif price < price_threshold:
-                action = f"Netzbezug (Akku sparen für >={round(price_threshold,3)}€)"
-                simulated_batt_wh += pred_solar
+                simulated_batt_wh += pred_solar - sim_discharge
             elif simulated_batt_wh <= min_batt_wh:
                 action = "Batterie am Minimum (DTU Aus)"
                 simulated_batt_wh += pred_solar
+            elif not dispatching_this_block:
+                action = "Akku sparen: DTU aus"
+                simulated_batt_wh += pred_solar
             else:
-                action = "Nulleinspeisung (DTU An)"
-                simulated_batt_wh += pred_solar - actual_discharge
+                action = f"Dispatch ({round(price,3)}€): DTU an"
+                simulated_batt_wh += pred_solar - sim_discharge
 
             simulated_batt_wh = max(0, min(batt_cap_wh, simulated_batt_wh))
 
@@ -1358,7 +1545,125 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         self.hourly_plan = plan
 
-    def _build_future_blocks(self, now, hourly_forecasts: list[dict]) -> list[dict]:
+    def _calculate_target_morning_soc(self, now) -> float | None:
+        """Berechnet den Ziel-SOC für den nächsten Morgen um Platz für Solar zu schaffen.
+
+        Berücksichtigt:
+        - Erwarteten Solar-Nettoüberschuss morgen (Solar minus Verbrauch)
+        - Morgenpreis-Reserve: Batterie-Kapazität für teure Morgenstunden (6-10 Uhr)
+        - Solar-Sicherheitspuffer (konfigurierbar)
+        - Gestrige Tibber-Preise als Fallback wenn heutige Morgenpreise noch nicht bekannt
+
+        Gibt None zurück wenn keine GHI-Daten für morgen verfügbar.
+        """
+        import homeassistant.util.dt as dt_util_local
+        local_now = dt_util_local.as_local(now)
+        tomorrow = (local_now + timedelta(days=1)).date()
+
+        batt_cap_wh = float(self.config.get(CONF_BATTERY_CAPACITY_WH, 5000))
+        batt_min_pct = float(self.config.get(CONF_BATTERY_MIN_LIMIT_PCT, 10))
+        max_batt_pct = float(self.config.get(CONF_BATTERY_MAX_LIMIT_PCT, 100.0))
+        batt_eff = float(self.config.get(CONF_BATTERY_EFFICIENCY_PCT, 90)) / 100.0
+        solar_margin_pct = float(self.config.get(CONF_PRESUNNY_SOLAR_MARGIN_PCT, 20)) / 100.0
+
+        # Schritt 1: Erwarteter Netto-Solar morgen (Solar minus Verbrauch, 6-18 Uhr)
+        tomorrow_net_solar_wh = 0.0
+        has_ghi_tomorrow = False
+        for hour in range(6, 19):
+            for minute_offset in [0, 15, 30, 45]:
+                q = hour * 4 + (minute_offset // 15)
+                block_dt = dt_util_local.as_utc(
+                    dt_util_local.as_local(now).replace(
+                        year=tomorrow.year, month=tomorrow.month, day=tomorrow.day,
+                        hour=hour, minute=minute_offset, second=0, microsecond=0
+                    )
+                )
+                ghi = self._get_ghi_for_dt(block_dt)
+                if ghi > 0:
+                    has_ghi_tomorrow = True
+                pred_solar = self.learning_engine.predict_solar_for_quarter(q, cloud_cover=50.0, ghi=ghi)
+                if self.config.get(CONF_BALCONY_POWER_SENSOR):
+                    pred_solar += self.learning_engine.predict_balcony_for_quarter(q, cloud_cover=50.0, ghi=ghi)
+                pred_solar_effective = pred_solar * batt_eff
+                pred_cons = self.learning_engine.predict_consumption_for_quarter(q, dow=tomorrow.weekday())
+                net = pred_solar_effective - pred_cons
+                if net > 0:
+                    tomorrow_net_solar_wh += net
+
+        if not has_ghi_tomorrow:
+            return None
+
+        # Sicherheitspuffer anwenden (20% Puffer = nutze nur 80% des Forecasts)
+        tomorrow_net_solar_wh_safe = tomorrow_net_solar_wh * (1.0 - solar_margin_pct)
+        self.tomorrow_net_solar_wh = tomorrow_net_solar_wh_safe
+
+        # Schritt 2: Morgenpreis-Reserve (6-10 Uhr)
+        morning_reserve_wh = 0.0
+        avg_morning_price = 0.0
+        morning_price_count = 0
+        for hour in range(6, 11):
+            for minute_offset in [0, 15, 30, 45]:
+                block_dt_local = dt_util_local.as_local(now).replace(
+                    year=tomorrow.year, month=tomorrow.month, day=tomorrow.day,
+                    hour=hour, minute=minute_offset, second=0, microsecond=0
+                )
+                block_dt_utc = dt_util_local.as_utc(block_dt_local)
+                # Tibber-Preis für diesen Block finden (Fallback: gestrig)
+                block_price = None
+                for p in self.tibber_prices:
+                    p_dt = p.get("datetime")
+                    if p_dt and p_dt <= block_dt_utc < p_dt + timedelta(minutes=15):
+                        block_price = float(p.get("total", 0.0))
+                        break
+                if block_price is None:
+                    # Fallback: gleicher Block gestern
+                    fallback_dt = block_dt_utc - timedelta(hours=24)
+                    for p in self.tibber_prices:
+                        p_dt = p.get("datetime")
+                        if p_dt and p_dt <= fallback_dt < p_dt + timedelta(minutes=15):
+                            block_price = float(p.get("total", 0.0))
+                            break
+                if block_price is not None:
+                    avg_morning_price += block_price
+                    morning_price_count += 1
+
+        if morning_price_count > 0:
+            avg_morning_price /= morning_price_count
+
+        # Morgenverbrauch (6-10 Uhr) — Anteil aus Batterie (Solar noch gering in diesen Stunden)
+        for hour in range(6, 11):
+            for minute_offset in [0, 15, 30, 45]:
+                q = hour * 4 + (minute_offset // 15)
+                block_dt = dt_util_local.as_utc(
+                    dt_util_local.as_local(now).replace(
+                        year=tomorrow.year, month=tomorrow.month, day=tomorrow.day,
+                        hour=hour, minute=minute_offset, second=0, microsecond=0
+                    )
+                )
+                ghi = self._get_ghi_for_dt(block_dt)
+                pred_solar = self.learning_engine.predict_solar_for_quarter(q, cloud_cover=50.0, ghi=ghi) * batt_eff
+                pred_cons = self.learning_engine.predict_consumption_for_quarter(q, dow=tomorrow.weekday())
+                # Wie viel kommt aus Batterie? (Verbrauch minus Solar, mindestens 0)
+                from_battery = max(0.0, pred_cons - pred_solar)
+                morning_reserve_wh += from_battery
+
+        # Schritt 3: Ziel-SOC berechnen
+        # Batterie muss morgen früh haben: Morgenreserve + Mindest-Puffer
+        min_batt_wh = batt_cap_wh * (batt_min_pct / 100.0)
+        max_batt_wh = batt_cap_wh * (max_batt_pct / 100.0)
+
+        target_wh = morning_reserve_wh + min_batt_wh
+        # Sicherstellen: target + Solar passt in Batterie
+        if target_wh + tomorrow_net_solar_wh_safe > max_batt_wh:
+            target_wh = max(min_batt_wh, max_batt_wh - tomorrow_net_solar_wh_safe)
+
+        target_pct = (target_wh / batt_cap_wh) * 100.0
+        # Clamp: sinnvoller Bereich
+        target_pct = max(batt_min_pct + 5.0, min(max_batt_pct - 10.0, target_pct))
+
+        return target_pct
+
+    def _build_future_blocks(self, now, hourly_forecasts: list[dict], apply_extreme_price_factor: bool = True) -> list[dict]:
         """Builds a list of 15-min blocks until the end of available prices."""
         # Find maximum time we have prices for
         max_dt = now
@@ -1444,8 +1749,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             if price is None:
                 price = 0.0
 
-            # Extreme Price Reserve Logic
-            if price > self.extreme_price_threshold:
+            # Extreme Price Reserve Logic (only for price arbitrage simulations, not physical overfill checks)
+            if apply_extreme_price_factor and price > self.extreme_price_threshold:
                 pred_solar = pred_solar * self.extreme_price_factor
                 pred_balcony = pred_balcony * self.extreme_price_factor
 
