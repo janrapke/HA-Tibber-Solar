@@ -1,0 +1,258 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Tibber Energietarif",
+        "description": "Verbinde den Smart Battery Optimizer mit deinem Tibber-Konto. Den API-Token findest du unter app.tibber.com → Konto → Entwickler.",
+        "data": {
+          "tibber_api_token": "Tibber API-Token",
+          "tibber_price_sensor": "Aktueller Strompreissensor (Tibber Pulse)",
+          "tibber_consumption_sensor": "Netzverbrauchssensor (Bezug)",
+          "tibber_export_sensor": "Netzeinspeisesensor (Einspeisung)"
+        },
+        "data_description": {
+          "tibber_api_token": "Persönlicher API-Token von app.tibber.com → Konto → Entwickler. Ermöglicht den Abruf der stündlichen Preisvorhersage.",
+          "tibber_price_sensor": "Sensor der Tibber-Integration, der den aktuellen Strompreis anzeigt (z. B. sensor.tibber_pulse_aktueller_stundenstrompreis).",
+          "tibber_consumption_sensor": "Sensor, der den aktuellen Strombezug aus dem Netz in Watt misst (z. B. sensor.tibber_pulse_leistung).",
+          "tibber_export_sensor": "Sensor, der die aktuelle Einspeisung ins Netz in Watt misst. Oft der gleiche Sensor wie der Verbrauchssensor mit negativen Werten – dann trotzdem separat eintragen."
+        }
+      },
+      "battery": {
+        "title": "Batterie",
+        "description": "Konfiguriere deine Hausbatterie. Diese Werte bestimmen, wie aggressiv die Batterie geladen und entladen wird.",
+        "data": {
+          "battery_level_sensor": "Batteriestand-Sensor (%)",
+          "battery_capacity_wh": "Batteriekapazität (Wh)",
+          "battery_min_limit_pct": "Minimaler Ladestand (%)",
+          "battery_max_limit_pct": "Maximaler Ladestand für Netzladung (%)",
+          "battery_efficiency_pct": "Lade-/Entlade-Wirkungsgrad (%)",
+          "solar_charge_state_sensor": "Ladezustand-Sensor des Solarladegeräts (optional)"
+        },
+        "data_description": {
+          "battery_level_sensor": "Sensor, der den aktuellen Ladestand der Batterie in Prozent (0–100) anzeigt.",
+          "battery_capacity_wh": "Gesamtkapazität deiner Batterie in Wattstunden. Beispiel: Eine 5-kWh-Batterie hat 5000 Wh.",
+          "battery_min_limit_pct": "Unter diesen Ladestand wird die Batterie nicht entladen – als Notreserve. Empfehlung: 10–20 %.",
+          "battery_max_limit_pct": "Bis zu diesem Ladestand darf die Batterie aus dem Netz geladen werden (bei günstigen Preisen). Solarüberschuss kann darüber hinaus laden. Empfehlung: 80–95 %.",
+          "battery_efficiency_pct": "Wirkungsgrad des Batterie-Lade/Entlade-Kreislaufs. Typisch: 90 % (100 Wh rein → 90 Wh nutzbar).",
+          "solar_charge_state_sensor": "Optional: Sensor des Batterie-Ladegeräts, der den Ladezustand meldet (z. B. 'Absorption', 'Float', 'Bulk'). Verbessert die Vorhersagegenauigkeit."
+        }
+      },
+      "solar_inverter": {
+        "title": "Solar & Wechselrichter (OpenDTU)",
+        "description": "Verbinde den Optimizer mit deiner Solaranlage und dem OpenDTU-Wechselrichter. OpenDTU steuert, ob der Wechselrichter Batteriestrom ins Haus einspeist.",
+        "data": {
+          "solar_power_sensor": "Solarleistungs-Sensoren (W)",
+          "balcony_power_sensor": "Balkonkraftwerk-Sensor (optional)",
+          "opendtu_turn_on_button": "OpenDTU: Einschalten-Button",
+          "opendtu_turn_off_button": "OpenDTU: Ausschalten-Button",
+          "opendtu_producing_sensor": "OpenDTU: Produziert-Sensor (Binär)",
+          "opendtu_output_sensor": "OpenDTU: Ausgangsleistungs-Sensor (W)",
+          "opendtu_dpl_mode_select": "OpenDTU: DPL-Modus-Entity (optional)",
+          "max_inverter_power_w": "Maximale Wechselrichterleistung (W)"
+        },
+        "data_description": {
+          "solar_power_sensor": "Alle Sensoren, die aktuelle Solarproduktion in Watt messen. Mehrere Sensoren wählen wenn mehrere Strings/Wechselrichter vorhanden sind.",
+          "balcony_power_sensor": "Optional: Sensor eines Balkonkraftwerks (Stecker-PV ohne Speicheranbindung), das separat gemessen wird.",
+          "opendtu_turn_on_button": "Button-Entity in Home Assistant, die den OpenDTU-Wechselrichter einschaltet (Batterieentladung startet).",
+          "opendtu_turn_off_button": "Button-Entity in Home Assistant, die den OpenDTU-Wechselrichter ausschaltet (Batterieentladung stoppt).",
+          "opendtu_producing_sensor": "Binärer Sensor, der anzeigt ob der Wechselrichter gerade aktiv Strom erzeugt (true = an, false = aus).",
+          "opendtu_output_sensor": "Sensor, der die aktuelle Ausgangsleistung des OpenDTU-Wechselrichters in Watt anzeigt.",
+          "opendtu_dpl_mode_select": "Optional: Entity zur Steuerung des 'Dynamic Power Limiter' in OpenDTU. Wenn gesetzt, wird der Wechselrichter stufenlos gedrosselt statt hart an/aus geschaltet.",
+          "max_inverter_power_w": "Maximale erlaubte Ausgangsleistung des Wechselrichters in Watt. In Deutschland gesetzlich auf 800 W für Stecker-PV begrenzt."
+        }
+      },
+      "system": {
+        "title": "Systemparameter",
+        "description": "Grundlegende Parameter deines Energiesystems. Diese Werte fließen in die Vorhersage- und Optimierungsberechnungen ein.",
+        "data": {
+          "weather_entity": "Wetter-Entity (für Solarvorhersage)",
+          "base_load_w": "Grundverbrauch des Hauses (W)",
+          "solar_peak_w": "Maximale Solarleistung (W)",
+          "extreme_price_threshold": "Extrempreisgrenze (€/kWh)",
+          "excluded_power_sensors": "Ausgeschlossene Leistungssensoren (optional)"
+        },
+        "data_description": {
+          "weather_entity": "Wetter-Entity aus der Home-Assistant-Wetter-Integration (z. B. weather.home). Die Wolkenbedeckungsvorhersage wird für die Solarertragsprognose genutzt.",
+          "base_load_w": "Durchschnittlicher Grundverbrauch deines Hauses ohne große Sonderverbraucher, in Watt. Tipp: In der Tibber-App ablelesbar als Durchschnittsverbrauch nachts.",
+          "solar_peak_w": "Nominale Maximalleistung aller installierten Solarmodule in Watt (Summe der Peakleistung aller Panels). Beispiel: 10 × 400-W-Module = 4000 W.",
+          "extreme_price_threshold": "Ab diesem Strompreis (€/kWh) gilt Strom als 'extrem teuer'. Der Optimizer entlädt dann die Batterie bevorzugt. Typisch: 0,35–0,50 €/kWh.",
+          "excluded_power_sensors": "Optional: Leistungssensoren von Großverbrauchern, die beim Berechnen des normalen Hausverbrauchs ignoriert werden sollen. Beispiel: E-Auto-Wallbox, Wärmepumpe."
+        }
+      },
+      "excess": {
+        "title": "Überschuss-Verbraucher",
+        "description": "Geräte, die automatisch eingeschaltet werden, wenn mehr Solarstrom produziert wird als gerade verbraucht wird. Alle Felder sind optional – nur konfigurieren was vorhanden ist.",
+        "data": {
+          "primary_excess_consumers": "Primäre Verbraucher (höchste Priorität)",
+          "secondary_excess_consumers": "Sekundäre Verbraucher (zweite Priorität)",
+          "early_excess_consumers": "Frühe Überschuss-Verbraucher (Vormittag)",
+          "early_excess_expected_power_w": "Erwarteter Verbrauch früher Verbraucher (W)",
+          "early_excess_min_battery_pct": "Mindest-Batteriestand für frühe Verbraucher (%)",
+          "excess_min_run_time_minutes": "Mindestlaufzeit pro Einschaltvorgang (Minuten)",
+          "excess_external_inverter": "Schalter an externem Wechselrichter (optional)",
+          "smart_devices": "Erweiterte Gerätekonfiguration (JSON, optional)"
+        },
+        "data_description": {
+          "primary_excess_consumers": "Schalter für Geräte, die als erste eingeschaltet werden wenn Solarüberschuss vorhanden ist (z. B. Waschmaschine, Geschirrspüler). Höchste Priorität.",
+          "secondary_excess_consumers": "Schalter für Geräte, die erst dann eingeschaltet werden wenn nach den primären Verbrauchern noch Überschuss verbleibt. Zweite Priorität.",
+          "early_excess_consumers": "Schalter für Geräte, die schon am frühen Morgen eingeschaltet werden dürfen wenn die Batterie ausreichend geladen ist – auch bevor voller Solarüberschuss vorhanden ist.",
+          "early_excess_expected_power_w": "Typischer Strombedarf der frühen Überschuss-Verbraucher in Watt. Wird genutzt um zu beurteilen ob genug Solarleistung erwartet wird.",
+          "early_excess_min_battery_pct": "Mindestladestand der Batterie, bevor frühe Verbraucher eingeschaltet werden dürfen. Schützt vor Entladen bei unzureichendem Solarertrag.",
+          "excess_min_run_time_minutes": "Mindestlaufzeit in Minuten, bevor ein Überschuss-Verbraucher wieder ausgeschaltet wird. Verhindert häufiges Ein-/Ausschalten und schützt Geräte.",
+          "excess_external_inverter": "Optional: Schalter, die an einem externen Wechselrichter (nicht OpenDTU) angeschlossen sind. Diese unterliegen nicht den OpenDTU-Leistungslimits.",
+          "smart_devices": "Optional: JSON-Konfiguration für Geräte mit Zeitplänen und Lernfunktionen (fortgeschrittene Funktion für erfahrene Nutzer)."
+        }
+      },
+      "grid_charger": {
+        "title": "Netzladegerät",
+        "description": "Konfiguriere das Laden der Batterie aus dem Netz. Der Optimizer lädt die Batterie automatisch auf wenn der Strompreis besonders günstig ist. Beide Felder können leer gelassen werden wenn kein Netzladegerät vorhanden ist.",
+        "data": {
+          "grid_charger_switch": "Netzladegerät-Schalter (optional)",
+          "grid_charger_power_w": "Ladeleistung des Netzladegeräts (W)"
+        },
+        "data_description": {
+          "grid_charger_switch": "Optional: Schalter (Switch-Entity), der das Netz-Ladegerät für die Batterie ein- und ausschaltet. Leer lassen wenn die Batterie nicht aus dem Netz geladen werden soll.",
+          "grid_charger_power_w": "Ladeleistung des Netz-Ladegeräts in Watt. Wird für die Planung der Netzladung bei günstigen Tibber-Preisen verwendet."
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbindung fehlgeschlagen",
+      "invalid_auth": "Ungültige Zugangsdaten",
+      "unknown": "Unerwarteter Fehler"
+    },
+    "abort": {
+      "already_configured": "Integration ist bereits eingerichtet"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Smart Battery Optimizer – Einstellungen",
+        "description": "Wähle den Bereich, den du ändern möchtest.",
+        "menu_options": {
+          "tibber": "Tibber Energietarif",
+          "battery": "Batterie",
+          "solar_inverter": "Solar & Wechselrichter",
+          "system": "Systemparameter",
+          "excess": "Überschuss-Verbraucher",
+          "grid_charger": "Netzladegerät"
+        }
+      },
+      "tibber": {
+        "title": "Tibber Energietarif",
+        "description": "Verbindung zu deinem Tibber-Konto und den Tibber-Sensoren.",
+        "data": {
+          "tibber_api_token": "Tibber API-Token",
+          "tibber_price_sensor": "Aktueller Strompreissensor (Tibber Pulse)",
+          "tibber_consumption_sensor": "Netzverbrauchssensor (Bezug)",
+          "tibber_export_sensor": "Netzeinspeisesensor (Einspeisung)"
+        },
+        "data_description": {
+          "tibber_api_token": "Persönlicher API-Token von app.tibber.com → Konto → Entwickler. Ermöglicht den Abruf der stündlichen Preisvorhersage.",
+          "tibber_price_sensor": "Sensor der Tibber-Integration, der den aktuellen Strompreis anzeigt (z. B. sensor.tibber_pulse_aktueller_stundenstrompreis).",
+          "tibber_consumption_sensor": "Sensor, der den aktuellen Strombezug aus dem Netz in Watt misst.",
+          "tibber_export_sensor": "Sensor, der die aktuelle Einspeisung ins Netz in Watt misst."
+        }
+      },
+      "battery": {
+        "title": "Batterie",
+        "description": "Ladegrenzen und Kapazität der Hausbatterie.",
+        "data": {
+          "battery_level_sensor": "Batteriestand-Sensor (%)",
+          "battery_capacity_wh": "Batteriekapazität (Wh)",
+          "battery_min_limit_pct": "Minimaler Ladestand (%)",
+          "battery_max_limit_pct": "Maximaler Ladestand für Netzladung (%)",
+          "battery_efficiency_pct": "Lade-/Entlade-Wirkungsgrad (%)",
+          "solar_charge_state_sensor": "Ladezustand-Sensor des Solarladegeräts (optional)"
+        },
+        "data_description": {
+          "battery_level_sensor": "Sensor, der den aktuellen Ladestand der Batterie in Prozent (0–100) anzeigt.",
+          "battery_capacity_wh": "Gesamtkapazität deiner Batterie in Wattstunden. Beispiel: Eine 5-kWh-Batterie hat 5000 Wh.",
+          "battery_min_limit_pct": "Unter diesen Ladestand wird die Batterie nicht entladen – als Notreserve. Empfehlung: 10–20 %.",
+          "battery_max_limit_pct": "Bis zu diesem Ladestand darf die Batterie aus dem Netz geladen werden. Solarüberschuss kann darüber hinaus laden. Empfehlung: 80–95 %.",
+          "battery_efficiency_pct": "Wirkungsgrad des Batterie-Lade/Entlade-Kreislaufs. Typisch: 90 % (100 Wh rein → 90 Wh nutzbar).",
+          "solar_charge_state_sensor": "Optional: Sensor des Batterie-Ladegeräts, der den Ladezustand meldet (z. B. 'Absorption', 'Float', 'Bulk'). Verbessert die Vorhersagegenauigkeit."
+        }
+      },
+      "solar_inverter": {
+        "title": "Solar & Wechselrichter (OpenDTU)",
+        "description": "Solaranlage und OpenDTU-Wechselrichter für die Batterieentladung.",
+        "data": {
+          "solar_power_sensor": "Solarleistungs-Sensoren (W)",
+          "balcony_power_sensor": "Balkonkraftwerk-Sensor (optional)",
+          "opendtu_turn_on_button": "OpenDTU: Einschalten-Button",
+          "opendtu_turn_off_button": "OpenDTU: Ausschalten-Button",
+          "opendtu_producing_sensor": "OpenDTU: Produziert-Sensor (Binär)",
+          "opendtu_output_sensor": "OpenDTU: Ausgangsleistungs-Sensor (W)",
+          "opendtu_dpl_mode_select": "OpenDTU: DPL-Modus-Entity (optional)",
+          "max_inverter_power_w": "Maximale Wechselrichterleistung (W)"
+        },
+        "data_description": {
+          "solar_power_sensor": "Alle Sensoren, die aktuelle Solarproduktion in Watt messen. Mehrere Sensoren wählen wenn mehrere Strings/Wechselrichter vorhanden sind.",
+          "balcony_power_sensor": "Optional: Sensor eines Balkonkraftwerks (Stecker-PV ohne Speicheranbindung), das separat gemessen wird.",
+          "opendtu_turn_on_button": "Button-Entity in Home Assistant, die den OpenDTU-Wechselrichter einschaltet (Batterieentladung startet).",
+          "opendtu_turn_off_button": "Button-Entity in Home Assistant, die den OpenDTU-Wechselrichter ausschaltet (Batterieentladung stoppt).",
+          "opendtu_producing_sensor": "Binärer Sensor, der anzeigt ob der Wechselrichter gerade aktiv Strom erzeugt (true = an, false = aus).",
+          "opendtu_output_sensor": "Sensor, der die aktuelle Ausgangsleistung des OpenDTU-Wechselrichters in Watt anzeigt.",
+          "opendtu_dpl_mode_select": "Optional: Entity zur Steuerung des 'Dynamic Power Limiter' in OpenDTU. Wenn gesetzt, wird der Wechselrichter stufenlos gedrosselt statt hart an/aus geschaltet.",
+          "max_inverter_power_w": "Maximale erlaubte Ausgangsleistung des Wechselrichters in Watt. In Deutschland gesetzlich auf 800 W für Stecker-PV begrenzt."
+        }
+      },
+      "system": {
+        "title": "Systemparameter",
+        "description": "Grundlegende Parameter deines Energiesystems für Vorhersage und Optimierung.",
+        "data": {
+          "weather_entity": "Wetter-Entity (für Solarvorhersage)",
+          "base_load_w": "Grundverbrauch des Hauses (W)",
+          "solar_peak_w": "Maximale Solarleistung (W)",
+          "extreme_price_threshold": "Extrempreisgrenze (€/kWh)",
+          "excluded_power_sensors": "Ausgeschlossene Leistungssensoren (optional)"
+        },
+        "data_description": {
+          "weather_entity": "Wetter-Entity aus der Home-Assistant-Wetter-Integration (z. B. weather.home). Die Wolkenbedeckungsvorhersage wird für die Solarertragsprognose genutzt.",
+          "base_load_w": "Durchschnittlicher Grundverbrauch deines Hauses ohne große Sonderverbraucher, in Watt. Tipp: In der Tibber-App ablelesbar als Durchschnittsverbrauch nachts.",
+          "solar_peak_w": "Nominale Maximalleistung aller installierten Solarmodule in Watt (Summe der Peakleistung aller Panels). Beispiel: 10 × 400-W-Module = 4000 W.",
+          "extreme_price_threshold": "Ab diesem Strompreis (€/kWh) gilt Strom als 'extrem teuer'. Der Optimizer entlädt dann die Batterie bevorzugt. Typisch: 0,35–0,50 €/kWh.",
+          "excluded_power_sensors": "Optional: Leistungssensoren von Großverbrauchern, die beim Berechnen des normalen Hausverbrauchs ignoriert werden sollen. Beispiel: E-Auto-Wallbox, Wärmepumpe."
+        }
+      },
+      "excess": {
+        "title": "Überschuss-Verbraucher",
+        "description": "Geräte, die automatisch bei Solarüberschuss eingeschaltet werden. Alle Felder sind optional.",
+        "data": {
+          "primary_excess_consumers": "Primäre Verbraucher (höchste Priorität)",
+          "secondary_excess_consumers": "Sekundäre Verbraucher (zweite Priorität)",
+          "early_excess_consumers": "Frühe Überschuss-Verbraucher (Vormittag)",
+          "early_excess_expected_power_w": "Erwarteter Verbrauch früher Verbraucher (W)",
+          "early_excess_min_battery_pct": "Mindest-Batteriestand für frühe Verbraucher (%)",
+          "excess_min_run_time_minutes": "Mindestlaufzeit pro Einschaltvorgang (Minuten)",
+          "excess_external_inverter": "Schalter an externem Wechselrichter (optional)",
+          "smart_devices": "Erweiterte Gerätekonfiguration (JSON, optional)"
+        },
+        "data_description": {
+          "primary_excess_consumers": "Schalter für Geräte, die als erste eingeschaltet werden wenn Solarüberschuss vorhanden ist (z. B. Waschmaschine, Geschirrspüler). Höchste Priorität.",
+          "secondary_excess_consumers": "Schalter für Geräte, die erst dann eingeschaltet werden wenn nach den primären Verbrauchern noch Überschuss verbleibt. Zweite Priorität.",
+          "early_excess_consumers": "Schalter für Geräte, die schon am frühen Morgen eingeschaltet werden dürfen wenn die Batterie ausreichend geladen ist – auch bevor voller Solarüberschuss vorhanden ist.",
+          "early_excess_expected_power_w": "Typischer Strombedarf der frühen Überschuss-Verbraucher in Watt. Wird genutzt um zu beurteilen ob genug Solarleistung erwartet wird.",
+          "early_excess_min_battery_pct": "Mindestladestand der Batterie, bevor frühe Verbraucher eingeschaltet werden dürfen. Schützt vor Entladen bei unzureichendem Solarertrag.",
+          "excess_min_run_time_minutes": "Mindestlaufzeit in Minuten, bevor ein Überschuss-Verbraucher wieder ausgeschaltet wird. Verhindert häufiges Ein-/Ausschalten und schützt Geräte.",
+          "excess_external_inverter": "Optional: Schalter, die an einem externen Wechselrichter (nicht OpenDTU) angeschlossen sind. Diese unterliegen nicht den OpenDTU-Leistungslimits.",
+          "smart_devices": "Optional: JSON-Konfiguration für Geräte mit Zeitplänen und Lernfunktionen (fortgeschrittene Funktion für erfahrene Nutzer)."
+        }
+      },
+      "grid_charger": {
+        "title": "Netzladegerät",
+        "description": "Einstellungen für das automatische Laden der Batterie aus dem Netz bei günstigen Tibber-Preisen.",
+        "data": {
+          "grid_charger_switch": "Netzladegerät-Schalter (optional)",
+          "grid_charger_power_w": "Ladeleistung des Netzladegeräts (W)"
+        },
+        "data_description": {
+          "grid_charger_switch": "Optional: Schalter (Switch-Entity), der das Netz-Ladegerät ein- und ausschaltet. Leer lassen wenn die Batterie nicht aus dem Netz geladen werden soll.",
+          "grid_charger_power_w": "Ladeleistung des Netz-Ladegeräts in Watt. Wird für die Planung der Netzladung bei günstigen Tibber-Preisen verwendet."
+        }
+      }
+    }
+  }
+}

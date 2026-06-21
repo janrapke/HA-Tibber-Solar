@@ -2,31 +2,117 @@
   "config": {
     "step": {
       "user": {
-        "title": "Smart Battery Optimizer Setup",
-        "description": "Configure the sensors and parameters for the Smart Battery Optimizer.",
+        "title": "Tibber Energy Tariff",
+        "description": "Connect the Smart Battery Optimizer to your Tibber account. Find your API token at app.tibber.com → Account → Developer.",
         "data": {
           "tibber_api_token": "Tibber API Token",
-          "tibber_price_sensor": "Tibber Live Price Sensor (e.g., Pulse)",
-          "tibber_consumption_sensor": "Tibber Pulse Consumption Sensor",
-          "tibber_export_sensor": "Tibber Pulse Export Sensor",
-          "battery_level_sensor": "Battery Level Sensor (%)",
-          "solar_power_sensor": "Solar Power Sensors (W)",
-          "opendtu_turn_on_button": "OpenDTU Inverter Turn ON Button",
-          "opendtu_turn_off_button": "OpenDTU Inverter Turn OFF Button",
-          "opendtu_producing_sensor": "OpenDTU Producing Binary Sensor",
-          "opendtu_output_sensor": "OpenDTU Inverter Output Sensor (W)",
-          "opendtu_dpl_mode_select": "OpenDTU DPL Mode Entity (Select/Number)",
-          "weather_entity": "Weather Entity (for cloud cover)",
+          "tibber_price_sensor": "Current Electricity Price Sensor (Tibber Pulse)",
+          "tibber_consumption_sensor": "Grid Consumption Sensor (Import)",
+          "tibber_export_sensor": "Grid Export Sensor (Feed-in)"
+        },
+        "data_description": {
+          "tibber_api_token": "Your personal API token from app.tibber.com → Account → Developer. Enables fetching hourly price forecasts.",
+          "tibber_price_sensor": "Sensor from the Tibber integration showing the current electricity price (e.g. sensor.tibber_pulse_current_hour_price).",
+          "tibber_consumption_sensor": "Sensor measuring current power drawn from the grid in watts (positive = import from grid).",
+          "tibber_export_sensor": "Sensor measuring current power fed into the grid in watts. May be the same sensor as consumption with negative values – enter it separately regardless."
+        }
+      },
+      "battery": {
+        "title": "Battery",
+        "description": "Configure your home battery. These values control how aggressively the battery is charged and discharged.",
+        "data": {
+          "battery_level_sensor": "Battery State of Charge Sensor (%)",
           "battery_capacity_wh": "Battery Capacity (Wh)",
-          "battery_min_limit_pct": "Minimum Battery Limit (%)",
-          "battery_max_limit_pct": "Battery Max Limit (%)",
-          "excluded_power_sensors": "Excluded Power Sensors (e.g., EV Charger)",
-          "prioritized_excess_consumers": "Prioritized Consumers (Switches for excess power)",
-          "early_excess_consumers": "Early Excess Consumers (Switches)",
-          "early_excess_expected_power_w": "Early Excess Expected Power (W)",
-          "early_excess_min_battery_pct": "Early Excess Min Battery (%)",
-          "excess_min_run_time_minutes": "Excess Consumers Minimum Run Time (Minutes)",
-          "excess_external_inverter": "Switches connected to External Inverter (Ignore OpenDTU limits)"
+          "battery_min_limit_pct": "Minimum State of Charge (%)",
+          "battery_max_limit_pct": "Maximum State of Charge for Grid Charging (%)",
+          "battery_efficiency_pct": "Charge/Discharge Efficiency (%)",
+          "solar_charge_state_sensor": "Solar Charger State Sensor (optional)"
+        },
+        "data_description": {
+          "battery_level_sensor": "Sensor reporting current battery charge level in percent (0–100).",
+          "battery_capacity_wh": "Total capacity of your battery in watt-hours. Example: a 5 kWh battery = 5000 Wh.",
+          "battery_min_limit_pct": "The battery will not discharge below this level – kept as emergency reserve. Recommended: 10–20 %.",
+          "battery_max_limit_pct": "The battery will be charged from the grid up to this level (at cheap prices). Solar surplus can charge beyond this. Recommended: 80–95 %.",
+          "battery_efficiency_pct": "Round-trip efficiency of the battery charge/discharge cycle. Typical: 90 % (100 Wh in → 90 Wh usable).",
+          "solar_charge_state_sensor": "Optional: Sensor from your battery charger reporting charge stage (e.g. 'Absorption', 'Float', 'Bulk'). Improves forecast accuracy."
+        }
+      },
+      "solar_inverter": {
+        "title": "Solar & Inverter (OpenDTU)",
+        "description": "Connect the optimizer to your solar array and OpenDTU inverter. OpenDTU controls whether the inverter feeds battery power into the home.",
+        "data": {
+          "solar_power_sensor": "Solar Power Sensor(s) (W)",
+          "balcony_power_sensor": "Balcony Power Plant Sensor (optional)",
+          "opendtu_turn_on_button": "OpenDTU: Turn On Button",
+          "opendtu_turn_off_button": "OpenDTU: Turn Off Button",
+          "opendtu_producing_sensor": "OpenDTU: Producing Binary Sensor",
+          "opendtu_output_sensor": "OpenDTU: Output Power Sensor (W)",
+          "opendtu_dpl_mode_select": "OpenDTU: DPL Mode Entity (optional)",
+          "max_inverter_power_w": "Maximum Inverter Output (W)"
+        },
+        "data_description": {
+          "solar_power_sensor": "All sensors measuring current solar production in watts. Select multiple if you have multiple strings or inverters.",
+          "balcony_power_sensor": "Optional: Sensor for a plug-in balcony power plant (micro-PV without battery connection) measured separately.",
+          "opendtu_turn_on_button": "Button entity in Home Assistant that turns the OpenDTU inverter on (starts battery discharge).",
+          "opendtu_turn_off_button": "Button entity in Home Assistant that turns the OpenDTU inverter off (stops battery discharge).",
+          "opendtu_producing_sensor": "Binary sensor indicating whether the inverter is currently producing power (true = on, false = off).",
+          "opendtu_output_sensor": "Sensor reporting the current output power of the OpenDTU inverter in watts.",
+          "opendtu_dpl_mode_select": "Optional: Entity to control the 'Dynamic Power Limiter' mode in OpenDTU. If set, the inverter is throttled smoothly instead of hard on/off switching.",
+          "max_inverter_power_w": "Maximum allowed output of the inverter in watts. In Germany legally limited to 800 W for plug-in PV systems."
+        }
+      },
+      "system": {
+        "title": "System Parameters",
+        "description": "Core parameters of your energy system used for forecasting and optimization calculations.",
+        "data": {
+          "weather_entity": "Weather Entity (for solar forecast)",
+          "base_load_w": "Household Base Load (W)",
+          "solar_peak_w": "Solar Peak Power (W)",
+          "extreme_price_threshold": "Extreme Price Threshold (€/kWh)",
+          "excluded_power_sensors": "Excluded Power Sensors (optional)"
+        },
+        "data_description": {
+          "weather_entity": "Weather entity from a Home Assistant weather integration (e.g. weather.home). Cloud cover forecast is used for the solar yield prediction.",
+          "base_load_w": "Average household power consumption excluding large appliances, in watts. Tip: Read from Tibber app as average overnight consumption.",
+          "solar_peak_w": "Nominal peak power of all installed solar panels in watts (sum of all panel ratings). Example: 10 × 400 W panels = 4000 W.",
+          "extreme_price_threshold": "Price threshold (€/kWh) above which electricity is considered 'extremely expensive'. The optimizer prefers battery discharge above this level. Typical: 0.35–0.50 €/kWh.",
+          "excluded_power_sensors": "Optional: Power sensors of large consumers to exclude when calculating normal household consumption. Example: EV charger, heat pump."
+        }
+      },
+      "excess": {
+        "title": "Excess Power Consumers",
+        "description": "Devices that are switched on automatically when more solar power is being produced than consumed. All fields are optional – only configure what you have.",
+        "data": {
+          "primary_excess_consumers": "Primary Consumers (highest priority)",
+          "secondary_excess_consumers": "Secondary Consumers (second priority)",
+          "early_excess_consumers": "Early Morning Consumers",
+          "early_excess_expected_power_w": "Expected Power of Early Consumers (W)",
+          "early_excess_min_battery_pct": "Minimum Battery Level for Early Consumers (%)",
+          "excess_min_run_time_minutes": "Minimum Run Time per Switch-On (minutes)",
+          "excess_external_inverter": "Switches on External Inverter (optional)",
+          "smart_devices": "Advanced Device Configuration (JSON, optional)"
+        },
+        "data_description": {
+          "primary_excess_consumers": "Switches for devices that are turned on first when solar surplus is available (e.g. washing machine, dishwasher). Highest priority.",
+          "secondary_excess_consumers": "Switches for devices that are turned on only when surplus remains after primary consumers. Second priority.",
+          "early_excess_consumers": "Switches for devices that may be switched on early in the morning when the battery is sufficiently charged – even before full solar surplus is available.",
+          "early_excess_expected_power_w": "Typical power consumption of early morning consumers in watts. Used to assess whether enough solar power is expected.",
+          "early_excess_min_battery_pct": "Minimum battery charge level before early consumers may be switched on. Protects against discharging with insufficient solar yield.",
+          "excess_min_run_time_minutes": "Minimum runtime in minutes before an excess consumer is switched off again. Prevents rapid on/off cycling and protects appliances.",
+          "excess_external_inverter": "Optional: Switches connected to an external inverter (not OpenDTU). These are not subject to OpenDTU power limits.",
+          "smart_devices": "Optional: JSON configuration for devices with schedules and learning functions (advanced feature for experienced users)."
+        }
+      },
+      "grid_charger": {
+        "title": "Grid Charger",
+        "description": "Configure charging the battery from the grid. The optimizer charges automatically when the Tibber price is especially cheap. Leave both fields empty if you do not have a grid charger.",
+        "data": {
+          "grid_charger_switch": "Grid Charger Switch (optional)",
+          "grid_charger_power_w": "Grid Charger Power (W)"
+        },
+        "data_description": {
+          "grid_charger_switch": "Optional: Switch entity that turns the grid charger for your battery on and off. Leave empty if you do not want to charge from the grid.",
+          "grid_charger_power_w": "Charging power of the grid charger in watts. Used to plan grid charging at cheap Tibber prices."
         }
       }
     },
@@ -36,36 +122,135 @@
       "unknown": "Unexpected error"
     },
     "abort": {
-      "already_configured": "Device is already configured"
+      "already_configured": "Integration is already configured"
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Smart Battery Optimizer Settings",
+        "title": "Smart Battery Optimizer – Settings",
+        "description": "Select the section you want to change.",
+        "menu_options": {
+          "tibber": "Tibber Energy Tariff",
+          "battery": "Battery",
+          "solar_inverter": "Solar & Inverter",
+          "system": "System Parameters",
+          "excess": "Excess Power Consumers",
+          "grid_charger": "Grid Charger"
+        }
+      },
+      "tibber": {
+        "title": "Tibber Energy Tariff",
+        "description": "Connection to your Tibber account and Tibber sensors.",
         "data": {
           "tibber_api_token": "Tibber API Token",
-          "tibber_price_sensor": "Tibber Live Price Sensor (e.g., Pulse)",
-          "tibber_consumption_sensor": "Tibber Pulse Consumption Sensor",
-          "tibber_export_sensor": "Tibber Pulse Export Sensor",
-          "battery_level_sensor": "Battery Level Sensor (%)",
-          "solar_power_sensor": "Solar Power Sensors (W)",
-          "opendtu_turn_on_button": "OpenDTU Inverter Turn ON Button",
-          "opendtu_turn_off_button": "OpenDTU Inverter Turn OFF Button",
-          "opendtu_producing_sensor": "OpenDTU Producing Binary Sensor",
-          "opendtu_output_sensor": "OpenDTU Inverter Output Sensor (W)",
-          "opendtu_dpl_mode_select": "OpenDTU DPL Mode Entity (Select/Number)",
-          "weather_entity": "Weather Entity (for cloud cover)",
+          "tibber_price_sensor": "Current Electricity Price Sensor (Tibber Pulse)",
+          "tibber_consumption_sensor": "Grid Consumption Sensor (Import)",
+          "tibber_export_sensor": "Grid Export Sensor (Feed-in)"
+        },
+        "data_description": {
+          "tibber_api_token": "Your personal API token from app.tibber.com → Account → Developer.",
+          "tibber_price_sensor": "Sensor from the Tibber integration showing the current electricity price.",
+          "tibber_consumption_sensor": "Sensor measuring current power drawn from the grid in watts.",
+          "tibber_export_sensor": "Sensor measuring current power fed into the grid in watts."
+        }
+      },
+      "battery": {
+        "title": "Battery",
+        "description": "Charge limits and capacity of your home battery.",
+        "data": {
+          "battery_level_sensor": "Battery State of Charge Sensor (%)",
           "battery_capacity_wh": "Battery Capacity (Wh)",
-          "battery_min_limit_pct": "Minimum Battery Limit (%)",
-          "battery_max_limit_pct": "Battery Max Limit (%)",
-          "excluded_power_sensors": "Excluded Power Sensors (e.g., EV Charger)",
-          "prioritized_excess_consumers": "Prioritized Consumers (Switches for excess power)",
-          "early_excess_consumers": "Early Excess Consumers (Switches)",
-          "early_excess_expected_power_w": "Early Excess Expected Power (W)",
-          "early_excess_min_battery_pct": "Early Excess Min Battery (%)",
-          "excess_min_run_time_minutes": "Excess Consumers Minimum Run Time (Minutes)",
-          "excess_external_inverter": "Switches connected to External Inverter (Ignore OpenDTU limits)"
+          "battery_min_limit_pct": "Minimum State of Charge (%)",
+          "battery_max_limit_pct": "Maximum State of Charge for Grid Charging (%)",
+          "battery_efficiency_pct": "Charge/Discharge Efficiency (%)",
+          "solar_charge_state_sensor": "Solar Charger State Sensor (optional)"
+        },
+        "data_description": {
+          "battery_level_sensor": "Sensor reporting current battery charge level in percent (0–100).",
+          "battery_capacity_wh": "Total capacity of your battery in watt-hours. Example: a 5 kWh battery = 5000 Wh.",
+          "battery_min_limit_pct": "The battery will not discharge below this level. Recommended: 10–20 %.",
+          "battery_max_limit_pct": "The battery will be charged from the grid up to this level. Recommended: 80–95 %.",
+          "battery_efficiency_pct": "Round-trip efficiency of the battery charge/discharge cycle. Typical: 90 %.",
+          "solar_charge_state_sensor": "Optional: Sensor from your battery charger reporting charge stage (e.g. 'Absorption', 'Float'). Improves forecast accuracy."
+        }
+      },
+      "solar_inverter": {
+        "title": "Solar & Inverter (OpenDTU)",
+        "description": "Solar array and OpenDTU inverter for battery discharge.",
+        "data": {
+          "solar_power_sensor": "Solar Power Sensor(s) (W)",
+          "balcony_power_sensor": "Balcony Power Plant Sensor (optional)",
+          "opendtu_turn_on_button": "OpenDTU: Turn On Button",
+          "opendtu_turn_off_button": "OpenDTU: Turn Off Button",
+          "opendtu_producing_sensor": "OpenDTU: Producing Binary Sensor",
+          "opendtu_output_sensor": "OpenDTU: Output Power Sensor (W)",
+          "opendtu_dpl_mode_select": "OpenDTU: DPL Mode Entity (optional)",
+          "max_inverter_power_w": "Maximum Inverter Output (W)"
+        },
+        "data_description": {
+          "solar_power_sensor": "All sensors measuring current solar production in watts. Select multiple for multiple strings/inverters.",
+          "balcony_power_sensor": "Optional: Sensor for a plug-in balcony power plant measured separately.",
+          "opendtu_turn_on_button": "Button entity that turns the OpenDTU inverter on (starts battery discharge).",
+          "opendtu_turn_off_button": "Button entity that turns the OpenDTU inverter off (stops battery discharge).",
+          "opendtu_producing_sensor": "Binary sensor indicating whether the inverter is currently producing power.",
+          "opendtu_output_sensor": "Sensor reporting the current output power of the OpenDTU inverter in watts.",
+          "opendtu_dpl_mode_select": "Optional: Entity to control the 'Dynamic Power Limiter' mode in OpenDTU for smooth throttling.",
+          "max_inverter_power_w": "Maximum allowed output of the inverter in watts (e.g. 800 W legal limit in Germany)."
+        }
+      },
+      "system": {
+        "title": "System Parameters",
+        "description": "Core parameters of your energy system for forecasting and optimization.",
+        "data": {
+          "weather_entity": "Weather Entity (for solar forecast)",
+          "base_load_w": "Household Base Load (W)",
+          "solar_peak_w": "Solar Peak Power (W)",
+          "extreme_price_threshold": "Extreme Price Threshold (€/kWh)",
+          "excluded_power_sensors": "Excluded Power Sensors (optional)"
+        },
+        "data_description": {
+          "weather_entity": "Weather entity for cloud cover forecast used in solar yield prediction (e.g. weather.home).",
+          "base_load_w": "Average household power consumption excluding large appliances, in watts.",
+          "solar_peak_w": "Nominal peak power of all installed solar panels in watts (sum of all panel ratings).",
+          "extreme_price_threshold": "Price threshold (€/kWh) above which the optimizer prefers battery discharge. Typical: 0.35–0.50 €/kWh.",
+          "excluded_power_sensors": "Optional: Power sensors to exclude from household consumption calculation (e.g. EV charger, heat pump)."
+        }
+      },
+      "excess": {
+        "title": "Excess Power Consumers",
+        "description": "Devices switched on automatically when solar surplus is available. All fields are optional.",
+        "data": {
+          "primary_excess_consumers": "Primary Consumers (highest priority)",
+          "secondary_excess_consumers": "Secondary Consumers (second priority)",
+          "early_excess_consumers": "Early Morning Consumers",
+          "early_excess_expected_power_w": "Expected Power of Early Consumers (W)",
+          "early_excess_min_battery_pct": "Minimum Battery Level for Early Consumers (%)",
+          "excess_min_run_time_minutes": "Minimum Run Time per Switch-On (minutes)",
+          "excess_external_inverter": "Switches on External Inverter (optional)",
+          "smart_devices": "Advanced Device Configuration (JSON, optional)"
+        },
+        "data_description": {
+          "primary_excess_consumers": "Switches for devices switched on first when solar surplus is available. Highest priority.",
+          "secondary_excess_consumers": "Switches for devices switched on only when surplus remains after primary consumers.",
+          "early_excess_consumers": "Switches for devices that may run early in the morning when the battery is sufficiently charged.",
+          "early_excess_expected_power_w": "Typical power draw of early morning consumers in watts.",
+          "early_excess_min_battery_pct": "Minimum battery level before early consumers may be switched on.",
+          "excess_min_run_time_minutes": "Minimum runtime in minutes before an excess consumer is switched off. Prevents rapid cycling.",
+          "excess_external_inverter": "Optional: Switches on an external inverter (not OpenDTU) not subject to OpenDTU power limits.",
+          "smart_devices": "Optional: JSON configuration for devices with schedules and learning functions (advanced)."
+        }
+      },
+      "grid_charger": {
+        "title": "Grid Charger",
+        "description": "Settings for automatically charging the battery from the grid at cheap Tibber prices.",
+        "data": {
+          "grid_charger_switch": "Grid Charger Switch (optional)",
+          "grid_charger_power_w": "Grid Charger Power (W)"
+        },
+        "data_description": {
+          "grid_charger_switch": "Optional: Switch entity that turns the grid charger on and off. Leave empty if you do not want to charge from the grid.",
+          "grid_charger_power_w": "Charging power of the grid charger in watts. Used to plan grid charging at cheap Tibber prices."
         }
       }
     }
