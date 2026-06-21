@@ -14,6 +14,9 @@ STORAGE_KEY = "smart_battery_optimizer.appliances"
 # Bootstrap window used for proposals before any profile is learned
 DEFAULT_BOOTSTRAP_MINUTES = 180
 
+# Decay factor applied to all program scores after each run (0.7 = recent runs dominate)
+SCORE_DECAY = 0.7
+
 
 @dataclass
 class ApplianceProgram:
@@ -22,6 +25,7 @@ class ApplianceProgram:
     power_profile: list[float] = field(default_factory=list)
     run_count: int = 0
     last_run: str | None = None
+    probability_score: float = 0.0
 
     @property
     def duration_minutes(self) -> int:
@@ -44,6 +48,7 @@ class ApplianceProgram:
             "power_profile": self.power_profile,
             "run_count": self.run_count,
             "last_run": self.last_run,
+            "probability_score": self.probability_score,
         }
 
     @classmethod
@@ -60,6 +65,7 @@ class ApplianceProgram:
             power_profile=profile,
             run_count=data.get("run_count", 0),
             last_run=data.get("last_run", None),
+            probability_score=float(data.get("probability_score", 0.0)),
         )
 
 
@@ -105,11 +111,11 @@ class SmartApplianceManager:
         return None
 
     def get_program(self, sensor_id: str) -> ApplianceProgram | None:
-        """Return the most recently run program (for backwards compat with coordinator)."""
+        """Return the most likely program to be used next (highest recency-decayed probability score)."""
         progs = self.get_programs(sensor_id)
         if not progs:
             return None
-        return max(progs, key=lambda p: p.last_run or "")
+        return max(progs, key=lambda p: p.probability_score)
 
     def add_program(self, sensor_id: str, program: ApplianceProgram):
         if sensor_id not in self.programs:
@@ -255,6 +261,7 @@ class ApplianceStateMachine:
                 matched.run_count += 1
                 matched.last_run = current_time.isoformat()
                 self.active_program_id = matched.id
+                winning_prog = matched
                 _LOGGER.info(
                     "Appliance %s: merged run into '%s' (%d min, %.0fW avg)",
                     self.sensor_id, matched.name, duration, total_wh * 60 / duration
@@ -270,10 +277,16 @@ class ApplianceStateMachine:
                 )
                 self.manager.add_program(self.sensor_id, new_prog)
                 self.active_program_id = new_prog.id
+                winning_prog = new_prog
                 _LOGGER.info(
                     "Appliance %s: new program '%s' detected (%d min, %.0fW avg)",
                     self.sensor_id, new_prog.name, duration, total_wh * 60 / duration
                 )
+
+            # Decay all scores, then reward the winning program
+            for p in self.manager.get_programs(self.sensor_id):
+                p.probability_score *= SCORE_DECAY
+            winning_prog.probability_score += 1.0
 
             await self.manager.async_save()
 
@@ -332,7 +345,7 @@ class ProposalCalculator:
         import homeassistant.util.dt as dt_util
         now = dt_util.now().replace(tzinfo=None)
 
-        # Pick most recently run program (None if nothing learned yet)
+        # Pick most likely program (highest run count = statistically most probable next use)
         program = self.coordinator.appliance_manager.get_program(sensor_id)
 
         cache_key = f"{sensor_id}_{program.id if program else 'bootstrap'}"

@@ -5,7 +5,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, CONF_SMART_DEVICES
-from .appliance_entities import ApplianceRecordButton, ApplianceConfirmButton, ApplianceProgramSelect, ApplianceProposalSelect
+from .appliance_entities import ApplianceConfirmButton, ApplianceProposalSelect
 
 from .coordinator import SmartBatteryOptimizerCoordinator
 

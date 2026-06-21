@@ -1486,11 +1486,17 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         total_wh = 0.0
 
         for sensor_id, sm in self.appliance_state_machines.items():
-            # Pick the right program: planned > actively running > most recent
-            if sm.planned_run and sm.planned_run.program_id:
+            if sm.state in (ApplianceState.RUNNING_SCHEDULED, ApplianceState.RUNNING_SPONTANEOUS):
+                # While running: detected program (confidence >50%) wins over what was planned
+                if sm.active_program_id:
+                    prog = self.appliance_manager.get_program_by_id(sensor_id, sm.active_program_id)
+                elif sm.planned_run and sm.planned_run.program_id:
+                    prog = self.appliance_manager.get_program_by_id(sensor_id, sm.planned_run.program_id)
+                else:
+                    prog = self.appliance_manager.get_program(sensor_id)
+            elif sm.planned_run and sm.planned_run.program_id:
+                # Waiting to start: use the scheduled program
                 prog = self.appliance_manager.get_program_by_id(sensor_id, sm.planned_run.program_id)
-            elif sm.active_program_id:
-                prog = self.appliance_manager.get_program_by_id(sensor_id, sm.active_program_id)
             else:
                 prog = self.appliance_manager.get_program(sensor_id)
 
