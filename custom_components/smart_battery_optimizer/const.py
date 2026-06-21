@@ -39,9 +39,22 @@ CONF_EARLY_EXCESS_MIN_BATTERY_PCT = "early_excess_min_battery_pct"
 CONF_EARLY_EXCESS_MAX_BATTERY_PCT = "early_excess_max_battery_pct" # Deprecated, use CONF_BATTERY_MAX_LIMIT_PCT
 
 CONF_EXCESS_MIN_RUN_TIME_MINUTES = "excess_min_run_time_minutes"
+CONF_MIN_SWITCH_INTERVAL_MINUTES = "min_switch_interval_minutes"  # Min time between any ON/OFF state change (1-15 min)
 
 CONF_EXCESS_EXTERNAL_INVERTER = "excess_external_inverter"
 CONF_SMART_DEVICES = "smart_devices"
 
 CONF_GRID_CHARGER_SWITCH = "grid_charger_switch"
 CONF_GRID_CHARGER_POWER_W = "grid_charger_power_w"
+
+# Number of degrees assumed for initial W/°C bootstrap (prior when no real data yet)
+CLIMATE_BOOTSTRAP_ASSUMED_DELTA = 10.0
+
+# Number of configurable climate device slots (increase here to add more)
+CLIMATE_MAX_SLOTS = 3
+
+# Climate device type constants (stored in coordinator per slot)
+CLIMATE_TYPE_DISABLED = "Deaktiviert"
+CLIMATE_TYPE_HEATING = "Nur Heizen"
+CLIMATE_TYPE_COOLING = "Nur Kühlen"
+CLIMATE_TYPE_HEAT_PUMP = "Wärmepumpe (Heizen+Kühlen)"

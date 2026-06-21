@@ -6,9 +6,11 @@ import asyncio
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 import homeassistant.util.dt as dt_util
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .tibber import fetch_tibber_prices
 
 from .const import (
+    CONF_MIN_SWITCH_INTERVAL_MINUTES,
     CONF_SOLAR_PEAK_W,
     CONF_OPENDTU_DPL_MODE_SELECT,
     CONF_SMART_DEVICES,
@@ -43,7 +45,7 @@ from .const import (
     CONF_EXCESS_MIN_RUN_TIME_MINUTES,
 )
 from .learning import LearningEngine
-from .appliance_manager import SmartApplianceManager, ApplianceStateMachine, ProposalCalculator
+from .appliance_manager import SmartApplianceManager, ApplianceStateMachine, ApplianceState, ProposalCalculator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -77,7 +79,15 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         self.tibber_prices = []
         self.last_tibber_fetch = None
         self._last_inverter_command_time = None
-        self._inverter_command_debounce_minutes = 5
+        # Inverter debounce uses the same min_switch_interval_minutes setting
+
+        # Open-Meteo GHI cache
+        self._open_meteo_ghi_data = []  # list of {datetime, ghi}
+        self._last_open_meteo_fetch = None
+
+        # Bidirectional switch lock — prevents any device (consumer or inverter) from switching
+        # more often than the configured min_switch_interval_minutes
+        self._last_switch_time: dict = {}  # entity_id -> datetime of last state change
 
         # Number entity states
         self.extreme_price_threshold = config.get(CONF_EXTREME_PRICE_THRESHOLD, 0.40)
@@ -106,6 +116,13 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         self._current_inverter_state = "unknown"
         self._low_solar_minutes = 0
         self._battery_recovery_mode = False
+
+        # Climate device slot state (populated by switch/number/select/text entities)
+        self.climate_slots_enabled: dict = {}    # slot_id -> bool
+        self.climate_slots_type: dict = {}       # slot_id -> "heating"|"cooling"|"heat_pump"|"disabled"
+        self.climate_slots_manual_w: dict = {}   # slot_id -> float (W nameplate)
+        self.climate_slots_setpoint: dict = {}   # slot_id -> float (°C Solltemperatur)
+        self.climate_slots_power_sensor: dict = {}  # slot_id -> HA entity_id for power reading
 
     @property
     def is_learning_mode_active(self) -> bool:
@@ -180,6 +197,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 self.appliance_entities['sensor'].append(ApplianceProfileSensor(self, self.config_entry.entry_id, dev, prog_sel))
 
         await self._fetch_tibber_prices()
+        await self._fetch_open_meteo_ghi()
 
     async def _fetch_tibber_prices(self):
         """Fetch prices from Tibber API."""
@@ -195,6 +213,87 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         if prices:
             self.tibber_prices = prices
             self.last_tibber_fetch = now
+
+    async def _fetch_open_meteo_ghi(self):
+        """Fetch hourly GHI and outdoor temperature from Open-Meteo (free, no API key)."""
+        now = dt_util.now()
+        if self._last_open_meteo_fetch and (now - self._last_open_meteo_fetch).total_seconds() < 3600:
+            return
+
+        lat = self.hass.config.latitude
+        lon = self.hass.config.longitude
+        if lat is None or lon is None:
+            return
+
+        try:
+            session = async_get_clientsession(self.hass)
+            url = (
+                f"https://api.open-meteo.com/v1/forecast"
+                f"?latitude={lat}&longitude={lon}"
+                f"&hourly=shortwave_radiation,temperature_2m"
+                f"&forecast_days=3&timezone=auto"
+            )
+            async with session.get(url, timeout=10) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    hourly = data.get("hourly", {})
+                    times = hourly.get("time", [])
+                    ghis = hourly.get("shortwave_radiation", [])
+                    temps = hourly.get("temperature_2m", [])
+                    ghi_data = []
+                    for t_str, g, temp in zip(times, ghis, temps):
+                        dt = dt_util.parse_datetime(t_str)
+                        if dt:
+                            ghi_data.append({
+                                "datetime": dt,
+                                "ghi": float(g or 0.0),
+                                "temp": float(temp) if temp is not None else None,
+                            })
+                    self._open_meteo_ghi_data = ghi_data
+                    self._last_open_meteo_fetch = now
+                    _LOGGER.debug("Fetched %d Open-Meteo entries (GHI + temp)", len(ghi_data))
+        except Exception as e:
+            _LOGGER.warning("Could not fetch Open-Meteo data: %s", e)
+
+    def _get_ghi_for_dt(self, target_dt) -> float:
+        """Return GHI (W/m²) for the hour containing target_dt, or 0 if unavailable."""
+        local_target = dt_util.as_local(target_dt)
+        for item in self._open_meteo_ghi_data:
+            item_local = dt_util.as_local(item["datetime"])
+            if item_local.date() == local_target.date() and item_local.hour == local_target.hour:
+                return item["ghi"]
+        return 0.0
+
+    def _get_outdoor_temp_for_dt(self, target_dt) -> float | None:
+        """Return forecast outdoor temperature (°C) for the hour containing target_dt."""
+        local_target = dt_util.as_local(target_dt)
+        for item in self._open_meteo_ghi_data:
+            item_local = dt_util.as_local(item["datetime"])
+            if item_local.date() == local_target.date() and item_local.hour == local_target.hour:
+                return item.get("temp")
+        return None
+
+    def _get_current_outdoor_temp(self) -> float:
+        """Return current outdoor temperature from the most recent Open-Meteo forecast hour.
+
+        Falls back to the HA weather entity if Open-Meteo data is unavailable.
+        Returns 15.0 as a neutral fallback (no heating/cooling demand expected).
+        """
+        now = dt_util.now()
+        temp = self._get_outdoor_temp_for_dt(now)
+        if temp is not None:
+            return temp
+
+        # Fallback: HA weather entity
+        weather_entity = self.config.get(CONF_WEATHER_ENTITY)
+        if weather_entity:
+            state = self.hass.states.get(weather_entity)
+            if state and state.attributes.get("temperature") is not None:
+                try:
+                    return float(state.attributes["temperature"])
+                except (ValueError, TypeError):
+                    pass
+        return 15.0
 
     def _get_float_state(self, entity_id: str, default: float = 0.0) -> float:
         """Helper to safely get float state from an entity."""
@@ -275,6 +374,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             return None
 
         await self._fetch_tibber_prices()
+        await self._fetch_open_meteo_ghi()
 
         tibber_cons = self._get_float_state(self.config[CONF_TIBBER_CONSUMPTION_SENSOR])
         tibber_exp = self._get_float_state(self.config[CONF_TIBBER_EXPORT_SENSOR])
@@ -330,6 +430,21 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         await self.learning_engine.record_solar(current_quarter, current_solar, cloud_cover, charge_state)
         await self.learning_engine.record_balcony(current_quarter, current_balcony, cloud_cover)
 
+        # Record climate device power (smart-plug sensor or 0 if not configured)
+        for slot_id, enabled in self.climate_slots_enabled.items():
+            if not enabled:
+                continue
+            sensor_entity_id = self.climate_slots_power_sensor.get(slot_id, "")
+            power_w = 0.0
+            if sensor_entity_id:
+                sensor_state = self.hass.states.get(sensor_entity_id)
+                if sensor_state and sensor_state.state not in ("unavailable", "unknown", None):
+                    try:
+                        power_w = float(sensor_state.state)
+                    except (ValueError, TypeError):
+                        pass
+            await self.learning_engine.record_climate_power(slot_id, power_w)
+
         if current_quarter != self.learning_engine._last_quarter_processed and self.learning_engine._last_quarter_processed != -1:
             # Get price from that quarter to pass to finalize_quarter
             old_price = 0.0
@@ -341,7 +456,26 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                         break
 
             c_price = old_price
-            actual_cons_wh, actual_solar_wh = await self.learning_engine.finalize_quarter(self.learning_engine._last_quarter_processed, cloud_cover, c_price)
+            current_ghi = self._get_ghi_for_dt(now)
+            actual_cons_wh, actual_solar_wh = await self.learning_engine.finalize_quarter(
+                self.learning_engine._last_quarter_processed, cloud_cover, c_price,
+                ghi=current_ghi, dow=now.weekday()
+            )
+
+            # Finalize climate quarters for active slots
+            current_outdoor_temp = self._get_current_outdoor_temp()
+            for slot_id, enabled in self.climate_slots_enabled.items():
+                if not enabled:
+                    continue
+                device_type = self.climate_slots_type.get(slot_id, "disabled")
+                if device_type == "disabled":
+                    continue
+                setpoint = self.climate_slots_setpoint.get(slot_id, 20.0)
+                await self.learning_engine.finalize_climate_quarter(
+                    self.learning_engine._last_quarter_processed,
+                    slot_id, device_type, current_outdoor_temp, setpoint,
+                    dow=now.weekday(),
+                )
 
             # Implicit Cloud Cover Correction
             pred_solar_clear = self.learning_engine.predict_solar_for_quarter(self.learning_engine._last_quarter_processed, 0.0)
@@ -401,12 +535,13 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                     # Exponential moving average for cloud cover correction (alpha = 0.3)
                     self.implicit_cloud_cover = (0.3 * implied_cloud_cover) + (0.7 * self.implicit_cloud_cover)
 
-            # Intraday Solar Factor
-            # We track how much better/worse actual yield is compared to what we predict for the *deduced* cloud cover.
+            # Intraday Solar Factor — corrects for day-specific deviations (dust, haze, etc.)
+            # Pass GHI so the GHI-ratio model is preferred when available
+            last_q_ghi = self._get_ghi_for_dt(now)
             target_cc = self.implicit_cloud_cover if getattr(self, 'implicit_cloud_cover', None) is not None else cloud_cover
-            target_pred = self.learning_engine.predict_solar_for_quarter(self.learning_engine._last_quarter_processed, target_cc)
+            target_pred = self.learning_engine.predict_solar_for_quarter(self.learning_engine._last_quarter_processed, target_cc, ghi=last_q_ghi)
             if self.config.get(CONF_BALCONY_POWER_SENSOR):
-                target_pred += self.learning_engine.predict_balcony_for_quarter(self.learning_engine._last_quarter_processed, target_cc)
+                target_pred += self.learning_engine.predict_balcony_for_quarter(self.learning_engine._last_quarter_processed, target_cc, ghi=last_q_ghi)
 
             if target_pred > 0 and actual_solar_wh > 0:
                 raw_factor = actual_solar_wh / target_pred
@@ -432,8 +567,6 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         if not hasattr(self, 'pessimistic_consumption_factor'):
             self.pessimistic_consumption_factor = 1.0
 
-        hourly_forecasts = await self._get_hourly_forecasts()
-
         # Temporary sum for sensors
         self.predicted_remaining_solar = 0.0
         self.predicted_remaining_consumption = 0.0
@@ -446,26 +579,24 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         batt_min_pct = self.config.get(CONF_BATTERY_MIN_LIMIT_PCT, 10)
         max_batt_pct = float(self.config.get(CONF_BATTERY_MAX_LIMIT_PCT, self.config.get(CONF_EARLY_EXCESS_MAX_BATTERY_PCT, 100.0)))
 
+        is_absorption = charge_state and charge_state.lower() in ("absorption", "float", "ausgleichsladung", "equalization")
+        virtual_batt_pct = 100.0 if is_absorption else batt_level_pct
+
+        # Simulations run every minute for accurate trend tracking.
+        # Device switching is controlled separately by min_switch_interval_minutes.
+        hourly_forecasts = await self._get_hourly_forecasts()
+
         price_threshold = self._simulate_optimal_threshold(now, hourly_forecasts, batt_level_pct, batt_cap_wh, batt_min_pct)
         charge_price_threshold = self._simulate_optimal_charge_threshold(now, hourly_forecasts, batt_level_pct, batt_cap_wh)
 
-        # Evaluate grid charging
-        is_grid_charging = False
-        if current_price is not None and charge_price_threshold is not None:
-            if current_price <= charge_price_threshold:
-                # We still need to pass the safety checks (overfill & excess devices limits)
-                is_grid_charging = self._check_grid_charge_safety(now, current_price, virtual_batt_pct, batt_cap_wh, hourly_forecasts)
-
         self._build_forecast_plan(now, hourly_forecasts, batt_level_pct, batt_cap_wh, price_threshold, charge_price_threshold)
-
-        available_batt_capacity_wh = batt_cap_wh * (1.0 - (batt_level_pct / 100.0))
 
         # Re-calc 24h sum
         for block in self.hourly_plan:
             self.predicted_remaining_solar += block["solar_wh"]
             self.predicted_remaining_consumption += block["consumption_wh"]
 
-        # Forward simulation to accurately detect if battery will hit max limit before emptying
+        # Forward simulation — will battery hit max?
         battery_will_overfill = False
         temp_batt_pct = batt_level_pct
         for block in self.hourly_plan:
@@ -476,60 +607,56 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             if temp_batt_pct <= batt_min_pct:
                 break
 
+        # Evaluate grid charging
+        is_grid_charging = False
+        if current_price is not None and charge_price_threshold is not None:
+            if current_price <= charge_price_threshold:
+                is_grid_charging = self._check_grid_charge_safety(now, current_price, virtual_batt_pct, batt_cap_wh, hourly_forecasts)
+
         turn_on_inverter = True
 
         async def set_switches(entities: list, turn_on: bool):
-            min_run_time = int(self.config.get(CONF_EXCESS_MIN_RUN_TIME_MINUTES, 10))
+            min_interval = int(self.config.get(CONF_MIN_SWITCH_INTERVAL_MINUTES, 15))
             current_time = dt_util.now()
 
             for switch_entity in entities:
                 state = self.hass.states.get(switch_entity)
                 if state is None:
                     continue
-                is_on = state and state.state == "on"
+                is_on = state.state == "on"
 
-                # Check minimum run time
-                if is_on and not turn_on:
-                    last_turned_on = self._excess_devices_last_turned_on.get(switch_entity)
-                    if last_turned_on:
-                        elapsed = (current_time - last_turned_on).total_seconds() / 60.0
-                        if elapsed < min_run_time:
-                            _LOGGER.debug("Switch %s must remain on. Min run time not reached. Elapsed: %.1f, Min: %d", switch_entity, elapsed, min_run_time)
-                            continue
-                    await self.hass.services.async_call("switch", "turn_off", {"entity_id": switch_entity}, blocking=False)
-                    self._excess_devices_last_turned_on.pop(switch_entity, None)
-                elif not is_on and turn_on:
+                if is_on == turn_on:
+                    continue  # already in desired state
+
+                # Bidirectional lock: don't switch if last switch was too recent
+                last_switch = self._last_switch_time.get(switch_entity)
+                if last_switch:
+                    elapsed = (current_time - last_switch).total_seconds() / 60.0
+                    if elapsed < min_interval:
+                        _LOGGER.debug(
+                            "Switch %s locked for %.1f more min (interval=%d min)",
+                            switch_entity, min_interval - elapsed, min_interval
+                        )
+                        continue
+
+                if turn_on:
                     await self.hass.services.async_call("switch", "turn_on", {"entity_id": switch_entity}, blocking=False)
-                    self._excess_devices_last_turned_on[switch_entity] = current_time
+                else:
+                    await self.hass.services.async_call("switch", "turn_off", {"entity_id": switch_entity}, blocking=False)
+                self._last_switch_time[switch_entity] = current_time
+                self._excess_devices_last_turned_on[switch_entity] = current_time if turn_on else None
 
-        # If a switch is manually turned off, we also remove it from the tracking dict
-        # This prevents it from being stuck "on" due to run time check if it's turned back on rapidly
+        # If a switch was manually turned off, clear the tracking so the min-run-time resets
+        _min_run_time = int(self.config.get(CONF_EXCESS_MIN_RUN_TIME_MINUTES, 10))
         for entity_list in [self.config.get(CONF_PRIMARY_EXCESS_CONSUMERS, []), self.config.get(CONF_SECONDARY_EXCESS_CONSUMERS, []), self.config.get(CONF_EARLY_EXCESS_CONSUMERS, [])]:
             if not isinstance(entity_list, list):
                 continue
             for switch_entity in entity_list:
                 state = self.hass.states.get(switch_entity)
                 if state and state.state == "off" and switch_entity in self._excess_devices_last_turned_on:
-                    # Switch is off, but our tracking thinks it might still be running.
-                    # See if someone else turned it off manually, if so, we can clear the timer.
-                    last_turned_on = self._excess_devices_last_turned_on[switch_entity]
-                    elapsed = (current_time - last_turned_on).total_seconds() / 60.0
-                    if elapsed < min_run_time:
-                        pass # Hasn't been min time, maybe user turned it off, we leave tracking to allow it to be turned back on instantly if needed, or we pop it? Let's pop it to reset timer.
                     self._excess_devices_last_turned_on.pop(switch_entity, None)
 
-        is_absorption = charge_state and charge_state.lower() in ("absorption", "float", "ausgleichsladung", "equalization")
-        virtual_batt_pct = 100.0 if is_absorption else batt_level_pct
-        has_excess_power = (current_solar > self.calculated_house_consumption) or is_absorption
-
-        # Timer logic for cloud tolerance
-        if not has_excess_power:
-            self._low_solar_minutes += 1
-        else:
-            self._low_solar_minutes = 0
-
-        cloud_tolerance_mins = getattr(self, "excess_cloud_tolerance_mins", 5.0)
-        cloud_override_off = self._low_solar_minutes >= cloud_tolerance_mins
+        # is_absorption and virtual_batt_pct already computed above before quarter-gate
 
         # --- Negative Price Override ---
         # When price is negative, we get paid to consume energy.
@@ -543,7 +670,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         def _any_external(entities):
             return any(e in external_inverters for e in entities)
 
-        # Primary Hysteresis Logic
+        # Primary Hysteresis Logic — pure battery % thresholds, no solar/cloud dependency
         primary_entities = self.config.get(CONF_PRIMARY_EXCESS_CONSUMERS, [])
         primary_is_external = _any_external(primary_entities)
 
@@ -551,26 +678,19 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             if is_negative_price:
                 turn_on_primary = True
             else:
-                turn_on_primary = False
-                if primary_is_external:
-                    # External inverter: strict battery percentage logic, ignore solar/cloud
-                    if virtual_batt_pct >= getattr(self, "primary_excess_on", 95.0):
-                        turn_on_primary = True
-                    elif virtual_batt_pct <= getattr(self, "primary_excess_off", 90.0):
-                        turn_on_primary = False
-                    else:
-                        turn_on_primary = any(self.hass.states.get(e) and self.hass.states.get(e).state == "on" for e in primary_entities)
+                on_thr = getattr(self, "primary_excess_on", 95.0)
+                off_thr = getattr(self, "primary_excess_off", 90.0)
+                currently_on = any(self.hass.states.get(e) and self.hass.states.get(e).state == "on" for e in primary_entities)
+                if virtual_batt_pct >= on_thr:
+                    turn_on_primary = True
+                elif virtual_batt_pct <= off_thr:
+                    turn_on_primary = False
                 else:
-                    if virtual_batt_pct >= getattr(self, "primary_excess_on", 95.0) and has_excess_power and battery_will_overfill:
-                        turn_on_primary = True
-                    elif virtual_batt_pct <= getattr(self, "primary_excess_off", 90.0) or cloud_override_off:
-                        turn_on_primary = False
-                    else:
-                        turn_on_primary = any(self.hass.states.get(e) and self.hass.states.get(e).state == "on" for e in primary_entities)
+                    turn_on_primary = currently_on  # hold current state (hysteresis)
 
             await set_switches(primary_entities, turn_on_primary)
 
-        # Secondary Hysteresis Logic
+        # Secondary Hysteresis Logic — pure battery % thresholds
         secondary_entities = self.config.get(CONF_SECONDARY_EXCESS_CONSUMERS, [])
         secondary_is_external = _any_external(secondary_entities)
 
@@ -578,27 +698,21 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             if is_negative_price:
                 turn_on_secondary = True
             else:
-                turn_on_secondary = False
-                if secondary_is_external:
-                    if virtual_batt_pct >= getattr(self, "secondary_excess_on", 98.0):
-                        turn_on_secondary = True
-                    elif virtual_batt_pct <= getattr(self, "secondary_excess_off", 95.0):
-                        turn_on_secondary = False
-                    else:
-                        turn_on_secondary = any(self.hass.states.get(e) and self.hass.states.get(e).state == "on" for e in secondary_entities)
+                on_thr = getattr(self, "secondary_excess_on", 98.0)
+                off_thr = getattr(self, "secondary_excess_off", 95.0)
+                currently_on = any(self.hass.states.get(e) and self.hass.states.get(e).state == "on" for e in secondary_entities)
+                if virtual_batt_pct >= on_thr:
+                    turn_on_secondary = True
+                elif virtual_batt_pct <= off_thr:
+                    turn_on_secondary = False
                 else:
-                    if virtual_batt_pct >= getattr(self, "secondary_excess_on", 98.0) and has_excess_power and battery_will_overfill:
-                        turn_on_secondary = True
-                    elif virtual_batt_pct <= getattr(self, "secondary_excess_off", 95.0) or cloud_override_off:
-                        turn_on_secondary = False
-                    else:
-                        turn_on_secondary = any(self.hass.states.get(e) and self.hass.states.get(e).state == "on" for e in secondary_entities)
+                    turn_on_secondary = currently_on  # hold current state (hysteresis)
 
             await set_switches(secondary_entities, turn_on_secondary)
 
-        # Early Excess Logic
+        # Early Excess Logic — prediction-based, no cloud/solar override to prevent toggling
+        # Turns ON when simulation predicts overfill; stays ON until simulation says it's safe to turn OFF.
         early_entities = self.config.get(CONF_EARLY_EXCESS_CONSUMERS, [])
-        early_is_external = _any_external(early_entities)
 
         if getattr(self, "early_excess_auto", True):
             if is_negative_price:
@@ -607,14 +721,10 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 early_excess_min_batt = float(self.config.get(CONF_EARLY_EXCESS_MIN_BATTERY_PCT, 30.0))
                 if virtual_batt_pct < early_excess_min_batt:
                     turn_on_early = False
-                elif not has_excess_power and cloud_override_off and not early_is_external:
-                    turn_on_early = False
                 else:
-                    # Will battery overfill if this device is OFF?
-                    will_overfill_without_early = self._simulate_early_excess_overfill(now, hourly_forecasts, virtual_batt_pct, batt_cap_wh)
-
-                    # Simple ON/OFF logic based on simulation. Minimum run time prevents rapid toggling.
-                    turn_on_early = will_overfill_without_early
+                    turn_on_early = self._simulate_early_excess_overfill(
+                        now, hourly_forecasts, virtual_batt_pct, batt_cap_wh
+                    )
 
             await set_switches(early_entities, turn_on_early)
 
@@ -738,14 +848,15 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
                     await self.hass.services.async_call(domain, "select_option", {"entity_id": dpl_entity, "option": target_option}, blocking=False)
 
+            min_inverter_interval = int(self.config.get(CONF_MIN_SWITCH_INTERVAL_MINUTES, 15))
             debounce_active = False
             if self._last_inverter_command_time is not None:
                 elapsed_mins = (now - self._last_inverter_command_time).total_seconds() / 60.0
-                if elapsed_mins < self._inverter_command_debounce_minutes:
+                if elapsed_mins < min_inverter_interval:
                     debounce_active = True
                     _LOGGER.debug(
-                        "Inverter commands debounced. Elapsed: %.1f mins, required: %d mins",
-                        elapsed_mins, self._inverter_command_debounce_minutes
+                        "Inverter locked for %.1f more min (interval=%d min)",
+                        min_inverter_interval - elapsed_mins, min_inverter_interval
                     )
 
             if not debounce_active:
@@ -1125,9 +1236,10 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             if b["dt"] <= end_of_today:
                 if implicit_cloud is not None:
                     q = self._get_quarter_index(b["dt"])
-                    b["solar"] = self.learning_engine.predict_solar_for_quarter(q, implicit_cloud)
+                    b_ghi = b.get("ghi")
+                    b["solar"] = self.learning_engine.predict_solar_for_quarter(q, implicit_cloud, ghi=b_ghi)
                     if self.config.get(CONF_BALCONY_POWER_SENSOR):
-                        b["balcony"] = self.learning_engine.predict_balcony_for_quarter(q, implicit_cloud)
+                        b["balcony"] = self.learning_engine.predict_balcony_for_quarter(q, implicit_cloud, ghi=b_ghi)
 
                     # Store original cloud cover for reference, but use implicit for calculation
                     b["original_cc"] = b["cc"]
@@ -1276,13 +1388,38 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                     cc = f["cloud_cover"]
                     break
 
-            pred_solar = self.learning_engine.predict_solar_for_quarter(q, cc)
-            pred_cons = self.learning_engine.predict_consumption_for_quarter(q)
+            ghi = self._get_ghi_for_dt(eval_dt)
+            pred_solar = self.learning_engine.predict_solar_for_quarter(q, cc, ghi=ghi)
+            pred_cons = self.learning_engine.predict_consumption_for_quarter(q, dow=eval_dt.weekday())
 
             pred_balcony = 0.0
             # Only add predicted balcony if a sensor is configured
             if self.config.get(CONF_BALCONY_POWER_SENSOR):
-                pred_balcony = self.learning_engine.predict_balcony_for_quarter(q, cc)
+                pred_balcony = self.learning_engine.predict_balcony_for_quarter(q, cc, ghi=ghi)
+
+            # Add climate device load prediction per active slot
+            forecast_temp = self._get_outdoor_temp_for_dt(eval_dt)
+            if forecast_temp is None:
+                forecast_temp = self._get_current_outdoor_temp()
+            for slot_id, enabled in self.climate_slots_enabled.items():
+                if not enabled:
+                    continue
+                device_type = self.climate_slots_type.get(slot_id, "disabled")
+                if device_type == "disabled":
+                    continue
+                pred_cons += self.learning_engine.predict_climate_for_quarter(
+                    slot_id=slot_id,
+                    device_type=device_type,
+                    quarter=q,
+                    outdoor_temp=forecast_temp,
+                    setpoint=self.climate_slots_setpoint.get(slot_id, 20.0),
+                    dow=eval_dt.weekday(),
+                    manual_w=self.climate_slots_manual_w.get(slot_id, 0.0),
+                    device_enabled=True,
+                )
+
+            # Add load from currently running or scheduled appliances (e.g. EV charging)
+            pred_cons += self._get_appliance_load_wh_for_block(eval_dt, now)
 
             # Find price for this 15 min block
             price = None
@@ -1316,6 +1453,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 "balcony": pred_balcony,
                 "house_wh": pred_cons,
                 "cc": cc,
+                "ghi": ghi,
                 "price": price
             })
 
@@ -1333,17 +1471,44 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 except ValueError:
                     pass
 
-    def get_scheduled_appliance_load_for_minute(self, target_time) -> float:
-        total_w = 0.0
-        for sm in self.appliance_state_machines.values():
-            if sm.planned_run:
-                start = sm.planned_run.scheduled_start
-                prog = self.appliance_manager.get_program_by_id(sm.sensor_id, sm.planned_run.program_id)
-                if prog and prog.power_profile:
-                    duration = len(prog.power_profile)
-                    end = start + timedelta(minutes=duration)
-                    if start <= target_time < end:
-                        min_idx = int((target_time - start).total_seconds() / 60)
-                        if min_idx < len(prog.power_profile):
-                            total_w += prog.power_profile[min_idx]
-        return total_w
+    def _get_appliance_load_wh_for_block(self, block_start: datetime, now: datetime) -> float:
+        """Returns extra Wh load for a 15-min block from all running or scheduled appliances.
+
+        Covers two cases:
+        - RUNNING_SPONTANEOUS / RUNNING_SCHEDULED: device is active now, estimate remaining run time
+        - WAITING_FOR_START: device has a scheduled start time in the future
+        """
+        if not self.appliance_manager:
+            return 0.0
+        block_end = block_start + timedelta(minutes=15)
+        total_wh = 0.0
+
+        for sensor_id, sm in self.appliance_state_machines.items():
+            prog = self.appliance_manager.get_program(sensor_id)
+            if not prog or prog.effective_power_w <= 0 or prog.duration_minutes <= 0:
+                continue
+
+            run_start: datetime | None = None
+            run_end: datetime | None = None
+
+            if sm.state in (ApplianceState.RUNNING_SPONTANEOUS, ApplianceState.RUNNING_SCHEDULED):
+                if sm._run_start_time is not None:
+                    elapsed_minutes = (now - sm._run_start_time).total_seconds() / 60
+                    remaining_minutes = max(0.0, prog.duration_minutes - elapsed_minutes)
+                    if remaining_minutes > 0:
+                        run_start = now
+                        run_end = now + timedelta(minutes=remaining_minutes)
+            elif sm.state == ApplianceState.WAITING_FOR_START and sm.planned_run:
+                run_start = sm.planned_run.scheduled_start
+                run_end = run_start + timedelta(minutes=prog.duration_minutes)
+
+            if run_start is None or run_end is None:
+                continue
+
+            overlap_start = max(block_start, run_start)
+            overlap_end = min(block_end, run_end)
+            overlap_minutes = (overlap_end - overlap_start).total_seconds() / 60
+            if overlap_minutes > 0:
+                total_wh += (prog.effective_power_w / 60.0) * overlap_minutes
+
+        return total_wh

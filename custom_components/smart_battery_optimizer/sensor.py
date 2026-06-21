@@ -28,6 +28,7 @@ async def async_setup_entry(
         DiagCurrentGridConsumptionSensor(coordinator, entry.entry_id),
         BatteryTotalSavingsSensor(coordinator, entry.entry_id),
         BatteryVsNoBatterySavingsSensor(coordinator, entry.entry_id),
+        LearningStatusSensor(coordinator, entry.entry_id),
     ]
 
     app_entities = coordinator.appliance_entities.get('sensor', [])
@@ -366,3 +367,66 @@ class BatteryVsNoBatterySavingsSensor(CoordinatorEntity, SensorEntity):
             return round(val, 2)
         except (KeyError, TypeError):
             return 0.0
+
+
+class LearningStatusSensor(CoordinatorEntity, SensorEntity):
+    """Sensor showing learning coverage and recommended time before disabling learning mode.
+
+    The value is the percentage of day-of-week/quarter slots that have reached
+    stable alpha (≥ 6 observations). Once 100% is reached, learning mode can safely
+    be turned off.
+
+    The 'hinweis' attribute provides a human-readable recommendation.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:brain"
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry_id}_learning_status"
+        self._attr_name = "Lernstatus (Datenbasis)"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
+
+    @property
+    def native_value(self):
+        return self.coordinator.learning_engine.get_learning_coverage()["coverage_pct"]
+
+    @property
+    def extra_state_attributes(self):
+        coverage = self.coordinator.learning_engine.get_learning_coverage()
+        weeks = coverage["estimated_weeks_remaining"]
+        is_learning = self.coordinator.is_learning_mode_active
+        is_vacation = self.coordinator.learning_engine.is_vacation_mode_active()
+
+        if is_vacation:
+            hint = "Urlaubsmodus aktiv — Lernen ist pausiert."
+        elif weeks == 0:
+            hint = "Lerndaten vollständig. Lernmodus kann deaktiviert werden."
+        elif is_learning:
+            hint = (
+                f"Lernmodus aktiv — empfohlen noch ca. {weeks} Woche(n) aktiv lassen "
+                f"({coverage['coverage_pct']:.0f}% stabile Zeitslots)."
+            )
+        else:
+            hint = (
+                f"Lernmodus inaktiv — {coverage['coverage_pct']:.0f}% der Zeitslots stabil. "
+                f"Für bessere Vorhersagen noch ca. {weeks} Woche(n) Lernmodus aktivieren."
+            )
+
+        return {
+            "hinweis": hint,
+            "coverage_pct": coverage["coverage_pct"],
+            "stable_slots": coverage["mature_slots"],
+            "total_slots": coverage["total_slots"],
+            "estimated_weeks_remaining": weeks,
+            "vacation_mode": is_vacation,
+            "learning_mode": is_learning,
+        }

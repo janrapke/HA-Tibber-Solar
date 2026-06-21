@@ -5,7 +5,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import DOMAIN, CLIMATE_MAX_SLOTS
 from .coordinator import SmartBatteryOptimizerCoordinator
 
 async def async_setup_entry(
@@ -22,7 +22,10 @@ async def async_setup_entry(
         EarlyExcessAutoSwitch(coordinator, entry.entry_id),
         LearningModeSwitch(coordinator, entry.entry_id),
         GridChargeEnableSwitch(coordinator, entry.entry_id),
+        VacationModeSwitch(coordinator, entry.entry_id),
     ]
+    for i in range(1, CLIMATE_MAX_SLOTS + 1):
+        entities.append(ClimateDeviceEnabledSwitch(coordinator, entry.entry_id, i))
     async_add_entities(entities)
 
 class GridChargeEnableSwitch(CoordinatorEntity, SwitchEntity):
@@ -218,6 +221,24 @@ class LearningModeSwitch(CoordinatorEntity, SwitchEntity):
     def is_on(self):
         return self.coordinator.is_learning_mode_active
 
+    @property
+    def extra_state_attributes(self):
+        """Expose learning coverage and recommendation as attributes."""
+        coverage = self.coordinator.learning_engine.get_learning_coverage()
+        weeks = coverage["estimated_weeks_remaining"]
+        if weeks == 0:
+            hint = "Lerndaten vollständig — Lernmodus kann deaktiviert werden."
+        else:
+            hint = (
+                f"Empfehlung: Lernmodus noch ca. {weeks} Woche(n) aktiv lassen "
+                f"({coverage['coverage_pct']:.0f}% der Zeitslots stabil)."
+            )
+        return {
+            "coverage_pct": coverage["coverage_pct"],
+            "estimated_weeks_remaining": weeks,
+            "hinweis": hint,
+        }
+
     async def async_turn_on(self, **kwargs):
         await self.coordinator.async_start_learning_mode()
         await self.coordinator.async_request_refresh()
@@ -225,3 +246,73 @@ class LearningModeSwitch(CoordinatorEntity, SwitchEntity):
     async def async_turn_off(self, **kwargs):
         await self.coordinator.async_stop_learning_mode()
         await self.coordinator.async_request_refresh()
+
+
+class VacationModeSwitch(CoordinatorEntity, SwitchEntity):
+    """Pause all learning while on vacation — prevents the model from learning wrong patterns."""
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:airplane-takeoff"
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
+        self._attr_unique_id = f"{entry_id}_vacation_mode"
+        self._attr_name = "Urlaubsmodus (Lernen pausieren)"
+
+    @property
+    def is_on(self):
+        return self.coordinator.learning_engine.is_vacation_mode_active()
+
+    async def async_turn_on(self, **kwargs):
+        self.coordinator.learning_engine.set_vacation_mode(True)
+        await self.coordinator.learning_engine.async_save()
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs):
+        self.coordinator.learning_engine.set_vacation_mode(False)
+        await self.coordinator.learning_engine.async_save()
+        self.async_write_ha_state()
+
+
+class ClimateDeviceEnabledSwitch(CoordinatorEntity, SwitchEntity):
+    """Enable/disable a climate device slot in consumption predictions.
+
+    Disable when the physical device is switched off for the season (e.g. AC in winter)
+    so the optimizer does not forecast load that won't materialize.
+    The learned model is preserved — re-enabling picks up where it left off.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:heat-pump"
+
+    def __init__(self, coordinator, entry_id, slot_number: int):
+        super().__init__(coordinator)
+        self._slot = slot_number
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
+        self._attr_unique_id = f"{entry_id}_climate_slot_{slot_number}_enabled"
+        self._attr_name = f"Klimagerät {slot_number} aktiv"
+        # Disabled by default — the user must explicitly turn on slots they've configured
+        if not hasattr(coordinator, "climate_slots_enabled"):
+            coordinator.climate_slots_enabled = {}
+        coordinator.climate_slots_enabled.setdefault(f"slot_{slot_number}", False)
+
+    @property
+    def is_on(self):
+        return self.coordinator.climate_slots_enabled.get(f"slot_{self._slot}", False)
+
+    async def async_turn_on(self, **kwargs):
+        self.coordinator.climate_slots_enabled[f"slot_{self._slot}"] = True
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs):
+        self.coordinator.climate_slots_enabled[f"slot_{self._slot}"] = False
+        self.async_write_ha_state()
