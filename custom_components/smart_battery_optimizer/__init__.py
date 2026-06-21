@@ -2,6 +2,7 @@
 import logging
 import pathlib
 
+from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceEntry
@@ -25,6 +26,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Register custom Lovelace card (once per HA instance)
     if not hass.data[DOMAIN].get("_card_registered"):
         hass.http.register_static_path(_CARD_URL, str(_CARD_PATH), cache_headers=False)
+        add_extra_js_url(hass, _CARD_URL)
         hass.data[DOMAIN]["_card_registered"] = True
 
     # Store config entry data
