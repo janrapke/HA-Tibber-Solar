@@ -41,23 +41,28 @@ class ApplianceProposalSelect(SmartApplianceBase, SelectEntity):
         self._attr_name = "Vorgeschlagene Startzeiten"
         self._attr_icon = "mdi:clock-outline"
         self._current_option: str | None = None
+        self._cached_proposals = None
+        self._cached_options: list[str] = []
 
     def force_recalculate(self):
         self.coordinator.proposal_calculator.invalidate(self.sensor_id)
         self._current_option = None
+        self._cached_proposals = None
+        self._cached_options = []
 
     def _get_proposals(self):
-        return self.coordinator.proposal_calculator.calculate_proposals(self.sensor_id)
+        proposals = self.coordinator.proposal_calculator.calculate_proposals(self.sensor_id)
+        # Only re-format option strings when proposals actually change (cache miss in calculator)
+        if proposals is not self._cached_proposals:
+            self._cached_proposals = proposals
+            self._cached_options = self._format_options(proposals)
+        return proposals
 
-    @property
-    def options(self) -> list[str]:
-        proposals = self._get_proposals()
+    def _format_options(self, proposals) -> list[str]:
         if not proposals:
             return ["Keine Vorschläge"]
-
         import homeassistant.util.dt as dt_util
         now = dt_util.now().replace(tzinfo=None)
-
         opts = []
         for p in proposals:
             time_str = p.start_time.strftime("%H:%M")
@@ -71,13 +76,16 @@ class ApplianceProposalSelect(SmartApplianceBase, SelectEntity):
                 delay_str = f"in {hours}h"
             else:
                 delay_str = f"in {minutes}m"
-
             cost_cents = round(p.cost_estimate * 100)
             solar_str = " ☀️" if p.uses_solar_excess else ""
             bootstrap_str = " (Schätzung)" if p.is_bootstrap else ""
             opts.append(f"{p.label}: {time_str} ({delay_str}) - {cost_cents}ct{solar_str}{bootstrap_str}")
-
         return opts
+
+    @property
+    def options(self) -> list[str]:
+        self._get_proposals()
+        return self._cached_options if self._cached_options else ["Keine Vorschläge"]
 
     @property
     def current_option(self) -> str | None:
