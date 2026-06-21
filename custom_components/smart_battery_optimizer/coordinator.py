@@ -1,4 +1,4 @@
-"""Coordinator to handle the core control logic for Smart Battery Optimizer."""
+﻿"""Coordinator to handle the core control logic for Smart Battery Optimizer."""
 import logging
 from datetime import timedelta, datetime
 import asyncio
@@ -70,7 +70,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         self.appliance_manager = None
         self.appliance_state_machines = {}
         self.proposal_calculator = ProposalCalculator(self)
-        self.appliance_entities = {'button': [], 'select': [], 'sensor': [], 'text': []}
+        self.appliance_entities = {'button': [], 'select': [], 'sensor': [], 'text': [], 'number': []}
 
         # Internal state
         self.is_enabled = True
@@ -162,7 +162,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         # Clear any existing entities to prevent double-initialization on reload
         self.appliance_state_machines.clear()
-        self.appliance_entities = {'button': [], 'select': [], 'sensor': [], 'text': []}
+        self.appliance_entities = {'button': [], 'select': [], 'sensor': [], 'text': [], 'number': []}
 
         # Init state machines for configured devices
         smart_devices_str = self.config.get(CONF_SMART_DEVICES, "")
@@ -171,30 +171,25 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             for dev in devices:
                 self.appliance_state_machines[dev] = ApplianceStateMachine(dev, self.appliance_manager)
 
-                # Instantiate UI Entities
                 from .appliance_entities import (
-                    ApplianceRecordButton, ApplianceProgramSelect, ApplianceProposalSelect, ApplianceTimerModeSelect, ApplianceTimerStepSelect,
-                    ApplianceConfirmButton, ApplianceDeleteButton, ApplianceRenameText, ApplianceStatusSensor, ApplianceTimerSensor,
-                    ApplianceProfileSensor, ApplianceManualTimeText
+                    ApplianceProposalSelect, ApplianceConfirmButton, ApplianceCancelButton,
+                    ApplianceStatusSensor, ApplianceTimerSensor, ApplianceProgramNameText,
                 )
 
-                prog_sel = ApplianceProgramSelect(self, self.config_entry.entry_id, dev)
-                prop_sel = ApplianceProposalSelect(self, self.config_entry.entry_id, dev, prog_sel)
-                timer_mode_sel = ApplianceTimerModeSelect(self, self.config_entry.entry_id, dev)
-                timer_step_sel = ApplianceTimerStepSelect(self, self.config_entry.entry_id, dev)
-                manual_time_txt = ApplianceManualTimeText(self, self.config_entry.entry_id, dev)
+                prop_sel = ApplianceProposalSelect(self, self.config_entry.entry_id, dev)
 
-                self.appliance_entities['select'].extend([prog_sel, prop_sel, timer_mode_sel, timer_step_sel])
+                self.appliance_entities['select'].append(prop_sel)
                 self.appliance_entities['button'].extend([
-                    ApplianceRecordButton(self, self.config_entry.entry_id, dev),
-                    ApplianceDeleteButton(self, self.config_entry.entry_id, dev, prog_sel),
-                    ApplianceConfirmButton(self, self.config_entry.entry_id, dev, prog_sel, prop_sel, manual_time_txt)
+                    ApplianceConfirmButton(self, self.config_entry.entry_id, dev, prop_sel),
+                    ApplianceCancelButton(self, self.config_entry.entry_id, dev),
                 ])
-                self.appliance_entities['text'].append(ApplianceRenameText(self, self.config_entry.entry_id, dev, prog_sel))
-                self.appliance_entities['text'].append(manual_time_txt)
-                self.appliance_entities['sensor'].append(ApplianceStatusSensor(self, self.config_entry.entry_id, dev))
-                self.appliance_entities['sensor'].append(ApplianceTimerSensor(self, self.config_entry.entry_id, dev))
-                self.appliance_entities['sensor'].append(ApplianceProfileSensor(self, self.config_entry.entry_id, dev, prog_sel))
+                self.appliance_entities['sensor'].extend([
+                    ApplianceStatusSensor(self, self.config_entry.entry_id, dev),
+                    ApplianceTimerSensor(self, self.config_entry.entry_id, dev),
+                ])
+                self.appliance_entities['text'].append(
+                    ApplianceProgramNameText(self, self.config_entry.entry_id, dev)
+                )
 
         await self._fetch_tibber_prices()
         await self._fetch_open_meteo_ghi()
@@ -1484,7 +1479,14 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         total_wh = 0.0
 
         for sensor_id, sm in self.appliance_state_machines.items():
-            prog = self.appliance_manager.get_program(sensor_id)
+            # Pick the right program: planned > actively running > most recent
+            if sm.planned_run and sm.planned_run.program_id:
+                prog = self.appliance_manager.get_program_by_id(sensor_id, sm.planned_run.program_id)
+            elif sm.active_program_id:
+                prog = self.appliance_manager.get_program_by_id(sensor_id, sm.active_program_id)
+            else:
+                prog = self.appliance_manager.get_program(sensor_id)
+
             if not prog or prog.effective_power_w <= 0 or prog.duration_minutes <= 0:
                 continue
 

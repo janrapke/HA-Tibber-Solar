@@ -25,6 +25,8 @@ async def async_setup_entry(
             ClimateSolltemperaturNumber(coordinator, entry.entry_id, i),
         ])
 
+    app_numbers = coordinator.appliance_entities.get('number', [])
+
     async_add_entities([
         ExtremePriceThresholdNumber(coordinator, entry.entry_id),
         ExtremePriceFactorNumber(coordinator, entry.entry_id),
@@ -39,6 +41,7 @@ async def async_setup_entry(
         GridChargeBufferNumber(coordinator, entry.entry_id),
         GridChargeMarginNumber(coordinator, entry.entry_id),
         *climate_entities,
+        *app_numbers,
     ])
 
 class GridChargeMarginNumber(CoordinatorEntity, NumberEntity):
