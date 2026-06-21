@@ -1,8 +1,7 @@
 /**
- * Smart Battery Optimizer — Battery Forecast Card
- * Zeigt Akkustand (Ist + Prognose), Tibber-Preis und Dispatch-Plan in einem Chart.
- * Wird automatisch beim HA-Start geladen — keine manuelle Konfiguration nötig.
+ * Smart Battery Optimizer — Battery Forecast Card v1.0
  */
+console.info('%c BATTERY-FORECAST-CARD %c v1.0 ', 'color:white;background:#4CAF50;font-weight:bold', 'color:#4CAF50;background:white;font-weight:bold');
 
 const ACTION_COLOR = {
   DIS: '#4CAF50',  // grün   — Dispatch (DTU an)
