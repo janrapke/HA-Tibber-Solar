@@ -191,6 +191,13 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                     ApplianceProgramNameText(self, self.config_entry.entry_id, dev)
                 )
 
+        # Auto-create state machines for excluded power sensors (e.g. EV charger) so that
+        # when they are active, their remaining load is included in the forward plan and
+        # the early-excess logic reacts correctly — no separate smart_devices entry needed.
+        for entity_id in self.config.get(CONF_EXCLUDED_POWER_SENSORS, []):
+            if entity_id not in self.appliance_state_machines:
+                self.appliance_state_machines[entity_id] = ApplianceStateMachine(entity_id, self.appliance_manager)
+
         await self._fetch_tibber_prices()
         await self._fetch_open_meteo_ghi()
 
