@@ -15,19 +15,23 @@ PLATFORMS: list[str] = ["sensor", "switch", "number", "button", "select", "text"
 
 from .coordinator import SmartBatteryOptimizerCoordinator
 
-_CARD_URL = f"/smart_battery_optimizer/appliance-card.js"
-_CARD_PATH = pathlib.Path(__file__).parent / "www" / "appliance-card.js"
+_WWW = pathlib.Path(__file__).parent / "www"
+_CARDS = [
+    ("appliance-card.js", "/smart_battery_optimizer/appliance-card.js"),
+    ("battery-forecast-card.js", "/smart_battery_optimizer/battery-forecast-card.js"),
+]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Smart Battery Optimizer from a config entry."""
     hass.data.setdefault(DOMAIN, {})
 
-    # Register custom Lovelace card (once per HA instance)
-    if not hass.data[DOMAIN].get("_card_registered"):
-        hass.http.register_static_path(_CARD_URL, str(_CARD_PATH), cache_headers=False)
-        add_extra_js_url(hass, _CARD_URL)
-        hass.data[DOMAIN]["_card_registered"] = True
+    # Register custom Lovelace cards (once per HA instance)
+    if not hass.data[DOMAIN].get("_cards_registered"):
+        for filename, url in _CARDS:
+            hass.http.register_static_path(url, str(_WWW / filename), cache_headers=False)
+            add_extra_js_url(hass, url)
+        hass.data[DOMAIN]["_cards_registered"] = True
 
     # Store config entry data
     hass.data[DOMAIN][entry.entry_id] = {}

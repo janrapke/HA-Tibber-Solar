@@ -381,8 +381,12 @@ class ProposalCalculator:
         base = now.replace(second=0, microsecond=0)
         end_search = now + timedelta(hours=48)
 
-        if granularity == 0:
-            # Uhrzeit mode: absolute 15-min clock slots (14:00, 14:15, 14:30...)
+        if granularity == 1:
+            # Uhrzeit genau: any minute, absolute clock, min 30 min lead
+            step = 1
+            start_search = base + timedelta(minutes=30)
+        elif granularity == 0:
+            # Uhrzeit 15 Min gerundet: absolute 15-min clock slots
             step = 15
             start_search = base + timedelta(hours=1)
             remainder = start_search.minute % step
