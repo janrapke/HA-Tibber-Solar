@@ -43,6 +43,10 @@ class BatteryForecastCard extends HTMLElement {
   setConfig(config) {
     this._config = config || {};
     this._history = null;
+    // Render placeholder immediately so HA card picker spinner goes away
+    if (this.shadowRoot) {
+      this.shadowRoot.innerHTML = '<div style="padding:16px;font-family:var(--paper-font-body1_-_font-family,sans-serif)">&#9889; Batterie Prognose lädt…</div>';
+    }
   }
 
   set hass(hass) {
@@ -63,14 +67,17 @@ class BatteryForecastCard extends HTMLElement {
     clearInterval(this._refreshTimer);
   }
 
+  getCardSize() { return 5; }
+
   // ── Daten ──────────────────────────────────────────────────────
 
   _findPlanSensor() {
     if (this._config.plan_sensor) return this._config.plan_sensor;
-    const ent = Object.values(this._hass?.entities || {}).find(
-      e => e.unique_id?.endsWith('_forecast_plan')
-    );
-    return ent?.entity_id;
+    // Scan states for any sensor with hourly_plan attribute (avoids hass.entities dependency)
+    for (const [eid, st] of Object.entries(this._hass?.states || {})) {
+      if (st.attributes?.hourly_plan) return eid;
+    }
+    return null;
   }
 
   _findBattSensor() {
