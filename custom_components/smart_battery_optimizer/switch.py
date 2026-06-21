@@ -6,7 +6,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, CLIMATE_MAX_SLOTS, CONF_PRESUNNY_SOLAR_MARGIN_PCT
+from .const import DOMAIN, CONF_PRESUNNY_SOLAR_MARGIN_PCT
 from .coordinator import SmartBatteryOptimizerCoordinator
 
 async def async_setup_entry(
@@ -25,9 +25,8 @@ async def async_setup_entry(
         GridChargeEnableSwitch(coordinator, entry.entry_id),
         VacationModeSwitch(coordinator, entry.entry_id),
         PresunnyDischargeSwitch(coordinator, entry.entry_id),
+        *coordinator.appliance_entities.get('switch', []),
     ]
-    for i in range(1, CLIMATE_MAX_SLOTS + 1):
-        entities.append(ClimateDeviceEnabledSwitch(coordinator, entry.entry_id, i))
     async_add_entities(entities)
 
 class GridChargeEnableSwitch(CoordinatorEntity, SwitchEntity):
@@ -320,44 +319,4 @@ class PresunnyDischargeSwitch(CoordinatorEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs):
         self.coordinator.presunny_discharge_enabled = False
-        self.async_write_ha_state()
-
-
-class ClimateDeviceEnabledSwitch(CoordinatorEntity, SwitchEntity):
-    """Enable/disable a climate device slot in consumption predictions.
-
-    Disable when the physical device is switched off for the season (e.g. AC in winter)
-    so the optimizer does not forecast load that won't materialize.
-    The learned model is preserved — re-enabling picks up where it left off.
-    """
-
-    _attr_has_entity_name = True
-    _attr_entity_category = EntityCategory.CONFIG
-    _attr_icon = "mdi:heat-pump"
-
-    def __init__(self, coordinator, entry_id, slot_number: int):
-        super().__init__(coordinator)
-        self._slot = slot_number
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry_id)},
-            "name": "Smart Battery Optimizer",
-            "manufacturer": "Custom",
-        }
-        self._attr_unique_id = f"{entry_id}_climate_slot_{slot_number}_enabled"
-        self._attr_name = f"Klimagerät {slot_number} aktiv"
-        # Disabled by default — the user must explicitly turn on slots they've configured
-        if not hasattr(coordinator, "climate_slots_enabled"):
-            coordinator.climate_slots_enabled = {}
-        coordinator.climate_slots_enabled.setdefault(f"slot_{slot_number}", False)
-
-    @property
-    def is_on(self):
-        return self.coordinator.climate_slots_enabled.get(f"slot_{self._slot}", False)
-
-    async def async_turn_on(self, **kwargs):
-        self.coordinator.climate_slots_enabled[f"slot_{self._slot}"] = True
-        self.async_write_ha_state()
-
-    async def async_turn_off(self, **kwargs):
-        self.coordinator.climate_slots_enabled[f"slot_{self._slot}"] = False
         self.async_write_ha_state()

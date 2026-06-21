@@ -42,6 +42,11 @@ from .const import (
     CONF_SMART_DEVICES,
     CONF_GRID_CHARGER_SWITCH,
     CONF_GRID_CHARGER_POWER_W,
+    CONF_CLIMATE_DEVICES,
+    CLIMATE_TYPE_HEATING,
+    CLIMATE_TYPE_COOLING,
+    CLIMATE_TYPE_HEAT_PUMP,
+    CLIMATE_LABEL_TO_INTERNAL,
 )
 
 
@@ -225,7 +230,7 @@ class SmartBatteryOptimizerOptionsFlowHandler(config_entries.OptionsFlow):
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         return self.async_show_menu(
             step_id="init",
-            menu_options=["tibber", "battery", "solar_inverter", "system", "excess", "grid_charger"],
+            menu_options=["tibber", "battery", "solar_inverter", "system", "excess", "grid_charger", "climate_devices"],
         )
 
     async def async_step_tibber(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -257,3 +262,68 @@ class SmartBatteryOptimizerOptionsFlowHandler(config_entries.OptionsFlow):
         if user_input is not None:
             return self._save_section(user_input)
         return self.async_show_form(step_id="grid_charger", data_schema=_schema_grid_charger(self._current()))
+
+    async def async_step_climate_devices(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        return self.async_show_menu(
+            step_id="climate_devices",
+            menu_options=["climate_add", "climate_remove"],
+        )
+
+    async def async_step_climate_add(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        if user_input is not None:
+            import uuid
+            data = self._current()
+            devices = list(data.get(CONF_CLIMATE_DEVICES, []))
+            devices.append({
+                "id": uuid.uuid4().hex[:8],
+                "name": user_input["name"],
+                "device_type": CLIMATE_LABEL_TO_INTERNAL.get(user_input["device_type"], "heating"),
+                "setpoint": float(user_input.get("setpoint", 20.0)),
+                "manual_w": float(user_input.get("manual_w", 0.0)),
+                "power_sensor": user_input.get("power_sensor", ""),
+            })
+            data[CONF_CLIMATE_DEVICES] = devices
+            return self.async_create_entry(title="", data=data)
+
+        schema = vol.Schema({
+            vol.Required("name"): str,
+            vol.Required("device_type", default=CLIMATE_TYPE_HEATING): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=[CLIMATE_TYPE_HEATING, CLIMATE_TYPE_COOLING, CLIMATE_TYPE_HEAT_PUMP],
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            ),
+            vol.Optional("setpoint", default=20.0): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=10, max=35, step=0.5, mode=selector.NumberSelectorMode.SLIDER)
+            ),
+            vol.Optional("manual_w", default=0.0): selector.NumberSelector(
+                selector.NumberSelectorConfig(min=0, max=10000, step=50, mode=selector.NumberSelectorMode.BOX)
+            ),
+            vol.Optional("power_sensor", default=""): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+        })
+        return self.async_show_form(step_id="climate_add", data_schema=schema)
+
+    async def async_step_climate_remove(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        data = self._current()
+        devices = data.get(CONF_CLIMATE_DEVICES, [])
+
+        if not devices:
+            return await self.async_step_climate_devices()
+
+        if user_input is not None:
+            remove_id = user_input.get("device_id")
+            data[CONF_CLIMATE_DEVICES] = [d for d in devices if d["id"] != remove_id]
+            return self.async_create_entry(title="", data=data)
+
+        options = [{"label": d["name"], "value": d["id"]} for d in devices]
+        schema = vol.Schema({
+            vol.Required("device_id"): selector.SelectSelector(
+                selector.SelectSelectorConfig(
+                    options=options,
+                    mode=selector.SelectSelectorMode.DROPDOWN,
+                )
+            ),
+        })
+        return self.async_show_form(step_id="climate_remove", data_schema=schema)

@@ -29,6 +29,11 @@ async def async_setup_entry(
         BatteryTotalSavingsSensor(coordinator, entry.entry_id),
         BatteryVsNoBatterySavingsSensor(coordinator, entry.entry_id),
         LearningStatusSensor(coordinator, entry.entry_id),
+        # Overfill emergency diagnostics
+        OverfillAbsorptionSensor(coordinator, entry.entry_id),
+        # Morning SOC planning (Step 3)
+        TargetMorningSocSensor(coordinator, entry.entry_id),
+        TomorrowForecastSolarSensor(coordinator, entry.entry_id),
     ]
 
     app_entities = coordinator.appliance_entities.get('sensor', [])
@@ -430,3 +435,108 @@ class LearningStatusSensor(CoordinatorEntity, SensorEntity):
             "vacation_mode": is_vacation,
             "learning_mode": is_learning,
         }
+
+
+class OverfillAbsorptionSensor(CoordinatorEntity, SensorEntity):
+    """Zeigt wie viel Wh die Verbraucher beim letzten Überfüll-Notfall tatsächlich absorbiert haben.
+
+    Positiver Wert: Batterie ist gesunken — Verbraucher haben geholfen.
+    Negativer Wert: Batterie ist trotzdem gestiegen — Verbraucher reichten nicht aus.
+    """
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_native_unit_of_measurement = "Wh"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:lightning-bolt"
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry_id}_overfill_absorption_last"
+        self._attr_name = "Überfüll-Notfall: Letzte Absorption"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
+
+    @property
+    def native_value(self):
+        return round(self.coordinator.overfill_absorption_last_wh, 1)
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "notfall_aktiv": self.coordinator._overfill_emergency_active,
+        }
+
+
+class TargetMorningSocSensor(CoordinatorEntity, SensorEntity):
+    """Zeigt den berechneten Ziel-Ladestand für den nächsten Morgen.
+
+    Wird genutzt um nachts Platz für Solar-Einspeisung zu schaffen.
+    None wenn Feature deaktiviert oder keine Vorhersagedaten verfügbar.
+    """
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.BATTERY
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:battery-arrow-down"
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry_id}_target_morning_soc"
+        self._attr_name = "Geplanter Morgen-Ladestand"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
+
+    @property
+    def native_value(self):
+        val = getattr(self.coordinator, "target_morning_soc_pct", None)
+        if val is None:
+            return None
+        return round(val, 1)
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "laderaum_aktiv": getattr(self.coordinator, "presunny_discharge_enabled", False),
+            "netto_solar_morgen_wh": round(getattr(self.coordinator, "tomorrow_net_solar_wh", 0.0), 0),
+        }
+
+
+class TomorrowForecastSolarSensor(CoordinatorEntity, SensorEntity):
+    """Zeigt den erwarteten Netto-Solar-Überschuss für morgen in Wh.
+
+    Netto = Solar minus erwarteter Hausverbrauch für Tagesstunden.
+    """
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_native_unit_of_measurement = "Wh"
+    _attr_state_class = None
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:weather-sunny-alert"
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry_id}_tomorrow_forecast_solar"
+        self._attr_name = "Erwarteter Solar-Überschuss morgen"
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": "Smart Battery Optimizer",
+            "manufacturer": "Custom",
+        }
+
+    @property
+    def native_value(self):
+        val = getattr(self.coordinator, "tomorrow_net_solar_wh", None)
+        if val is None:
+            return None
+        return round(val, 0)

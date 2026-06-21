@@ -47,14 +47,29 @@ CONF_SMART_DEVICES = "smart_devices"
 CONF_GRID_CHARGER_SWITCH = "grid_charger_switch"
 CONF_GRID_CHARGER_POWER_W = "grid_charger_power_w"
 
+# Proactive night-discharge feature
+CONF_PRESUNNY_SOLAR_MARGIN_PCT = "presunny_solar_margin_pct"
+
+# Climate device learning
+CONF_CLIMATE_DEVICES = "climate_devices"   # list of device dicts stored in options
+
 # Number of degrees assumed for initial W/°C bootstrap (prior when no real data yet)
 CLIMATE_BOOTSTRAP_ASSUMED_DELTA = 10.0
 
-# Number of configurable climate device slots (increase here to add more)
-CLIMATE_MAX_SLOTS = 3
-
-# Climate device type constants (stored in coordinator per slot)
-CLIMATE_TYPE_DISABLED = "Deaktiviert"
+# Climate device type values (stored per device in CONF_CLIMATE_DEVICES)
 CLIMATE_TYPE_HEATING = "Nur Heizen"
 CLIMATE_TYPE_COOLING = "Nur Kühlen"
 CLIMATE_TYPE_HEAT_PUMP = "Wärmepumpe (Heizen+Kühlen)"
+
+# Internal type strings used by the learning engine
+CLIMATE_INTERNAL_HEATING = "heating"
+CLIMATE_INTERNAL_COOLING = "cooling"
+CLIMATE_INTERNAL_HEAT_PUMP = "heat_pump"
+
+# Map display labels → internal strings
+CLIMATE_LABEL_TO_INTERNAL = {
+    CLIMATE_TYPE_HEATING: CLIMATE_INTERNAL_HEATING,
+    CLIMATE_TYPE_COOLING: CLIMATE_INTERNAL_COOLING,
+    CLIMATE_TYPE_HEAT_PUMP: CLIMATE_INTERNAL_HEAT_PUMP,
+}
+CLIMATE_INTERNAL_TO_LABEL = {v: k for k, v in CLIMATE_LABEL_TO_INTERNAL.items()}

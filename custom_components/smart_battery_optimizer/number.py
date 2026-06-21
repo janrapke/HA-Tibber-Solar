@@ -7,7 +7,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, CONF_MIN_SWITCH_INTERVAL_MINUTES, CLIMATE_MAX_SLOTS, CONF_PRESUNNY_SOLAR_MARGIN_PCT
+from .const import DOMAIN, CONF_MIN_SWITCH_INTERVAL_MINUTES, CONF_PRESUNNY_SOLAR_MARGIN_PCT
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -18,15 +18,6 @@ async def async_setup_entry(
 ) -> None:
     """Set up the number entities."""
     coordinator = hass.data[DOMAIN][entry.entry_id]["coordinator"]
-
-    climate_entities = []
-    for i in range(1, CLIMATE_MAX_SLOTS + 1):
-        climate_entities.extend([
-            ClimateManualWNumber(coordinator, entry.entry_id, i),
-            ClimateSolltemperaturNumber(coordinator, entry.entry_id, i),
-        ])
-
-    app_numbers = coordinator.appliance_entities.get('number', [])
 
     async_add_entities([
         ExtremePriceThresholdNumber(coordinator, entry.entry_id),
@@ -42,8 +33,7 @@ async def async_setup_entry(
         GridChargeBufferNumber(coordinator, entry.entry_id),
         GridChargeMarginNumber(coordinator, entry.entry_id),
         PresunnySolarMarginNumber(coordinator, entry.entry_id),
-        *climate_entities,
-        *app_numbers,
+        *coordinator.appliance_entities.get('number', []),
     ])
 
 class GridChargeMarginNumber(CoordinatorEntity, NumberEntity):
@@ -472,87 +462,3 @@ class PresunnySolarMarginNumber(CoordinatorEntity, NumberEntity):
         self.async_write_ha_state()
 
 
-class ClimateManualWNumber(CoordinatorEntity, NumberEntity):
-    """Electrical power consumption (W) of a climate device slot when running.
-
-    Enter the device's actual electrical draw — NOT the heating/cooling output capacity.
-    For heat pumps: use Leistungsaufnahme (e.g. 2500 W), not Heizleistung (e.g. 9000 W).
-    The system uses this as a bootstrap estimate until a smart-plug sensor takes over.
-    Set to 0 if using a power sensor only.
-    """
-
-    _attr_has_entity_name = True
-    _attr_entity_category = EntityCategory.CONFIG
-    _attr_icon = "mdi:lightning-bolt"
-    _attr_mode = NumberMode.BOX
-    _attr_native_min_value = 0
-    _attr_native_max_value = 10000
-    _attr_native_step = 50
-
-    def __init__(self, coordinator, entry_id, slot_number: int):
-        super().__init__(coordinator)
-        self._slot = slot_number
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry_id)},
-            "name": "Smart Battery Optimizer",
-            "manufacturer": "Custom",
-        }
-        self._attr_unique_id = f"{entry_id}_climate_slot_{slot_number}_manual_w"
-        self._attr_name = f"Klimagerät {slot_number} Leistungsaufnahme (W)"
-        if not hasattr(coordinator, "climate_slots_manual_w"):
-            coordinator.climate_slots_manual_w = {}
-        coordinator.climate_slots_manual_w.setdefault(f"slot_{slot_number}", 0.0)
-
-    @property
-    def native_value(self) -> float:
-        return self.coordinator.climate_slots_manual_w.get(f"slot_{self._slot}", 0.0)
-
-    async def async_set_native_value(self, value: float) -> None:
-        self.coordinator.climate_slots_manual_w[f"slot_{self._slot}"] = value
-        # Re-run bootstrap whenever manual W is set so predictions improve immediately
-        slot_type = self.coordinator.climate_slots_type.get(f"slot_{self._slot}", "disabled")
-        if slot_type != "disabled":
-            self.coordinator.learning_engine.bootstrap_climate_slot(
-                f"slot_{self._slot}", value, slot_type
-            )
-            await self.coordinator.learning_engine.async_save()
-        self.async_write_ha_state()
-
-
-class ClimateSolltemperaturNumber(CoordinatorEntity, NumberEntity):
-    """Target indoor temperature (Solltemperatur) for a climate device slot.
-
-    The device heats when outdoor temp falls below this value,
-    and cools when outdoor temp rises above it — depending on the device type.
-    One setpoint covers both modes for heat pumps.
-    """
-
-    _attr_has_entity_name = True
-    _attr_entity_category = EntityCategory.CONFIG
-    _attr_icon = "mdi:thermometer"
-    _attr_mode = NumberMode.SLIDER
-    _attr_native_min_value = 10
-    _attr_native_max_value = 35
-    _attr_native_step = 0.5
-
-    def __init__(self, coordinator, entry_id, slot_number: int):
-        super().__init__(coordinator)
-        self._slot = slot_number
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry_id)},
-            "name": "Smart Battery Optimizer",
-            "manufacturer": "Custom",
-        }
-        self._attr_unique_id = f"{entry_id}_climate_slot_{slot_number}_setpoint"
-        self._attr_name = f"Klimagerät {slot_number} Solltemperatur (°C)"
-        if not hasattr(coordinator, "climate_slots_setpoint"):
-            coordinator.climate_slots_setpoint = {}
-        coordinator.climate_slots_setpoint.setdefault(f"slot_{slot_number}", 20.0)
-
-    @property
-    def native_value(self) -> float:
-        return self.coordinator.climate_slots_setpoint.get(f"slot_{self._slot}", 20.0)
-
-    async def async_set_native_value(self, value: float) -> None:
-        self.coordinator.climate_slots_setpoint[f"slot_{self._slot}"] = value
-        self.async_write_ha_state()

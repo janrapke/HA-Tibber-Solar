@@ -9,7 +9,7 @@ from homeassistant.helpers.storage import Store
 
 from .const import (
     CONF_BASE_LOAD_W, CONF_SOLAR_PEAK_W,
-    CLIMATE_BOOTSTRAP_ASSUMED_DELTA, CLIMATE_MAX_SLOTS,
+    CLIMATE_BOOTSTRAP_ASSUMED_DELTA,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -73,32 +73,15 @@ class LearningEngine:
                 "cloudy": 6,
             }
 
-        # Climate device learning — slot-based, temperature-delta model.
-        # Supports up to CLIMATE_MAX_SLOTS devices, each configurable as:
-        #   Nur Heizen / Nur Kühlen / Wärmepumpe (Heizen+Kühlen)
-        # Per slot, separate W/°C models are kept for heating and cooling modes
-        # so a heat pump can learn both independently.
-        _empty_slot = lambda: {
-            "wpc_heating": 0.0,          # W per °C below heating setpoint
-            "wpc_heating_counter": 0,
-            "wpc_cooling": 0.0,          # W per °C above cooling setpoint
-            "wpc_cooling_counter": 0,
-            "occupancy_dow": {
-                str(dow): {str(q): 0.0 for q in range(96)} for dow in range(7)
-            },
-            "occupancy_dow_counters": {
-                str(dow): {str(q): 0 for q in range(96)} for dow in range(7)
-            },
-        }
-        self.data.setdefault("climate", {
-            f"slot_{i}": _empty_slot() for i in range(1, CLIMATE_MAX_SLOTS + 1)
-        })
+        # Climate device learning — device-ID-keyed, temperature-delta model.
+        # Devices are registered dynamically via register_climate_device().
+        # Per device, separate W/°C models for heating and cooling so a heat pump
+        # can learn both independently.
+        self.data.setdefault("climate", {})
         self.data.setdefault("vacation_mode_active", False)
 
-        # Accumulators for current quarter (climate), keyed by slot_id
-        self._climate_acc: dict = {
-            f"slot_{i}": {"power": 0.0, "n": 0} for i in range(1, CLIMATE_MAX_SLOTS + 1)
-        }
+        # Accumulators for current quarter (climate), keyed by device_id
+        self._climate_acc: dict = {}
 
         # GHI-ratio based solar prediction (site-specific efficiency per time slot)
         # ratio[slot] = actual_production_wh / GHI_W_per_m2
@@ -174,10 +157,9 @@ class LearningEngine:
                 self.data["vacation_mode_active"] = stored_data["vacation_mode_active"]
 
             if "climate" in stored_data:
-                for slot_id, src in stored_data["climate"].items():
-                    if slot_id not in self.data["climate"]:
-                        continue
-                    dst = self.data["climate"][slot_id]
+                for device_id, src in stored_data["climate"].items():
+                    # Restore any stored device — new devices get lazy-created via register_climate_device
+                    dst = self._ensure_climate_slot(device_id)
                     for scalar_key in ("wpc_heating", "wpc_heating_counter", "wpc_cooling", "wpc_cooling_counter"):
                         if scalar_key in src:
                             cast = float if "counter" not in scalar_key else int
@@ -237,12 +219,6 @@ class LearningEngine:
 
     async def hard_reset_data(self):
         """Hard reset the learning data completely and reinitialize with priors."""
-        _empty_slot = lambda: {
-            "wpc_heating": 0.0, "wpc_heating_counter": 0,
-            "wpc_cooling": 0.0, "wpc_cooling_counter": 0,
-            "occupancy_dow": {str(dow): {str(q): 0.0 for q in range(96)} for dow in range(7)},
-            "occupancy_dow_counters": {str(dow): {str(q): 0 for q in range(96)} for dow in range(7)},
-        }
         self.data = {
             "consumption": {},
             "solar": {str(q): {} for q in range(96)},
@@ -260,9 +236,9 @@ class LearningEngine:
             "consumption_dow_counters": {str(dow): {str(q): 0 for q in range(96)} for dow in range(7)},
             "learning_mode_active": False, "learning_rate_factor": 0.7,
             "vacation_mode_active": False,
-            "climate": {f"slot_{i}": _empty_slot() for i in range(1, CLIMATE_MAX_SLOTS + 1)},
+            "climate": {},
         }
-        self._climate_acc = {f"slot_{i}": {"power": 0.0, "n": 0} for i in range(1, CLIMATE_MAX_SLOTS + 1)}
+        self._climate_acc = {}
         self._initialize_priors()
         await self.async_save()
         _LOGGER.info("Learning data has been hard-reset to priors.")
@@ -288,6 +264,29 @@ class LearningEngine:
     # Climate device learning
     # ------------------------------------------------------------------
 
+    def _ensure_climate_slot(self, device_id: str) -> dict:
+        """Return the climate data dict for device_id, creating it if absent."""
+        if device_id not in self.data["climate"]:
+            self.data["climate"][device_id] = {
+                "wpc_heating": 0.0, "wpc_heating_counter": 0,
+                "wpc_cooling": 0.0, "wpc_cooling_counter": 0,
+                "occupancy_dow": {
+                    str(dow): {str(q): 0.0 for q in range(96)} for dow in range(7)
+                },
+                "occupancy_dow_counters": {
+                    str(dow): {str(q): 0 for q in range(96)} for dow in range(7)
+                },
+            }
+        if device_id not in self._climate_acc:
+            self._climate_acc[device_id] = {"power": 0.0, "n": 0}
+        return self.data["climate"][device_id]
+
+    def register_climate_device(self, device_id: str, manual_w: float, device_type: str):
+        """Ensure storage exists for device_id and run bootstrap if not yet seeded."""
+        self._ensure_climate_slot(device_id)
+        if manual_w > 0:
+            self.bootstrap_climate_slot(device_id, manual_w, device_type)
+
     def bootstrap_climate_slot(self, slot_id: str, manual_w: float, device_type: str):
         """Seed the W/°C coefficient from a manual wattage estimate.
 
@@ -296,9 +295,9 @@ class LearningEngine:
         Counter is set to 1 so actual measurements quickly take over.
         device_type must be one of: "heating", "cooling", "heat_pump".
         """
-        if slot_id not in self.data["climate"] or manual_w <= 0:
+        if manual_w <= 0:
             return
-        slot = self.data["climate"][slot_id]
+        slot = self._ensure_climate_slot(slot_id)
         wpc_init = manual_w / CLIMATE_BOOTSTRAP_ASSUMED_DELTA
         if device_type in ("heating", "heat_pump") and slot["wpc_heating_counter"] == 0:
             slot["wpc_heating"] = wpc_init
@@ -311,10 +310,9 @@ class LearningEngine:
 
     async def record_climate_power(self, slot_id: str, power_w: float):
         """Accumulate smart-plug power reading during a 15-min quarter."""
-        if slot_id not in self._climate_acc:
-            return
         if power_w < 0:
             return
+        self._ensure_climate_slot(slot_id)
         self._climate_acc[slot_id]["power"] += power_w
         self._climate_acc[slot_id]["n"] += 1
 
@@ -344,9 +342,7 @@ class LearningEngine:
         avg_power_w = (acc["power"] / n) if n > 0 else 0.0
         self._climate_acc[slot_id] = {"power": 0.0, "n": 0}
 
-        if slot_id not in self.data["climate"]:
-            return
-        slot = self.data["climate"][slot_id]
+        slot = self._ensure_climate_slot(slot_id)
         q_str = str(quarter)
         d_str = str(dow)
 
