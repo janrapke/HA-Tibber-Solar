@@ -170,8 +170,9 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
                 from .appliance_entities import (
                     ApplianceProposalSelect, ApplianceConfirmButton, ApplianceCancelButton,
-                    ApplianceStatusSensor, ApplianceTimerSensor, ApplianceProgramNameText,
-                    ApplianceScheduleSelect, ApplianceEarliestStartNumber, ApplianceLatestEndNumber,
+                    ApplianceRecalculateButton, ApplianceStatusSensor, ApplianceTimerSensor,
+                    ApplianceProgramNameText, ApplianceScheduleSelect,
+                    ApplianceEarliestStartNumber, ApplianceLatestEndNumber,
                 )
 
                 prop_sel = ApplianceProposalSelect(self, self.config_entry.entry_id, dev)
@@ -187,6 +188,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 self.appliance_entities['button'].extend([
                     ApplianceConfirmButton(self, self.config_entry.entry_id, dev, prop_sel),
                     ApplianceCancelButton(self, self.config_entry.entry_id, dev),
+                    ApplianceRecalculateButton(self, self.config_entry.entry_id, dev),
                 ])
                 self.appliance_entities['sensor'].extend([
                     ApplianceStatusSensor(self, self.config_entry.entry_id, dev),

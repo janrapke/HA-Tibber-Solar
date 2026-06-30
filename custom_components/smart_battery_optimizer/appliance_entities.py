@@ -151,6 +151,20 @@ class ApplianceCancelButton(SmartApplianceBase, ButtonEntity):
             await self.coordinator.async_request_refresh()
 
 
+class ApplianceRecalculateButton(SmartApplianceBase, ButtonEntity):
+    """Force proposal recalculation by invalidating cache and refreshing coordinator."""
+
+    def __init__(self, coordinator, entry_id, sensor_id):
+        super().__init__(coordinator, entry_id, sensor_id)
+        self._attr_unique_id = f"{entry_id}_{sensor_id}_recalculate_btn"
+        self._attr_name = "Vorschläge neu berechnen"
+        self._attr_icon = "mdi:refresh"
+
+    async def async_press(self) -> None:
+        self.coordinator.proposal_calculator.invalidate(self.sensor_id)
+        await self.coordinator.async_request_refresh()
+
+
 class ApplianceStatusSensor(SmartApplianceBase, SensorEntity):
     """Shows the current status, countdown, and probability breakdown."""
 

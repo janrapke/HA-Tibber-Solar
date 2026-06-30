@@ -50,6 +50,7 @@ class ApplianceCard extends HTMLElement {
           select:         find(`${base}_proposal_select`),
           confirm:        find(`${base}_confirm_btn`),
           cancel:         find(`${base}_cancel_btn`),
+          recalculate:    find(`${base}_recalculate_btn`),
           scheduleSelect: find(`${base}_schedule_granularity`),
           earliestStart:  find(`${base}_earliest_start_hour`),
           latestEnd:      find(`${base}_latest_end_hour`),
@@ -75,6 +76,7 @@ class ApplianceCard extends HTMLElement {
       select:         findState('select', 'vorgeschlagene_zeiten', 'vorgeschlagene_startzeiten'),
       confirm:        findState('button', 'plan_bestatigen', 'plan_bestaetigen'),
       cancel:         findState('button', 'plan_abbrechen'),
+      recalculate:    findState('button', 'vorschlage_neu_berechnen', 'vorschlage_neu'),
       scheduleSelect: findState('select', 'zeitsteuerung'),
       earliestStart:  findState('number', 'fruhester_start_stunde', 'fruhester_start'),
       latestEnd:      findState('number', 'spateste_fertigstellung_stunde', 'spateste_fertigstellung'),
@@ -238,8 +240,13 @@ class ApplianceCard extends HTMLElement {
 
     this.shadowRoot.querySelector('.btn-reload')?.addEventListener('click', () => {
       if (!this._hass) return;
-      // Refresh coordinator via the status sensor (CoordinatorEntity → async_request_refresh)
-      this._hass.callService('homeassistant', 'update_entity', { entity_id: ents.status });
+      if (ents.recalculate) {
+        // Dedicated button: invalidates cache + triggers coordinator refresh
+        this._pressButton(ents.recalculate);
+      } else {
+        // Fallback: coordinator refresh via status entity
+        this._hass.callService('homeassistant', 'update_entity', { entity_id: ents.status });
+      }
     });
 
     this.shadowRoot.querySelector('#earliest-start')?.addEventListener('change', e =>
