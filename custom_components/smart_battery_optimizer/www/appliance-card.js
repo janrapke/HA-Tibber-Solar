@@ -1,3 +1,5 @@
+console.info('%c APPLIANCE-CARD %c v1.0 ', 'color:white;background:#2196F3;font-weight:bold', 'color:#2196F3;background:white;font-weight:bold');
+
 class ApplianceCard extends HTMLElement {
   constructor() {
     super();
@@ -7,10 +9,18 @@ class ApplianceCard extends HTMLElement {
     this._entities = null;
   }
 
+  static getStubConfig() {
+    return { entity: '' };
+  }
+
   setConfig(config) {
     if (!config.entity) throw new Error('Bitte "entity" (Status-Sensor) angeben');
     this._config = config;
     this._entities = null;
+    // Render placeholder immediately so HA card picker spinner goes away
+    if (this.shadowRoot) {
+      this.shadowRoot.innerHTML = '<div style="padding:16px;font-family:var(--paper-font-body1_-_font-family,sans-serif)">&#8635; Gerätekarte lädt…</div>';
+    }
   }
 
   set hass(hass) {
