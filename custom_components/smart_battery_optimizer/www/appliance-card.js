@@ -26,6 +26,9 @@ class ApplianceCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     if (!this._entities) this._resolveEntities();
+    // Skip re-render while the user has a dropdown open to prevent it closing mid-interaction
+    const active = this.shadowRoot?.activeElement;
+    if (active && active.tagName === 'SELECT') return;
     this._render();
   }
 
