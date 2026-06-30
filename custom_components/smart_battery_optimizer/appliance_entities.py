@@ -282,6 +282,7 @@ class _ApplianceHourNumber(SmartApplianceBase, NumberEntity):
         await self.coordinator.appliance_manager.async_save()
         self.coordinator.proposal_calculator.invalidate(self.sensor_id)
         self.async_write_ha_state()
+        await self.coordinator.async_request_refresh()
 
 
 def ApplianceEarliestStartNumber(coordinator, entry_id, sensor_id):

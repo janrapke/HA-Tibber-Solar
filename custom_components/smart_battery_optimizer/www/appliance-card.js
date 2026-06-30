@@ -243,10 +243,10 @@ class ApplianceCard extends HTMLElement {
     });
 
     this.shadowRoot.querySelector('#earliest-start')?.addEventListener('change', e =>
-      this._setNumber(ents.earliestStart, e.target.value));
+      this._setNumberAndRefresh(ents.earliestStart, ents.status, e.target.value));
 
     this.shadowRoot.querySelector('#latest-end')?.addEventListener('change', e =>
-      this._setNumber(ents.latestEnd, e.target.value));
+      this._setNumberAndRefresh(ents.latestEnd, ents.status, e.target.value));
   }
 
   _renderRunning(probs, timerState) {
@@ -360,6 +360,15 @@ class ApplianceCard extends HTMLElement {
   _setNumber(entityId, value) {
     if (!entityId || !this._hass) return;
     this._hass.callService('number', 'set_value', { entity_id: entityId, value: parseInt(value) });
+  }
+
+  _setNumberAndRefresh(entityId, statusEntityId, value) {
+    this._setNumber(entityId, value);
+    // Backend triggers coordinator refresh after set_value, give it 1.5s to settle then update card
+    setTimeout(() => {
+      if (statusEntityId && this._hass)
+        this._hass.callService('homeassistant', 'update_entity', { entity_id: statusEntityId });
+    }, 1500);
   }
 
   getCardSize() { return 3; }
