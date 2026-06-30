@@ -1,0 +1,203 @@
+##############################################################
+# Smart Battery Optimizer — Dashboard Karte
+#
+# Benötigt: custom:apexcharts-card (aus HACS)
+#
+# SETUP: Ersetze die zwei Zeilen mit # <-- ANPASSEN:
+#   DEIN_AKKU_SENSOR   → dein Akkustand-Sensor (z.B. sensor.battery_soc)
+#   DEIN_PLAN_SENSOR   → Tagesplan Sensor (z.B. sensor.smart_battery_optimizer_tagesplan_vorhersage)
+#
+# Aktions-Legende:
+#   DIS = Dispatch aktiv (DTU an, teuerste Stunde)        → Grün
+#   SAV = Akku sparen (DTU aus, günstige Stunde)          → Rot
+#   OVF = Überschussvermeidung (Batterie fast voll)       → Orange
+#   LAD = Netzladen (sehr günstiger Preis)                → Blau
+#   FUL = Batterie voll                                   → Hellgrün
+#   NEG = Negativpreis (DTU aus)                          → Lila
+#   MIN = Batterie am Minimum                             → Grau
+#   PRE = Laderaum-Vorbereitung (Nacht-Entladung)         → Cyan
+##############################################################
+
+type: custom:apexcharts-card
+header:
+  show: true
+  title: ⚡ Batterie & Dispatch Prognose
+  show_states: true
+  colorize_states: true
+now:
+  show: true
+  label: Jetzt
+  color: "#FF5722"
+graph_span: 30h
+span:
+  start: hour
+  offset: "-6h"
+apex_config:
+  chart:
+    height: 360
+  legend:
+    show: true
+    position: top
+    horizontalAlign: left
+    fontSize: "12px"
+  tooltip:
+    shared: true
+    x:
+      format: "ddd dd.MM HH:mm"
+  dataLabels:
+    enabled: false
+  annotations:
+    xaxis: []
+
+# ── Y-Achsen ──────────────────────────────────────────────
+yaxis:
+  - id: batt
+    min: 0
+    max: 105
+    decimals: 0
+    apex_config:
+      title:
+        text: "Ladestand %"
+        style:
+          fontSize: "11px"
+      tickAmount: 5
+      labels:
+        formatter: |
+          EVAL:function(v) { return v === null ? '' : v.toFixed(0) + '%'; }
+
+  - id: price
+    opposite: true
+    min: ~
+    decimals: 1
+    apex_config:
+      title:
+        text: "Preis ct/kWh"
+        style:
+          fontSize: "11px"
+      tickAmount: 6
+      labels:
+        formatter: |
+          EVAL:function(v) { return v === null ? '' : v.toFixed(1) + 'ct'; }
+
+  - id: action
+    show: false
+    min: 0
+    max: 1
+
+# ── Serien ────────────────────────────────────────────────
+series:
+
+  # ── 1. HINTERGRUND: Dispatch-Aktion (farbige Flächen) ──
+  # DIS=grün  SAV=rot  OVF=orange  LAD=blau  FUL=hellgrün  NEG=lila  MIN=grau  PRE=cyan
+  - entity: sensor.DEIN_PLAN_SENSOR     # <-- ANPASSEN
+    name: "Aktion"
+    yaxis_id: action
+    type: area
+    stroke_width: 0
+    opacity: 0.18
+    extend_to: false
+    show_in_legend: false
+    color_threshold:
+      - value: 0.00
+        color: "#9E9E9E"   # grau  — MIN / unbekannt
+      - value: 0.10
+        color: "#F44336"   # rot   — SAV (sparen)
+      - value: 0.20
+        color: "#FF9800"   # orange — OVF (überfüll)
+      - value: 0.30
+        color: "#4CAF50"   # grün   — FUL (voll)
+      - value: 0.40
+        color: "#2196F3"   # blau   — LAD (netzladen)
+      - value: 0.50
+        color: "#9C27B0"   # lila   — NEG (negativpreis)
+      - value: 0.60
+        color: "#00BCD4"   # cyan   — PRE (laderaum)
+      - value: 0.70
+        color: "#66BB6A"   # hellgrün — DIS (dispatch)
+    data_generator: |
+      const plan = entity.attributes.hourly_plan || [];
+      const now = new Date();
+      const start = new Date(now);
+      start.setMinutes(Math.floor(start.getMinutes() / 15) * 15, 0, 0);
+      const actionMap = {
+        'MIN': 0.05, 'SAV': 0.15, 'OVF': 0.25,
+        'FUL': 0.35, 'LAD': 0.45, 'NEG': 0.55,
+        'PRE': 0.65, 'DIS': 0.75, 'MAN': 0.75
+      };
+      return plan.map((b, i) => {
+        const v = actionMap[b.planned_action] ?? 0.05;
+        return [start.getTime() + i * 900000, v];
+      });
+
+  # ── 2. AKKU IST (historisch aus HA Recorder) ──
+  - entity: sensor.DEIN_AKKU_SENSOR     # <-- ANPASSEN
+    name: "Akku Ist"
+    yaxis_id: batt
+    type: line
+    stroke_width: 2.5
+    color: "#1565C0"
+    group_by:
+      func: last
+      duration: 15min
+    show:
+      in_chart: true
+      legend_value: true
+
+  # ── 3. AKKU PROGNOSE (gestrichelt, Zukunft) ──
+  - entity: sensor.DEIN_PLAN_SENSOR     # <-- ANPASSEN
+    name: "Akku Prognose"
+    yaxis_id: batt
+    type: line
+    stroke_width: 2
+    stroke_dash: 6
+    color: "#42A5F5"
+    extend_to: false
+    show:
+      in_chart: true
+      legend_value: true
+    data_generator: |
+      const plan = entity.attributes.hourly_plan || [];
+      const now = new Date();
+      const start = new Date(now);
+      start.setMinutes(Math.floor(start.getMinutes() / 15) * 15, 0, 0);
+      return plan.map((b, i) => [start.getTime() + i * 900000, b.battery_pct_end]);
+
+  # ── 4. SOLAR PROGNOSE ──
+  - entity: sensor.DEIN_PLAN_SENSOR     # <-- ANPASSEN
+    name: "Solar Prognose"
+    yaxis_id: batt
+    type: area
+    stroke_width: 1
+    opacity: 0.12
+    color: "#FDD835"
+    extend_to: false
+    show:
+      in_chart: true
+      legend_value: true
+    data_generator: |
+      const plan = entity.attributes.hourly_plan || [];
+      const now = new Date();
+      const start = new Date(now);
+      start.setMinutes(Math.floor(start.getMinutes() / 15) * 15, 0, 0);
+      // Solar in Wh → skaliert auf 0-100% (geteilt durch 20 als Näherung für 800W Max * 0.25h)
+      // Zeigt relativen Solar-Verlauf (passe Divisionswert ggf. an deine Anlage an)
+      const maxSolar = Math.max(...plan.map(b => b.solar_wh), 1);
+      return plan.map((b, i) => [start.getTime() + i * 900000, (b.solar_wh / maxSolar) * 50]);
+
+  # ── 5. PREIS (Balken, rechte Y-Achse) ──
+  - entity: sensor.DEIN_PLAN_SENSOR     # <-- ANPASSEN
+    name: "Preis ct/kWh"
+    yaxis_id: price
+    type: column
+    color: "#FF7043"
+    opacity: 0.45
+    extend_to: false
+    show:
+      in_chart: true
+      legend_value: true
+    data_generator: |
+      const plan = entity.attributes.hourly_plan || [];
+      const now = new Date();
+      const start = new Date(now);
+      start.setMinutes(Math.floor(start.getMinutes() / 15) * 15, 0, 0);
+      return plan.map((b, i) => [start.getTime() + i * 900000, +(b.price * 100).toFixed(2)]);

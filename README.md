@@ -22,6 +22,8 @@ Ein Custom Component für Home Assistant, das deinen Batteriespeicher intelligen
   - [Schritt 5: Überschuss-Verbraucher (optional)](#schritt-5-überschuss-verbraucher-optional)
   - [Schritt 6: Netzladegerät (optional)](#schritt-6-netzladegerät-optional)
 - [Wie funktioniert die Optimierung?](#wie-funktioniert-die-optimierung)
+- [Klimageräte & Wärmepumpen — Verbrauchslernen](#klimageräte--wärmepumpen--verbrauchslernen)
+- [Geräteplanung — Waschmaschine & Co. zum günstigsten Preis](#geräteplanung--waschmaschine--co-zum-günstigsten-preis)
 - [Alle Steuerungsentitäten im Überblick](#alle-steuerungsentitäten-im-überblick)
 - [Dashboard-Kacheln einrichten](#dashboard-kacheln-einrichten)
   - [Kachel 1: Batterie & Dispatch Prognose (ApexCharts)](#kachel-1-batterie--dispatch-prognose-apexcharts)
@@ -414,6 +416,102 @@ Diese Vorhersagen werden täglich aktualisiert und verbessern sich kontinuierlic
 ### Laderaum-Vorbereitung (Proaktive Entladung)
 
 Wenn morgen ein sehr sonniger Tag erwartet wird, ist es manchmal sinnvoll die Batterie am heutigen Abend etwas zu entladen — damit morgens früh mehr Platz für Solarstrom ist. Der Optimizer erkennt diese Situationen und kann die Batterie proaktiv leeren. Diese Funktion kann mit dem Schalter **„Laderaum vorbereiten"** aktiviert werden.
+
+---
+
+## Klimageräte & Wärmepumpen — Verbrauchslernen
+
+Klimaanlagen und Wärmepumpen sind oft die größten Stromverbraucher im Haus — und ihr Verbrauch schwankt stark je nach Außentemperatur. An einem Wintertag mit -5°C zieht eine Wärmepumpe vielleicht 2500 W, an einem milden Tag mit 10°C nur 800 W. Ohne dieses Wissen würde der Optimizer den Verbrauch falsch einschätzen und die Batterie zu früh oder zu spät entladen.
+
+### Was der Optimizer macht (und was nicht)
+
+**Der Optimizer steuert Klimageräte und Wärmepumpen nicht.** Er schaltet sie nicht ein oder aus und ändert keine Temperatureinstellungen. Das bleibt vollständig in deiner Hand.
+
+Was er stattdessen tut: Er **lernt wie viel Strom dein Klimagerät oder deine Wärmepumpe verbraucht** — in Abhängigkeit von der Außentemperatur und der eingestellten Solltemperatur. Dieses Wissen fließt in die Verbrauchsvorhersage ein, damit der Optimizer weiß: „Morgen früh wird es kalt, die Wärmepumpe zieht mehr — also halte ich die Batterie besser voll."
+
+### Das W/°C-Modell
+
+Der Lernalgorithmus arbeitet mit einem **Watts-pro-Grad-Koeffizient (W/°C)**:
+
+- **Heizen:** Wie viel Watt zieht das Gerät pro Grad Temperaturdifferenz zwischen Außentemperatur und Solltemperatur? Beispiel: Außen 0°C, Solltemperatur 20°C → Differenz 20°C. Wenn das Gerät dabei 1200 W zieht, ergibt das einen W/°C-Wert von 60.
+- **Kühlen:** Dasselbe Prinzip umgekehrt — wie viel Watt pro Grad Differenz bei Kühlung?
+- **Wärmepumpen (Heizen + Kühlen):** Beide Werte werden separat gelernt und je nach Betriebsmodus angewendet.
+
+Dieser Koeffizient startet mit deiner manuellen Schätzung (die du beim Einrichten eingibst) und wird mit jeder gemessenen Viertelstunde präziser. Nach einigen Wochen kennt der Optimizer das Gerät besser als du.
+
+### Einrichtung
+
+Klimageräte werden über **Einstellungen → Geräte & Dienste → Smart Battery Optimizer → Konfigurieren → Klimageräte** hinzugefügt.
+
+Pro Gerät gibst du an:
+
+| Feld | Beschreibung |
+|---|---|
+| **Name** | Frei wählbar, z. B. „Wärmepumpe Haus" |
+| **Gerätetyp** | „Nur Heizen", „Nur Kühlen" oder „Wärmepumpe (Heizen+Kühlen)" |
+| **Solltemperatur** | Die typisch eingestellte Zieltemperatur (wird für die W/°C-Berechnung verwendet) |
+| **Geschätzte Leistung (W)** | Deine erste Schätzung des Verbrauchs — der Algorithmus verfeinert das automatisch |
+| **Leistungs-Sensor** | Optional: Ein `sensor.*` der die aktuelle Leistungsaufnahme des Geräts in Watt misst. Wenn vorhanden, lernt der Algorithmus deutlich schneller |
+
+> **Tipp:** Einen Leistungs-Sensor bekommst du entweder direkt von der Wärmepumpen-Integration (viele moderne Wärmepumpen liefern das), oder durch einen Shelly EM / Shelly Plus 1PM der zwischen Sicherungskasten und Wärmepumpe eingebaut ist.
+
+> **Tipp für Wärmepumpen:** Wähle immer „Wärmepumpe (Heizen+Kühlen)" auch wenn du sie aktuell nur zum Heizen nutzt. So kann der Optimizer bei zukünftigem Kühlbetrieb sofort mit einem vernünftigen Startmodell arbeiten.
+
+---
+
+## Geräteplanung — Waschmaschine & Co. zum günstigsten Preis
+
+Neben der Echtzeit-Steuerung der Batterie kann der Optimizer auch **große Einmal-Verbraucher** wie Waschmaschinen, Spülmaschinen oder Trockner auf den günstigsten Startzeitpunkt innerhalb eines Zeitfensters planen.
+
+### Das Prinzip
+
+Du sagst dem Optimizer: „Ich möchte dass meine Waschmaschine bis **spätestens 8:00 Uhr** fertig ist." Der Optimizer schaut sich die Tibber-Preisvorhersage an und berechnet das günstigste Startzeitfenster — z. B. Programmstart um 2:30 Uhr weil der Strom dann am billigsten ist.
+
+Er berücksichtigt dabei:
+- Die **Programmdauer** des gewählten Waschprogramms
+- Den **stündlichen Leistungsverlauf** des Programms (Waschmaschinen ziehen am Anfang und beim Schleudern besonders viel)
+- Die **Tibber-Preisvorhersage** für die nächsten Stunden
+- Den **aktuellen Batteriestand** — wenn die Batterie eh entladen wird, kann auch ein etwas teureres Zeitfenster günstiger sein als Netzstrom
+
+### Programm-Lernen
+
+Der Optimizer lernt die Lastprofile deiner Geräte automatisch. Beim ersten Mal startest du ein Programm manuell — der Optimizer beobachtet den Leistungsverlauf über die gesamte Laufzeit und speichert ihn als „Programm-Profil". Beim nächsten Mal kennt er die genaue Dauer und den typischen Verbrauch dieses Programms.
+
+Mit jedem Durchlauf wird das Profil präziser. Nach 3–5 Wäschen kennt er das Programm sehr gut.
+
+### Einrichtung
+
+Die Geräteplanung wird über das Feld **„Erweiterte Gerätekonfiguration (JSON)"** im Schritt „Überschuss-Verbraucher" eingerichtet. Das ist ein fortgeschrittenes Feature für Nutzer die bereit sind etwas JSON zu schreiben.
+
+Beispiel für eine Waschmaschine:
+
+```json
+[
+  {
+    "name": "Waschmaschine",
+    "sensor": "sensor.waschmaschine_leistung",
+    "type": "washer"
+  }
+]
+```
+
+| Feld | Beschreibung |
+|---|---|
+| `name` | Anzeigename des Geräts |
+| `sensor` | `sensor.*`-Entity die die aktuelle Leistungsaufnahme in Watt misst (z. B. von einem Shelly) |
+| `type` | Gerätetyp: `washer` (Waschmaschine), `dishwasher` (Spülmaschine), `dryer` (Trockner) |
+
+### Planung auslösen
+
+Sobald das Gerät eingerichtet ist, erscheint in HA eine neue Entity mit der du den nächsten Lauf planen kannst. Du wählst:
+1. Das gewünschte **Programm** (wird erkannt sobald der Optimizer es einmal gesehen hat)
+2. Den **spätesten Fertigstellungszeitpunkt** (Deadline)
+
+Der Optimizer plant den Start automatisch und zeigt dir im Dashboard wann er das Gerät starten wird.
+
+> **Voraussetzung:** Du brauchst einen Leistungs-Sensor am Gerät — z. B. einen **Shelly Plus 1PM** oder **Shelly EM** in der Steckdose oder im Sicherungskasten. Ohne Leistungsmessung kann weder gelernt noch geplant werden.
+
+> **Tipp:** Viele Steckdosen-Zwischenstecker haben eine integrierte Leistungsmessung (z. B. Shelly Plug S, NOUS A1T, Tasmota-basierte Stecker). Das ist oft die einfachste Lösung für Waschmaschine und Spülmaschine.
 
 ---
 
