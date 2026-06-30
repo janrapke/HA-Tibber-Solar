@@ -292,12 +292,23 @@ class ApplianceCard extends HTMLElement {
     const earliestVal = ents.earliestStart ? parseInt(hass.states[ents.earliestStart]?.state ?? 0) : null;
     const latestVal   = ents.latestEnd     ? parseInt(hass.states[ents.latestEnd]?.state ?? 23)    : null;
 
-    const hourOpts = h => Array.from({length: 24}, (_, i) =>
-      `<option value="${i}" ${i === h ? 'selected' : ''}>${String(i).padStart(2,'0')}:00 Uhr</option>`
-    ).join('');
+    // earliest=0 and latest=23 are "no limit" (backend skips filter in that case)
+    const earliestOpts = h => {
+      const noLimit = `<option value="0" ${h === 0 ? 'selected' : ''}>– kein Limit –</option>`;
+      return noLimit + Array.from({length: 23}, (_, i) => i + 1)
+        .map(i => `<option value="${i}" ${i === h ? 'selected' : ''}>${String(i).padStart(2,'0')}:00 Uhr</option>`)
+        .join('');
+    };
+
+    const latestOpts = h => {
+      const noLimit = `<option value="23" ${h === 23 ? 'selected' : ''}>– kein Limit –</option>`;
+      return noLimit + Array.from({length: 23}, (_, i) => i)
+        .map(i => `<option value="${i}" ${i === h ? 'selected' : ''}>${String(i).padStart(2,'0')}:00 Uhr</option>`)
+        .join('');
+    };
 
     const currentHour = new Date().getHours();
-    const nextDayHint = latestVal !== null && latestVal < currentHour
+    const nextDayHint = latestVal !== null && latestVal < currentHour && latestVal !== 23
       ? `<div style="font-size:0.75em;color:var(--secondary-text-color);margin-top:3px">→ morgen ${String(latestVal).padStart(2,'0')}:00 Uhr</div>`
       : '';
 
@@ -306,12 +317,12 @@ class ApplianceCard extends HTMLElement {
         ${earliestVal !== null ? `
           <div class="time-field">
             <div class="time-label">Frühester Start</div>
-            <select id="earliest-start" class="time-select">${hourOpts(earliestVal)}</select>
+            <select id="earliest-start" class="time-select">${earliestOpts(earliestVal)}</select>
           </div>` : ''}
         ${latestVal !== null ? `
           <div class="time-field">
             <div class="time-label">Fertig bis</div>
-            <select id="latest-end" class="time-select">${hourOpts(latestVal)}</select>
+            <select id="latest-end" class="time-select">${latestOpts(latestVal)}</select>
             ${nextDayHint}
           </div>` : ''}
       </div>
