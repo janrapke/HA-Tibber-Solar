@@ -1,5 +1,13 @@
 # Smart Battery Optimizer – Entwicklungsregeln
 
+## Home Assistant MCP Server
+
+In diesem Projekt ist ein Home Assistant MCP Server verfügbar (`homeassistant`). 
+
+**WICHTIG: Nutze AUSSCHLIESSLICH den MCP Server für alle HA-Abfragen. Niemals REST API, curl, Token abfragen oder andere Alternativen verwenden — auch nicht wenn der Server beim Start noch lädt. Warten bis er verfügbar ist.**
+
+Tools: `mcp__homeassistant__list_devices`, `mcp__homeassistant__get_history`, `mcp__homeassistant__control`, `mcp__homeassistant__notify` u.a.
+
 ## Neue Entities anlegen
 
 Jede neue Entity MUSS folgende Muster einhalten:

@@ -34,7 +34,6 @@ class LearningEngine:
                 "solar": {},
                 "balcony": {}
             },
-            "learning_mode_active": False, "learning_rate_factor": 0.7
         }
 
         self._current_quarter_consumption_acc = 0.0
@@ -92,14 +91,20 @@ class LearningEngine:
         self.data.setdefault("balcony_ghi_ratio_counters", {str(q): 0 for q in range(96)})
 
         # Day-of-week consumption model (0=Monday … 6=Sunday), 7×96 slots
-        # Used for prediction when learning_mode_active=False (switch once enough data exists)
-        # Always learned in the background regardless of learning mode
         self.data.setdefault("consumption_dow", {
             str(dow): {str(q): 0.0 for q in range(96)} for dow in range(7)
         })
         self.data.setdefault("consumption_dow_counters", {
             str(dow): {str(q): 0 for q in range(96)} for dow in range(7)
         })
+
+        # Monthly bias correction: EMA of (actual_wh / predicted_wh) per month — 12 values only.
+        # GHI already encodes seasonal variation (sun angle, day length), so the annual
+        # GHI-ratio model is seasonally robust. This bias factor corrects small residual
+        # effects like panel temperature coefficient (hot panels less efficient in summer)
+        # and inverter low-light efficiency. Fills in ~2-4 weeks per month.
+        self.data.setdefault("solar_monthly_bias", {str(m): 1.0 for m in range(1, 13)})
+        self.data.setdefault("solar_monthly_bias_counters", {str(m): 0 for m in range(1, 13)})
 
     async def async_load(self):
         """Load historical data from storage or initialize priors."""
@@ -149,10 +154,12 @@ class LearningEngine:
                                 if q in self.data[dow_key][dow]:
                                     self.data[dow_key][dow][q] = val
 
-            if "learning_mode_active" in stored_data:
-                self.data["learning_mode_active"] = stored_data["learning_mode_active"]
-            if "learning_rate_factor" in stored_data:
-                self.data["learning_rate_factor"] = stored_data["learning_rate_factor"]
+            for bias_key in ("solar_monthly_bias", "solar_monthly_bias_counters"):
+                if bias_key in stored_data:
+                    for m, val in stored_data[bias_key].items():
+                        if m in self.data[bias_key]:
+                            self.data[bias_key][m] = val
+
             if "vacation_mode_active" in stored_data:
                 self.data["vacation_mode_active"] = stored_data["vacation_mode_active"]
 
@@ -234,7 +241,8 @@ class LearningEngine:
             "balcony_ghi_ratio_counters": {str(q): 0 for q in range(96)},
             "consumption_dow": {str(dow): {str(q): 0.0 for q in range(96)} for dow in range(7)},
             "consumption_dow_counters": {str(dow): {str(q): 0 for q in range(96)} for dow in range(7)},
-            "learning_mode_active": False, "learning_rate_factor": 0.7,
+            "solar_monthly_bias": {str(m): 1.0 for m in range(1, 13)},
+            "solar_monthly_bias_counters": {str(m): 0 for m in range(1, 13)},
             "vacation_mode_active": False,
             "climate": {},
         }
@@ -246,12 +254,7 @@ class LearningEngine:
     def reset_learning_counters(self):
         pass
 
-    def set_learning_mode(self, active: bool):
-        self.data["learning_mode_active"] = active
-        _LOGGER.info("Learning mode set to %s", active)
 
-    def set_learning_rate(self, rate: float):
-        self.data["learning_rate_factor"] = rate
 
     def set_vacation_mode(self, active: bool):
         self.data["vacation_mode_active"] = active
@@ -460,28 +463,49 @@ class LearningEngine:
     def get_learning_coverage(self) -> dict:
         """Return learning coverage info for the hint sensor.
 
-        Counts DOW/quarter slots with ≥ 6 observations (= stable alpha = 0.1).
-        Total possible slots: 7 days × 96 quarters = 672.
-        Estimated weeks remaining assumes ~96 new observations per week.
+        Consumption quality: weighted DOW slot progress (min(cnt,6)/6).
+        Solar quality: % of current-month daylight slots (q 24..72 = 6h..18h) with ≥2 observations.
+        Overall: 60% solar + 40% consumption (solar matters more for the core use case).
         """
-        total = 7 * 96
-        mature = 0
+        # Consumption quality (7 DOW × 96 quarters, weighted)
+        cons_total = 7 * 96
+        cons_weighted = 0.0
+        cons_mature = 0
         for dow in range(7):
             d_str = str(dow)
             for q in range(96):
-                q_str = str(q)
-                cnt = self.data.get("consumption_dow_counters", {}).get(d_str, {}).get(q_str, 0)
+                cnt = self.data.get("consumption_dow_counters", {}).get(d_str, {}).get(str(q), 0)
+                cons_weighted += min(cnt, 6) / 6.0
                 if cnt >= 6:
-                    mature += 1
+                    cons_mature += 1
+        cons_pct = round((cons_weighted / cons_total) * 100, 1)
 
-        pct = round((mature / total) * 100, 1)
-        # Each week adds roughly 96 observations per DOW × 1 DOW = 96 mature slots
-        remaining_slots = total - mature
+        # Solar quality: daylight slots with annual GHI-ratio learned (≥2 observations)
+        now = datetime.now()
+        m_str = str(now.month)
+        daylight_quarters = list(range(24, 72))  # 06:00–18:00
+        solar_slots_with_data = sum(
+            1 for q in daylight_quarters
+            if self.data.get("solar_ghi_ratio_counters", {}).get(str(q), 0) >= 2
+        )
+        solar_pct = round((solar_slots_with_data / len(daylight_quarters)) * 100, 1)
+
+        # Bias correction quality for current month
+        bias_val = self.data.get("solar_monthly_bias", {}).get(m_str, 1.0)
+        bias_counter = self.data.get("solar_monthly_bias_counters", {}).get(m_str, 0)
+
+        overall_pct = round(solar_pct * 0.6 + cons_pct * 0.4, 1)
+        remaining_slots = cons_total - cons_mature
         weeks_remaining = max(0, math.ceil(remaining_slots / 96))
+
         return {
-            "coverage_pct": pct,
-            "mature_slots": mature,
-            "total_slots": total,
+            "coverage_pct": overall_pct,
+            "consumption_quality_pct": cons_pct,
+            "solar_quality_pct": solar_pct,
+            "solar_bias_correction": round(bias_val, 3),
+            "solar_bias_observations": bias_counter,
+            "mature_slots": cons_mature,
+            "total_slots": cons_total,
             "estimated_weeks_remaining": weeks_remaining,
         }
 
@@ -529,14 +553,12 @@ class LearningEngine:
         self._current_quarter_balcony_count += 1
 
     def _calculate_alpha(self, counter: int) -> float:
-        """Calculate dynamic alpha based on counter or fixed if learning mode active."""
-        if self.data.get("learning_mode_active"):
-            return float(self.data.get("learning_rate_factor", 0.7))
+        """Calculate dynamic alpha: fast at start (0.7), slows to 0.1 after 6+ observations."""
         if counter >= 6:
             return 0.1
         return max(0.7 - (0.1 * counter), 0.1)
 
-    async def finalize_quarter(self, quarter: int, cloud_cover: float, price: float = 0.0, ghi: float = None, balcony_ghi: float = None, dow: int = None):
+    async def finalize_quarter(self, quarter: int, cloud_cover: float, price: float = 0.0, ghi: float = None, balcony_ghi: float = None, dow: int = None, month: int = None):
         """Called once at the end of a 15-min interval to calculate the average Wh and apply EMA."""
         q_str = str(quarter)
 
@@ -594,6 +616,26 @@ class LearningEngine:
             self._current_quarter_consumption_acc = 0.0
             self._current_quarter_consumption_count = 0
 
+        # Implizite Drosselerkennung: Wenn GHI-Ratio etabliert ist, aber der Messwert deutlich
+        # darunter liegt (trotz Sonne), deutet das auf Inverter-Curtailment (Absorption/Float) hin.
+        # Das funktioniert auch ohne konfigurierten Charge-State-Sensor.
+        if (not self._current_quarter_solar_throttled
+                and self._current_quarter_solar_count > 0
+                and ghi is not None and ghi > 50.0):
+            _current_ratio = self.data.get("solar_ghi_ratio", {}).get(q_str, 0.0)
+            _ghi_cnt = self.data.get("solar_ghi_ratio_counters", {}).get(q_str, 0)
+            if _ghi_cnt >= 3 and _current_ratio > 0.0:
+                _avg_pw = self._current_quarter_solar_acc / self._current_quarter_solar_count
+                _measured_wh = _avg_pw / 4.0
+                _expected_wh = _current_ratio * ghi
+                if _expected_wh > 10.0 and _measured_wh < _expected_wh * 0.5:
+                    self._current_quarter_solar_throttled = True
+                    _LOGGER.info(
+                        "Implizite Drosselung erkannt Slot %s: %.1f Wh gemessen vs %.1f Wh erwartet "
+                        "(GHI=%.1f W/m²) — Slot als gedrosselt markiert, GHI-Schätzung wird genutzt",
+                        quarter, _measured_wh, _expected_wh, ghi,
+                    )
+
         # Finalize solar
         if self._current_quarter_solar_count > 0 and not self._current_quarter_solar_throttled:
             condition = self._get_cloud_category(cloud_cover)
@@ -609,9 +651,7 @@ class LearningEngine:
             if counter < 6:
                 self.data["counters"]["solar"][q_str][condition] = counter + 1
 
-            # GHI ratio learning: ratio = actual_wh / GHI_W_per_m2
-            # Captures all site-specific factors (shading, tracker type, panel angle, losses)
-            # Only learns from unthrottled data; valid across all system types
+            # Annual GHI-ratio (backward compat fallback)
             if ghi is not None and ghi > 10.0 and actual_solar_wh > 0:
                 ratio = actual_solar_wh / ghi
                 ghi_counter = self.data["solar_ghi_ratio_counters"].get(q_str, 0)
@@ -623,6 +663,35 @@ class LearningEngine:
                     self.data["solar_ghi_ratio"][q_str] = (ghi_alpha * ratio) + ((1 - ghi_alpha) * current_ratio)
                 if ghi_counter < 6:
                     self.data["solar_ghi_ratio_counters"][q_str] = ghi_counter + 1
+
+            # Bias tracking: compare annual GHI-ratio prediction vs reality, per month.
+            # Catches residual seasonal effects (panel temp coefficient, low-light efficiency).
+            if month is not None and ghi is not None and ghi > 10.0 and actual_solar_wh > 0:
+                m_str = str(month)
+                predicted = self.predict_solar_for_quarter(quarter, cloud_cover, ghi, apply_bias=False)
+                if predicted > 5.0:
+                    error_ratio = max(0.3, min(actual_solar_wh / predicted, 3.0))
+                    b_counter = self.data["solar_monthly_bias_counters"].get(m_str, 0)
+                    b_alpha = self._calculate_alpha(b_counter)
+                    current_bias = self.data["solar_monthly_bias"].get(m_str, 1.0)
+                    self.data["solar_monthly_bias"][m_str] = (b_alpha * error_ratio) + ((1 - b_alpha) * current_bias)
+                    if b_counter < 6:
+                        self.data["solar_monthly_bias_counters"][m_str] = b_counter + 1
+
+        elif self._current_quarter_solar_throttled and ghi is not None and ghi > 10.0:
+            # Absorption-Blindspot-Fix: Batterie ist voll, Solar-Sensor zeigt gedrosselten Wert.
+            # Wenn das annual GHI-Ratio bekannt ist (≥2 Beobachtungen), schätzen wir
+            # den tatsächlichen Solarertrag und lernen ihn mit halbem Gewicht.
+            current_ratio = self.data.get("solar_ghi_ratio", {}).get(q_str, 0.0)
+            ghi_counter = self.data.get("solar_ghi_ratio_counters", {}).get(q_str, 0)
+            if ghi_counter >= 2 and current_ratio > 0.0:
+                estimated_solar_wh = current_ratio * ghi
+                ghi_alpha = self._calculate_alpha(ghi_counter) * 0.5
+                self.data["solar_ghi_ratio"][q_str] = (ghi_alpha * current_ratio) + ((1 - ghi_alpha) * current_ratio)
+                _LOGGER.debug(
+                    "Absorption-Slot %s: Solar geschätzt %.1f Wh via GHI-Ratio (Gewicht 0.5)",
+                    quarter, estimated_solar_wh,
+                )
 
         self._current_quarter_solar_acc = 0.0
         self._current_quarter_solar_count = 0
@@ -675,7 +744,7 @@ class LearningEngine:
         base_load_w = float(self.config.get(CONF_BASE_LOAD_W, 250))
         min_wh = base_load_w / 4.0
 
-        if dow is not None and not self.data.get("learning_mode_active", False):
+        if dow is not None:
             d_str = str(dow)
             q_str = str(quarter)
             dow_val = float(self.data.get("consumption_dow", {}).get(d_str, {}).get(q_str, 0.0))
@@ -683,15 +752,32 @@ class LearningEngine:
             if dow_val > 0.0 and dow_count >= 2:
                 return max(dow_val, min_wh * 0.5)
 
+            # Neighbor interpolation: sparse slot → average ±1 and ±2 neighbors on same DOW
+            if dow_count < 2:
+                neighbor_vals = []
+                dow_data = self.data.get("consumption_dow", {}).get(d_str, {})
+                dow_counts = self.data.get("consumption_dow_counters", {}).get(d_str, {})
+                for offset in (-2, -1, 1, 2):
+                    nq = (quarter + offset) % 96
+                    nv = float(dow_data.get(str(nq), 0.0))
+                    nc = dow_counts.get(str(nq), 0)
+                    if nv > 0.0 and nc >= 2:
+                        neighbor_vals.append(nv)
+                if neighbor_vals:
+                    return max(sum(neighbor_vals) / len(neighbor_vals), min_wh * 0.5)
+
         val = float(self.data["consumption"].get(str(quarter), 0.0))
         return max(val, min_wh * 0.5)
 
-    def predict_solar_for_quarter(self, quarter: int, cloud_cover: float = 50.0, ghi: float = None) -> float:
+    def predict_solar_for_quarter(self, quarter: int, cloud_cover: float = 50.0, ghi: float = None, month: int = None, apply_bias: bool = True) -> float:
         """Predict solar generation (Wh) for a specific 15-min interval.
 
-        Uses GHI-ratio model when GHI is provided and ratio is learned — works for any
-        installation type (fixed, single-axis, dual-axis tracker) without explicit configuration.
-        Falls back to cloud-cover bucket model for backward compatibility.
+        Priority:
+        1. Annual GHI-ratio model + monthly bias correction.
+           GHI already encodes seasonal variation (sun angle, day length), so the annual
+           ratio is seasonally robust. The monthly bias corrects small residual effects
+           (panel temperature, inverter low-light efficiency). Fills in weeks, not a year.
+        2. Cloud-cover bucket model (cold-start fallback, no GHI available).
         """
         q_str = str(quarter)
 
@@ -699,8 +785,16 @@ class LearningEngine:
             ratio = self.data.get("solar_ghi_ratio", {}).get(q_str, 0.0)
             counter = self.data.get("solar_ghi_ratio_counters", {}).get(q_str, 0)
             if ratio > 0.0 and counter > 0:
-                return ratio * ghi
+                prediction = ratio * ghi
+                if apply_bias and month is not None:
+                    m_str = str(month)
+                    bias = self.data.get("solar_monthly_bias", {}).get(m_str, 1.0)
+                    b_counter = self.data.get("solar_monthly_bias_counters", {}).get(m_str, 0)
+                    if b_counter >= 2:
+                        prediction *= bias
+                return prediction
 
+        # Cloud-cover bucket fallback (prior / cold-start / no GHI)
         if q_str not in self.data["solar"]:
             return 0.0
         condition = self._get_cloud_category(cloud_cover)

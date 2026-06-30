@@ -137,32 +137,6 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         # Each entry: {enabled, device_type, setpoint, manual_w, power_sensor}
         self.climate_device_states: dict = {}
 
-    @property
-    def is_learning_mode_active(self) -> bool:
-        """Check if learning mode is active."""
-        return self.learning_engine.data.get("learning_mode_active", False)
-
-    @property
-    def learning_rate_factor(self) -> float:
-        """Get the custom learning rate factor."""
-        return self.learning_engine.data.get("learning_rate_factor", 0.7)
-
-    @learning_rate_factor.setter
-    def learning_rate_factor(self, value: float):
-        """Set the custom learning rate factor."""
-        self.learning_engine.set_learning_rate(value)
-        self.hass.async_create_task(self.learning_engine.async_save())
-
-    async def async_start_learning_mode(self):
-        """Start the learning mode manually."""
-        self.learning_engine.set_learning_mode(True)
-        await self.learning_engine.async_save()
-
-    async def async_stop_learning_mode(self):
-        """Stop the learning mode manually."""
-        self.learning_engine.set_learning_mode(False)
-        await self.learning_engine.async_save()
-
     async def _async_setup(self):
         # Initialize appliance manager with entry_id if not done yet
         if not self.appliance_manager:
@@ -502,7 +476,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             current_ghi = self._get_ghi_for_dt(now)
             actual_cons_wh, actual_solar_wh = await self.learning_engine.finalize_quarter(
                 self.learning_engine._last_quarter_processed, cloud_cover, c_price,
-                ghi=current_ghi, dow=now.weekday()
+                ghi=current_ghi, dow=now.weekday(), month=now.month
             )
 
             # Finalize climate quarters for active devices
@@ -519,9 +493,9 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 )
 
             # Implicit Cloud Cover Correction
-            pred_solar_clear = self.learning_engine.predict_solar_for_quarter(self.learning_engine._last_quarter_processed, 0.0)
-            pred_solar_partly = self.learning_engine.predict_solar_for_quarter(self.learning_engine._last_quarter_processed, 50.0)
-            pred_solar_cloudy = self.learning_engine.predict_solar_for_quarter(self.learning_engine._last_quarter_processed, 100.0)
+            pred_solar_clear = self.learning_engine.predict_solar_for_quarter(self.learning_engine._last_quarter_processed, 0.0, month=now.month)
+            pred_solar_partly = self.learning_engine.predict_solar_for_quarter(self.learning_engine._last_quarter_processed, 50.0, month=now.month)
+            pred_solar_cloudy = self.learning_engine.predict_solar_for_quarter(self.learning_engine._last_quarter_processed, 100.0, month=now.month)
 
             if self.config.get(CONF_BALCONY_POWER_SENSOR):
                 pred_solar_clear += self.learning_engine.predict_balcony_for_quarter(self.learning_engine._last_quarter_processed, 0.0)
@@ -580,7 +554,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             # Pass GHI so the GHI-ratio model is preferred when available
             last_q_ghi = self._get_ghi_for_dt(now)
             target_cc = self.implicit_cloud_cover if getattr(self, 'implicit_cloud_cover', None) is not None else cloud_cover
-            target_pred = self.learning_engine.predict_solar_for_quarter(self.learning_engine._last_quarter_processed, target_cc, ghi=last_q_ghi)
+            target_pred = self.learning_engine.predict_solar_for_quarter(self.learning_engine._last_quarter_processed, target_cc, ghi=last_q_ghi, month=now.month)
             if self.config.get(CONF_BALCONY_POWER_SENSOR):
                 target_pred += self.learning_engine.predict_balcony_for_quarter(self.learning_engine._last_quarter_processed, target_cc, ghi=last_q_ghi)
 
@@ -722,13 +696,29 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         def _any_external(entities):
             return any(e in external_inverters for e in entities)
 
+        # DTU-Verfügbarkeit prüfen: Wenn der WR-Output-Sensor nicht erreichbar ist,
+        # wissen wir nicht ob Solar läuft — alle Überschuss-Verbraucher sperren.
+        _dtu_output_sensor = self.config.get(CONF_OPENDTU_OUTPUT_SENSOR)
+        _dtu_unavailable = False
+        if _dtu_output_sensor:
+            _dtu_state = self.hass.states.get(_dtu_output_sensor)
+            if _dtu_state is None or _dtu_state.state in ("unavailable", "unknown"):
+                _dtu_unavailable = True
+                _LOGGER.warning(
+                    "DTU-Output-Sensor '%s' nicht verfügbar — alle Überschuss-Verbraucher werden NICHT eingeschaltet",
+                    _dtu_output_sensor,
+                )
+
         # Primary Hysteresis Logic — pure battery % thresholds, no solar/cloud dependency
         primary_entities = self.config.get(CONF_PRIMARY_EXCESS_CONSUMERS, [])
         primary_is_external = _any_external(primary_entities)
 
         if self.primary_excess_auto:
-            if is_negative_price:
+            if _dtu_unavailable:
+                await set_switches(primary_entities, False)
+            elif is_negative_price:
                 turn_on_primary = True
+                await set_switches(primary_entities, turn_on_primary)
             else:
                 on_thr = getattr(self, "primary_excess_on", 95.0)
                 off_thr = getattr(self, "primary_excess_off", 90.0)
@@ -740,15 +730,18 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 else:
                     turn_on_primary = currently_on  # hold current state (hysteresis)
 
-            await set_switches(primary_entities, turn_on_primary)
+                await set_switches(primary_entities, turn_on_primary)
 
         # Secondary Hysteresis Logic — pure battery % thresholds
         secondary_entities = self.config.get(CONF_SECONDARY_EXCESS_CONSUMERS, [])
         secondary_is_external = _any_external(secondary_entities)
 
         if self.secondary_excess_auto:
-            if is_negative_price:
+            if _dtu_unavailable:
+                await set_switches(secondary_entities, False)
+            elif is_negative_price:
                 turn_on_secondary = True
+                await set_switches(secondary_entities, turn_on_secondary)
             else:
                 on_thr = getattr(self, "secondary_excess_on", 98.0)
                 off_thr = getattr(self, "secondary_excess_off", 95.0)
@@ -760,15 +753,18 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 else:
                     turn_on_secondary = currently_on  # hold current state (hysteresis)
 
-            await set_switches(secondary_entities, turn_on_secondary)
+                await set_switches(secondary_entities, turn_on_secondary)
 
         # Early Excess Logic — prediction-based, no cloud/solar override to prevent toggling
         # Turns ON when simulation predicts overfill; stays ON until simulation says it's safe to turn OFF.
         early_entities = self.config.get(CONF_EARLY_EXCESS_CONSUMERS, [])
 
         if getattr(self, "early_excess_auto", True):
-            if is_negative_price:
+            if _dtu_unavailable:
+                await set_switches(early_entities, False)
+            elif is_negative_price:
                 turn_on_early = True
+                await set_switches(early_entities, turn_on_early)
             else:
                 early_excess_min_batt = float(self.config.get(CONF_EARLY_EXCESS_MIN_BATTERY_PCT, 30.0))
                 if virtual_batt_pct < early_excess_min_batt:
@@ -778,11 +774,12 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                         now, hourly_forecasts, virtual_batt_pct, batt_cap_wh
                     )
 
-            await set_switches(early_entities, turn_on_early)
+                await set_switches(early_entities, turn_on_early)
 
         # Überfüll-Notfall: wenn Simulation Überfüllung zeigt, ALLE Verbraucher sofort einschalten
         # unabhängig von individuellen Hysterese-Schwellen — verhindert Solarabschneidung
-        if battery_will_overfill and not is_negative_price:
+        # Nur wenn DTU erreichbar ist — sonst wissen wir nicht ob Solar wirklich läuft.
+        if battery_will_overfill and not is_negative_price and not _dtu_unavailable:
             emergency_entities = (
                 (primary_entities if self.primary_excess_auto else []) +
                 (secondary_entities if self.secondary_excess_auto else []) +
@@ -1321,7 +1318,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 if implicit_cloud is not None:
                     q = self._get_quarter_index(b["dt"])
                     b_ghi = b.get("ghi")
-                    b["solar"] = self.learning_engine.predict_solar_for_quarter(q, implicit_cloud, ghi=b_ghi)
+                    b["solar"] = self.learning_engine.predict_solar_for_quarter(q, implicit_cloud, ghi=b_ghi, month=b["dt"].month)
                     if self.config.get(CONF_BALCONY_POWER_SENSOR):
                         b["balcony"] = self.learning_engine.predict_balcony_for_quarter(q, implicit_cloud, ghi=b_ghi)
 
@@ -1480,7 +1477,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 ghi = self._get_ghi_for_dt(block_dt)
                 if ghi > 0:
                     has_ghi_tomorrow = True
-                pred_solar = self.learning_engine.predict_solar_for_quarter(q, cloud_cover=50.0, ghi=ghi)
+                pred_solar = self.learning_engine.predict_solar_for_quarter(q, cloud_cover=50.0, ghi=ghi, month=block_dt.month)
                 if self.config.get(CONF_BALCONY_POWER_SENSOR):
                     pred_solar += self.learning_engine.predict_balcony_for_quarter(q, cloud_cover=50.0, ghi=ghi)
                 pred_solar_effective = pred_solar * batt_eff
@@ -1540,9 +1537,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                     )
                 )
                 ghi = self._get_ghi_for_dt(block_dt)
-                pred_solar = self.learning_engine.predict_solar_for_quarter(q, cloud_cover=50.0, ghi=ghi) * batt_eff
+                pred_solar = self.learning_engine.predict_solar_for_quarter(q, cloud_cover=50.0, ghi=ghi, month=block_dt.month) * batt_eff
                 pred_cons = self.learning_engine.predict_consumption_for_quarter(q, dow=tomorrow.weekday())
-                # Wie viel kommt aus Batterie? (Verbrauch minus Solar, mindestens 0)
                 from_battery = max(0.0, pred_cons - pred_solar)
                 morning_reserve_wh += from_battery
 
@@ -1595,7 +1591,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                     break
 
             ghi = self._get_ghi_for_dt(eval_dt)
-            pred_solar = self.learning_engine.predict_solar_for_quarter(q, cc, ghi=ghi)
+            pred_solar = self.learning_engine.predict_solar_for_quarter(q, cc, ghi=ghi, month=eval_dt.month)
             pred_cons = self.learning_engine.predict_consumption_for_quarter(q, dow=eval_dt.weekday())
 
             pred_balcony = 0.0

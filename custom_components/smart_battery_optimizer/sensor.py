@@ -413,32 +413,28 @@ class LearningStatusSensor(CoordinatorEntity, SensorEntity):
     def extra_state_attributes(self):
         coverage = self.coordinator.learning_engine.get_learning_coverage()
         weeks = coverage["estimated_weeks_remaining"]
-        is_learning = self.coordinator.is_learning_mode_active
         is_vacation = self.coordinator.learning_engine.is_vacation_mode_active()
 
         if is_vacation:
             hint = "Urlaubsmodus aktiv — Lernen ist pausiert."
         elif weeks == 0:
-            hint = "Lerndaten vollständig. Lernmodus kann deaktiviert werden."
-        elif is_learning:
-            hint = (
-                f"Lernmodus aktiv — empfohlen noch ca. {weeks} Woche(n) aktiv lassen "
-                f"({coverage['coverage_pct']:.0f}% stabile Zeitslots)."
-            )
+            hint = "Lerndaten vollständig — Vorhersagen sind zuverlässig."
         else:
             hint = (
-                f"Lernmodus inaktiv — {coverage['coverage_pct']:.0f}% der Zeitslots stabil. "
-                f"Für bessere Vorhersagen noch ca. {weeks} Woche(n) Lernmodus aktivieren."
+                f"Lernt noch — ca. {weeks} Woche(n) bis zur vollen Datenqualität "
+                f"(Solar: {coverage['solar_quality_pct']:.0f}%, Verbrauch: {coverage['consumption_quality_pct']:.0f}%)."
             )
 
         return {
             "hinweis": hint,
-            "coverage_pct": coverage["coverage_pct"],
-            "stable_slots": coverage["mature_slots"],
-            "total_slots": coverage["total_slots"],
-            "estimated_weeks_remaining": weeks,
-            "vacation_mode": is_vacation,
-            "learning_mode": is_learning,
+            "solar_qualität_%": coverage["solar_quality_pct"],
+            "verbrauch_qualität_%": coverage["consumption_quality_pct"],
+            "solar_bias_korrektur": coverage["solar_bias_correction"],
+            "solar_bias_beobachtungen": coverage["solar_bias_observations"],
+            "stabile_slots": coverage["mature_slots"],
+            "gesamt_slots": coverage["total_slots"],
+            "verbleibende_wochen": weeks,
+            "urlaubsmodus": is_vacation,
         }
 
 

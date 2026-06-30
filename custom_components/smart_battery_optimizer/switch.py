@@ -21,7 +21,6 @@ async def async_setup_entry(
         PrimaryExcessAutoSwitch(coordinator, entry.entry_id),
         SecondaryExcessAutoSwitch(coordinator, entry.entry_id),
         EarlyExcessAutoSwitch(coordinator, entry.entry_id),
-        LearningModeSwitch(coordinator, entry.entry_id),
         GridChargeEnableSwitch(coordinator, entry.entry_id),
         VacationModeSwitch(coordinator, entry.entry_id),
         PresunnyDischargeSwitch(coordinator, entry.entry_id),
@@ -199,54 +198,6 @@ class EarlyExcessAutoSwitch(CoordinatorEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs):
         self.coordinator.early_excess_auto = False
-        await self.coordinator.async_request_refresh()
-
-
-class LearningModeSwitch(CoordinatorEntity, SwitchEntity):
-    """Switch to start/stop the fast learning mode."""
-
-    _attr_has_entity_name = True
-    _attr_entity_category = EntityCategory.CONFIG
-    _attr_icon = "mdi:brain"
-
-    def __init__(self, coordinator, entry_id):
-        super().__init__(coordinator)
-        self._attr_device_info = {
-            "identifiers": {(DOMAIN, entry_id)},
-            "name": "Smart Battery Optimizer",
-            "manufacturer": "Custom",
-        }
-        self._attr_unique_id = f"{entry_id}_learning_mode"
-        self._attr_name = "Lernmodus aktiv"
-
-    @property
-    def is_on(self):
-        return self.coordinator.is_learning_mode_active
-
-    @property
-    def extra_state_attributes(self):
-        """Expose learning coverage and recommendation as attributes."""
-        coverage = self.coordinator.learning_engine.get_learning_coverage()
-        weeks = coverage["estimated_weeks_remaining"]
-        if weeks == 0:
-            hint = "Lerndaten vollständig — Lernmodus kann deaktiviert werden."
-        else:
-            hint = (
-                f"Empfehlung: Lernmodus noch ca. {weeks} Woche(n) aktiv lassen "
-                f"({coverage['coverage_pct']:.0f}% der Zeitslots stabil)."
-            )
-        return {
-            "coverage_pct": coverage["coverage_pct"],
-            "estimated_weeks_remaining": weeks,
-            "hinweis": hint,
-        }
-
-    async def async_turn_on(self, **kwargs):
-        await self.coordinator.async_start_learning_mode()
-        await self.coordinator.async_request_refresh()
-
-    async def async_turn_off(self, **kwargs):
-        await self.coordinator.async_stop_learning_mode()
         await self.coordinator.async_request_refresh()
 
 
