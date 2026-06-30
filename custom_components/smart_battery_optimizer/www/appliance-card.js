@@ -407,6 +407,6 @@ customElements.define('appliance-card-editor', ApplianceCardEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: 'appliance-card',
-  name: 'Smart Appliance Card',
-  description: 'Steuerung für Smart Battery Optimizer Geräte',
+  name: 'Smart Battery: Gerätekarte',
+  description: 'Smart Battery Optimizer — Steuerung für Waschmaschine, Spülmaschine etc.',
 });

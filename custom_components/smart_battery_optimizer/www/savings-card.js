@@ -239,7 +239,7 @@ customElements.define('savings-card-editor', SavingsCardEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: 'savings-card',
-  name: 'Batterie Ersparnisse',
-  description: 'Zeigt Gesamtersparnis und Vergleich ggü. System ohne Akku',
+  name: 'Smart Battery: Ersparnisse',
+  description: 'Smart Battery Optimizer — Gesamtersparnis und Vergleich ggü. System ohne Akku',
   preview: true,
 });
