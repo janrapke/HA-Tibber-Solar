@@ -31,22 +31,49 @@ class ApplianceCard extends HTMLElement {
 
   _resolveEntities() {
     const statusId = this._config.entity;
-    const entry = this._hass.entities?.[statusId];
-    if (!entry?.unique_id) return;
+    if (!statusId || !this._hass?.states[statusId]) return;
 
-    const base = entry.unique_id.replace(/_status$/, '');
-    const all = Object.values(this._hass.entities || {});
-    const find = uid => all.find(e => e.unique_id === uid)?.entity_id;
+    // Primary: use entity registry (hass.entities) for reliable unique_id lookup
+    if (this._hass.entities) {
+      const entry = this._hass.entities[statusId];
+      if (entry?.unique_id) {
+        const base = entry.unique_id.replace(/_status$/, '');
+        const all = Object.values(this._hass.entities);
+        const find = uid => all.find(e => e.unique_id === uid)?.entity_id;
+        const device = this._hass.devices?.[entry.device_id];
+        this._entities = {
+          status: statusId,
+          timer:          find(`${base}_timer`),
+          select:         find(`${base}_proposal_select`),
+          confirm:        find(`${base}_confirm_btn`),
+          cancel:         find(`${base}_cancel_btn`),
+          scheduleSelect: find(`${base}_schedule_granularity`),
+          deviceName: this._config.title || device?.name || 'Gerät',
+        };
+        return;
+      }
+    }
 
-    const device = this._hass.devices?.[entry.device_id];
+    // Fallback: derive entity_ids from hass.states by prefix pattern.
+    // Status entity_id: "sensor.smart_device_X_status" → base: "smart_device_X"
+    const baseId = statusId.replace(/^sensor\./, '').replace(/_status$/, '');
+    const findState = (domain, ...suffixes) => {
+      for (const s of suffixes) {
+        const id = `${domain}.${baseId}_${s}`;
+        if (this._hass.states[id]) return id;
+      }
+      return null;
+    };
     this._entities = {
-      status: statusId,
-      timer: find(`${base}_timer`),
-      select: find(`${base}_proposal_select`),
-      confirm: find(`${base}_confirm_btn`),
-      cancel: find(`${base}_cancel_btn`),
-      scheduleSelect: find(`${base}_schedule_granularity`),
-      deviceName: this._config.title || device?.name || 'Gerät',
+      status:         statusId,
+      timer:          findState('sensor', 'timer'),
+      select:         findState('select', 'vorgeschlagene_zeiten', 'vorgeschlagene_startzeiten'),
+      confirm:        findState('button', 'plan_bestatigen', 'plan_bestaetigen'),
+      cancel:         findState('button', 'plan_abbrechen'),
+      scheduleSelect: findState('select', 'zeitsteuerung'),
+      deviceName: this._config.title ||
+        (this._hass.states[statusId]?.attributes?.friendly_name || '').replace(/ Status$/i, '') ||
+        'Gerät',
     };
   }
 
