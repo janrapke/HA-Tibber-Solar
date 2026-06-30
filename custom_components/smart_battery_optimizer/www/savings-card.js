@@ -302,7 +302,9 @@ class SavingsCardEditor extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     if (!this._initialized) this._render();
-    else this._populateSelects();
+    else if (!this.shadowRoot?.activeElement || this.shadowRoot.activeElement.tagName !== 'SELECT') {
+      this._populateSelects();
+    }
   }
 
   setConfig(config) {

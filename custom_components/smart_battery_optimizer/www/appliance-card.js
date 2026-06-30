@@ -51,6 +51,8 @@ class ApplianceCard extends HTMLElement {
           confirm:        find(`${base}_confirm_btn`),
           cancel:         find(`${base}_cancel_btn`),
           scheduleSelect: find(`${base}_schedule_granularity`),
+          earliestStart:  find(`${base}_earliest_start_hour`),
+          latestEnd:      find(`${base}_latest_end_hour`),
           deviceName: this._config.title || device?.name || 'Gerät',
         };
         return;
@@ -74,6 +76,8 @@ class ApplianceCard extends HTMLElement {
       confirm:        findState('button', 'plan_bestatigen', 'plan_bestaetigen'),
       cancel:         findState('button', 'plan_abbrechen'),
       scheduleSelect: findState('select', 'zeitsteuerung'),
+      earliestStart:  findState('number', 'fruhester_start_stunde', 'fruhester_start'),
+      latestEnd:      findState('number', 'spateste_fertigstellung_stunde', 'spateste_fertigstellung'),
       deviceName: this._config.title ||
         (this._hass.states[statusId]?.attributes?.friendly_name || '').replace(/ Status$/i, '') ||
         'Gerät',
@@ -194,6 +198,16 @@ class ApplianceCard extends HTMLElement {
 
         .divider { height: 1px; background: var(--divider-color); margin: 12px 0; }
 
+        .time-row { display: flex; gap: 8px; margin-bottom: 12px; }
+        .time-field { flex: 1; }
+        .time-label { font-size: 0.75em; color: var(--secondary-text-color); margin-bottom: 4px; }
+        .time-select {
+          width: 100%; padding: 7px 8px; border-radius: 8px;
+          border: 1px solid var(--divider-color);
+          background: var(--card-background-color); color: var(--primary-text-color);
+          font-size: 0.88em; cursor: pointer;
+        }
+
       </style>
 
       <ha-card>
@@ -223,12 +237,15 @@ class ApplianceCard extends HTMLElement {
       this._pressButton(ents.cancel));
 
     this.shadowRoot.querySelector('.btn-reload')?.addEventListener('click', () => {
-      if (ents.select && this._hass) {
-        // Force recalculate by calling the invalidate service (reload via select entity refresh)
-        // We do this by briefly calling a dummy select then correct to trigger re-render
+      if (ents.select && this._hass)
         this._hass.callService('homeassistant', 'update_entity', { entity_id: ents.select });
-      }
     });
+
+    this.shadowRoot.querySelector('#earliest-start')?.addEventListener('change', e =>
+      this._setNumber(ents.earliestStart, e.target.value));
+
+    this.shadowRoot.querySelector('#latest-end')?.addEventListener('change', e =>
+      this._setNumber(ents.latestEnd, e.target.value));
   }
 
   _renderRunning(probs, timerState) {
@@ -268,10 +285,37 @@ class ApplianceCard extends HTMLElement {
   }
 
   _renderIdle(hint, selectOptions, currentOption, hasProposals) {
-    if (hint) return `<div class="hint">💡 ${hint}</div>`;
-    if (!hasProposals) return `<div class="hint">Keine Vorschläge — Tibber-Preise prüfen.</div>`;
+    const ents = this._entities;
+    const hass = this._hass;
+
+    const earliestVal = ents.earliestStart ? parseInt(hass.states[ents.earliestStart]?.state ?? 0) : null;
+    const latestVal   = ents.latestEnd     ? parseInt(hass.states[ents.latestEnd]?.state ?? 23)    : null;
+
+    const hourOpts = h => Array.from({length: 24}, (_, i) =>
+      `<option value="${i}" ${i === h ? 'selected' : ''}>${String(i).padStart(2,'0')}:00 Uhr</option>`
+    ).join('');
+
+    const timeRow = (earliestVal !== null || latestVal !== null) ? `
+      <div class="time-row">
+        ${earliestVal !== null ? `
+          <div class="time-field">
+            <div class="time-label">Frühester Start</div>
+            <select id="earliest-start" class="time-select">${hourOpts(earliestVal)}</select>
+          </div>` : ''}
+        ${latestVal !== null ? `
+          <div class="time-field">
+            <div class="time-label">Fertig bis</div>
+            <select id="latest-end" class="time-select">${hourOpts(latestVal)}</select>
+          </div>` : ''}
+      </div>
+      <div class="divider"></div>
+    ` : '';
+
+    if (hint) return timeRow + `<div class="hint">💡 ${hint}</div>`;
+    if (!hasProposals) return timeRow + `<div class="hint">Keine Vorschläge — Tibber-Preise prüfen.</div>`;
 
     return `
+      ${timeRow}
       <div class="proposal-wrap">
         <div class="section-label">Startzeit wählen</div>
         <select id="proposal-sel">
@@ -293,6 +337,11 @@ class ApplianceCard extends HTMLElement {
   _pressButton(entityId) {
     if (!entityId || !this._hass) return;
     this._hass.callService('button', 'press', { entity_id: entityId });
+  }
+
+  _setNumber(entityId, value) {
+    if (!entityId || !this._hass) return;
+    this._hass.callService('number', 'set_value', { entity_id: entityId, value: parseInt(value) });
   }
 
   getCardSize() { return 3; }
