@@ -278,16 +278,25 @@ class ApplianceCardEditor extends HTMLElement {
     this.attachShadow({ mode: 'open' });
     this._config = {};
     this._hass = null;
+    this._initialized = false;
   }
 
   set hass(hass) {
     this._hass = hass;
-    this._render();
+    if (!this._initialized) {
+      this._render();
+    } else {
+      this._populateEntityOptions();
+    }
   }
 
   setConfig(config) {
     this._config = config || {};
-    this._render();
+    if (!this._initialized) {
+      this._render();
+    } else {
+      this._syncValues();
+    }
   }
 
   _statusEntities() {
@@ -298,11 +307,6 @@ class ApplianceCardEditor extends HTMLElement {
   }
 
   _render() {
-    const entities = this._statusEntities();
-    const current = this._config.entity || '';
-    const currentTitle = this._config.title || '';
-    const currentIcon = this._config.icon || '';
-
     this.shadowRoot.innerHTML = `
       <style>
         .form { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
@@ -318,18 +322,15 @@ class ApplianceCardEditor extends HTMLElement {
       <div class="form">
         <div>
           <label>Gerät (Status-Sensor) *</label>
-          <select id="entity">
-            <option value="">– bitte wählen –</option>
-            ${entities.map(id => `<option value="${id}" ${id === current ? 'selected' : ''}>${this._hass.states[id].attributes.friendly_name || id}</option>`).join('')}
-          </select>
+          <select id="entity"><option value="">– bitte wählen –</option></select>
         </div>
         <div>
           <label>Anzeigename (optional)</label>
-          <input id="title" type="text" placeholder="z.B. Waschmaschine" value="${currentTitle}">
+          <input id="title" type="text" placeholder="z.B. Waschmaschine">
         </div>
         <div>
           <label>Icon (optional, MDI)</label>
-          <input id="icon" type="text" placeholder="mdi:washing-machine" value="${currentIcon}">
+          <input id="icon" type="text" placeholder="mdi:washing-machine">
         </div>
       </div>
     `;
@@ -337,12 +338,35 @@ class ApplianceCardEditor extends HTMLElement {
     this.shadowRoot.querySelector('#entity').addEventListener('change', e => {
       this._dispatch({ ...this._config, entity: e.target.value });
     });
-    this.shadowRoot.querySelector('#title').addEventListener('input', e => {
+    this.shadowRoot.querySelector('#title').addEventListener('change', e => {
       this._dispatch({ ...this._config, title: e.target.value });
     });
-    this.shadowRoot.querySelector('#icon').addEventListener('input', e => {
+    this.shadowRoot.querySelector('#icon').addEventListener('change', e => {
       this._dispatch({ ...this._config, icon: e.target.value });
     });
+
+    this._initialized = true;
+    this._populateEntityOptions();
+    this._syncValues();
+  }
+
+  _populateEntityOptions() {
+    const sel = this.shadowRoot.querySelector('#entity');
+    if (!sel || !this._hass) return;
+    const current = sel.value || this._config.entity || '';
+    const entities = this._statusEntities();
+    sel.innerHTML = '<option value="">– bitte wählen –</option>' +
+      entities.map(id => `<option value="${id}">${this._hass.states[id].attributes.friendly_name || id}</option>`).join('');
+    sel.value = current;
+  }
+
+  _syncValues() {
+    const sel = this.shadowRoot.querySelector('#entity');
+    const titleEl = this.shadowRoot.querySelector('#title');
+    const iconEl = this.shadowRoot.querySelector('#icon');
+    if (sel && document.activeElement !== sel) sel.value = this._config.entity || '';
+    if (titleEl && document.activeElement !== titleEl) titleEl.value = this._config.title || '';
+    if (iconEl && document.activeElement !== iconEl) iconEl.value = this._config.icon || '';
   }
 
   _dispatch(config) {
