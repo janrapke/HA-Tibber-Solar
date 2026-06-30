@@ -446,6 +446,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         await self.learning_engine.record_consumption(current_quarter, self.calculated_house_consumption)
         await self.learning_engine.record_solar(current_quarter, current_solar, cloud_cover, charge_state)
         await self.learning_engine.record_balcony(current_quarter, current_balcony, cloud_cover)
+        await self.learning_engine.record_grid(current_quarter, tibber_cons, tibber_exp)
 
         # Record climate device power (smart-plug sensor or 0 if not configured)
         for device_id, state in self.climate_device_states.items():

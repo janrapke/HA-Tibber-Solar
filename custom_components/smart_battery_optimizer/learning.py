@@ -43,6 +43,10 @@ class LearningEngine:
         self._current_quarter_solar_throttled = False
         self._current_quarter_balcony_acc = 0.0
         self._current_quarter_balcony_count = 0
+        self._current_quarter_grid_import_acc = 0.0
+        self._current_quarter_grid_import_count = 0
+        self._current_quarter_grid_export_acc = 0.0
+        self._current_quarter_grid_export_count = 0
         self._last_quarter_processed = -1
 
         # Initialize default structures for 96 quarters (24h * 4)
@@ -105,6 +109,10 @@ class LearningEngine:
         # and inverter low-light efficiency. Fills in ~2-4 weeks per month.
         self.data.setdefault("solar_monthly_bias", {str(m): 1.0 for m in range(1, 13)})
         self.data.setdefault("solar_monthly_bias_counters", {str(m): 0 for m in range(1, 13)})
+        self.data.setdefault("savings", {
+            "total_battery_savings": 0.0,
+            "total_battery_savings_vs_no_battery": 0.0,
+        })
 
     async def async_load(self):
         """Load historical data from storage or initialize priors."""
@@ -162,6 +170,11 @@ class LearningEngine:
 
             if "vacation_mode_active" in stored_data:
                 self.data["vacation_mode_active"] = stored_data["vacation_mode_active"]
+
+            if "savings" in stored_data:
+                for k in ("total_battery_savings", "total_battery_savings_vs_no_battery"):
+                    if k in stored_data["savings"]:
+                        self.data["savings"][k] = float(stored_data["savings"][k])
 
             if "climate" in stored_data:
                 for device_id, src in stored_data["climate"].items():
@@ -245,6 +258,10 @@ class LearningEngine:
             "solar_monthly_bias_counters": {str(m): 0 for m in range(1, 13)},
             "vacation_mode_active": False,
             "climate": {},
+            "savings": {
+                "total_battery_savings": 0.0,
+                "total_battery_savings_vs_no_battery": 0.0,
+            },
         }
         self._climate_acc = {}
         self._initialize_priors()
@@ -552,6 +569,13 @@ class LearningEngine:
         self._current_quarter_balcony_acc += power_w
         self._current_quarter_balcony_count += 1
 
+    async def record_grid(self, quarter: int, import_w: float, export_w: float):
+        """Accumulate grid import/export power for savings calculation."""
+        self._current_quarter_grid_import_acc += max(0.0, float(import_w))
+        self._current_quarter_grid_import_count += 1
+        self._current_quarter_grid_export_acc += max(0.0, float(export_w))
+        self._current_quarter_grid_export_count += 1
+
     def _calculate_alpha(self, counter: int) -> float:
         """Calculate dynamic alpha: fast at start (0.7), slows to 0.1 after 6+ observations."""
         if counter >= 6:
@@ -728,6 +752,29 @@ class LearningEngine:
 
             self._current_quarter_balcony_acc = 0.0
             self._current_quarter_balcony_count = 0
+
+        # Savings calculation — requires grid data and a positive price
+        grid_import_wh = 0.0
+        grid_export_wh = 0.0
+        if self._current_quarter_grid_import_count > 0:
+            grid_import_wh = (self._current_quarter_grid_import_acc / self._current_quarter_grid_import_count) / 4.0
+        if self._current_quarter_grid_export_count > 0:
+            grid_export_wh = (self._current_quarter_grid_export_acc / self._current_quarter_grid_export_count) / 4.0
+        self._current_quarter_grid_import_acc = 0.0
+        self._current_quarter_grid_import_count = 0
+        self._current_quarter_grid_export_acc = 0.0
+        self._current_quarter_grid_export_count = 0
+
+        if price is not None and float(price) > 0.0 and actual_consumption_wh > 0.0:
+            price_f = float(price)
+            # Battery discharge = house load covered neither by solar nor grid
+            net_battery_wh = max(0.0, actual_consumption_wh - actual_solar_wh - grid_import_wh + grid_export_wh)
+            self.data["savings"]["total_battery_savings"] += net_battery_wh / 1000.0 * price_f
+
+            # Savings vs. no battery: what grid draw would be without battery
+            no_batt_grid_wh = max(0.0, actual_consumption_wh - actual_solar_wh)
+            actual_net_grid_wh = max(0.0, grid_import_wh - grid_export_wh)
+            self.data["savings"]["total_battery_savings_vs_no_battery"] += (no_batt_grid_wh - actual_net_grid_wh) / 1000.0 * price_f
 
         return actual_consumption_wh, actual_solar_wh
 
