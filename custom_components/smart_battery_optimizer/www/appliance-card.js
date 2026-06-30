@@ -266,9 +266,93 @@ class ApplianceCard extends HTMLElement {
   }
 
   getCardSize() { return 3; }
+
+  static getConfigElement() {
+    return document.createElement('appliance-card-editor');
+  }
+}
+
+class ApplianceCardEditor extends HTMLElement {
+  constructor() {
+    super();
+    this.attachShadow({ mode: 'open' });
+    this._config = {};
+    this._hass = null;
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._render();
+  }
+
+  setConfig(config) {
+    this._config = config || {};
+    this._render();
+  }
+
+  _statusEntities() {
+    if (!this._hass) return [];
+    return Object.keys(this._hass.states)
+      .filter(id => id.endsWith('_status') && this._hass.states[id].attributes?.friendly_name?.startsWith('Smart Device:'))
+      .sort();
+  }
+
+  _render() {
+    const entities = this._statusEntities();
+    const current = this._config.entity || '';
+    const currentTitle = this._config.title || '';
+    const currentIcon = this._config.icon || '';
+
+    this.shadowRoot.innerHTML = `
+      <style>
+        .form { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+        label { font-size: 0.85em; color: var(--secondary-text-color); margin-bottom: 4px; display: block; }
+        select, input {
+          width: 100%; padding: 9px 10px; border-radius: 8px;
+          border: 1px solid var(--divider-color);
+          background: var(--card-background-color); color: var(--primary-text-color);
+          font-size: 0.9em; box-sizing: border-box;
+        }
+        select:focus, input:focus { outline: 2px solid var(--primary-color); border-color: transparent; }
+      </style>
+      <div class="form">
+        <div>
+          <label>Gerät (Status-Sensor) *</label>
+          <select id="entity">
+            <option value="">– bitte wählen –</option>
+            ${entities.map(id => `<option value="${id}" ${id === current ? 'selected' : ''}>${this._hass.states[id].attributes.friendly_name || id}</option>`).join('')}
+          </select>
+        </div>
+        <div>
+          <label>Anzeigename (optional)</label>
+          <input id="title" type="text" placeholder="z.B. Waschmaschine" value="${currentTitle}">
+        </div>
+        <div>
+          <label>Icon (optional, MDI)</label>
+          <input id="icon" type="text" placeholder="mdi:washing-machine" value="${currentIcon}">
+        </div>
+      </div>
+    `;
+
+    this.shadowRoot.querySelector('#entity').addEventListener('change', e => {
+      this._dispatch({ ...this._config, entity: e.target.value });
+    });
+    this.shadowRoot.querySelector('#title').addEventListener('input', e => {
+      this._dispatch({ ...this._config, title: e.target.value });
+    });
+    this.shadowRoot.querySelector('#icon').addEventListener('input', e => {
+      this._dispatch({ ...this._config, icon: e.target.value });
+    });
+  }
+
+  _dispatch(config) {
+    this._config = config;
+    this.dispatchEvent(new CustomEvent('config-changed', { detail: { config }, bubbles: true, composed: true }));
+  }
 }
 
 customElements.define('appliance-card', ApplianceCard);
+customElements.define('appliance-card-editor', ApplianceCardEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: 'appliance-card',
