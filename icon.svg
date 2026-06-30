@@ -1,0 +1,56 @@
+<svg width="512" height="512" viewBox="0 0 512 512" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title>Smart Battery Optimizer</title>
+  <desc>Battery with solar rays and lightning bolt</desc>
+  <style>
+    @media (prefers-color-scheme: dark) {
+      .bg { fill: #1a1f2e; }
+      .ring1 { stroke: #1e2a4a; }
+      .ring2 { stroke: #2a3a60; }
+      .batt-shell { fill: #1a2340; stroke: #3949ab; }
+      .batt-pole  { fill: #3949ab; }
+      .seg1 { fill: #1565c0; }
+      .seg2 { fill: #1e88e5; }
+      .seg3 { fill: #42a5f5; }
+      .seg4-bg { fill: #1a2340; stroke: #3949ab; }
+      .bolt { fill: #ffd54f; }
+      .ray  { stroke: #ffb300; }
+    }
+    .bg { fill: #eef2ff; }
+    .ring1 { stroke: #c5cae9; fill: none; }
+    .ring2 { stroke: #9fa8da; fill: none; }
+    .batt-shell { fill: #e8eaf6; stroke: #3949ab; }
+    .batt-pole  { fill: #3949ab; }
+    .seg1 { fill: #1a237e; }
+    .seg2 { fill: #283593; }
+    .seg3 { fill: #3949ab; }
+    .seg4-bg { fill: #e8eaf6; stroke: #9fa8da; }
+    .bolt { fill: #f9a825; }
+    .ray  { stroke: #f9a825; fill: none; stroke-linecap: round; }
+  </style>
+
+  <rect width="512" height="512" rx="80" class="bg"/>
+
+  <circle cx="256" cy="256" r="196" class="ring1" stroke-width="1.5"/>
+  <circle cx="256" cy="256" r="152" class="ring2" stroke-width="1" stroke-dasharray="5 8"/>
+
+  <g class="ray" stroke-width="5">
+    <line x1="256" y1="40"  x2="256" y2="20"/>
+    <line x1="256" y1="472" x2="256" y2="492"/>
+    <line x1="40"  y1="256" x2="20"  y2="256"/>
+    <line x1="472" y1="256" x2="492" y2="256"/>
+    <line x1="98"  y1="98"  x2="84"  y2="84"/>
+    <line x1="414" y1="98"  x2="428" y2="84"/>
+    <line x1="98"  y1="414" x2="84"  y2="428"/>
+    <line x1="414" y1="414" x2="428" y2="428"/>
+  </g>
+
+  <rect x="110" y="172" width="252" height="148" rx="18" class="batt-shell" stroke-width="6"/>
+  <rect x="362" y="218" width="22" height="56" rx="8" class="batt-pole"/>
+
+  <rect x="122" y="184" width="46" height="124" rx="8" class="seg1"/>
+  <rect x="175" y="184" width="46" height="124" rx="8" class="seg2"/>
+  <rect x="228" y="184" width="46" height="124" rx="8" class="seg3"/>
+  <rect x="281" y="184" width="46" height="124" rx="8" class="seg4-bg" stroke-width="2" stroke-dasharray="4 3"/>
+
+  <polygon points="272,160 236,264 258,264 248,348 290,232 268,232" class="bolt"/>
+</svg>
