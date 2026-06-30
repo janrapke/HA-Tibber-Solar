@@ -19,6 +19,7 @@ _WWW = pathlib.Path(__file__).parent / "www"
 _CARD_FILES = [
     ("appliance-card.js", "/smart_battery_optimizer/appliance-card.js"),
     ("battery-forecast-card.js", "/smart_battery_optimizer/battery-forecast-card.js"),
+    ("savings-card.js", "/smart_battery_optimizer/savings-card.js"),
 ]
 _CARD_RESOURCE_URLS = [url for _, url in _CARD_FILES]
 
