@@ -30,10 +30,10 @@ Ein Custom Component für Home Assistant, das deinen Batteriespeicher intelligen
 - [Geräteplanung — Waschmaschine & Co. zum günstigsten Preis](#geräteplanung--waschmaschine--co-zum-günstigsten-preis)
 - [Alle Steuerungsentitäten im Überblick](#alle-steuerungsentitäten-im-überblick)
 - [Dashboard-Kacheln einrichten](#dashboard-kacheln-einrichten)
-  - [Kachel 1: Battery Forecast Card](#kachel-1-battery-forecast-card)
-  - [Kachel 2: Appliance Card (Gerätesteuerung)](#kachel-2-appliance-card-gerätesteuerung)
-  - [Kachel 3: Savings Card (Ersparnis-Statistik)](#kachel-3-savings-card-ersparnis-statistik)
-  - [Bonus: Batterie & Dispatch Prognose (ApexCharts)](#bonus-batterie--dispatch-prognose-apexcharts)
+  - [Kachel 1: Forecast Chart Card (Prognose-Diagramm)](#kachel-1-forecast-chart-card-prognose-diagramm)
+  - [Kachel 2: Battery Forecast Card](#kachel-2-battery-forecast-card)
+  - [Kachel 3: Appliance Card (Gerätesteuerung)](#kachel-3-appliance-card-gerätesteuerung)
+  - [Kachel 4: Savings Card (Ersparnis-Statistik)](#kachel-4-savings-card-ersparnis-statistik)
 - [Einstellungen nachträglich ändern](#einstellungen-nachträglich-ändern)
 - [Tipps für den Alltag](#tipps-für-den-alltag)
 - [Fehlerbehebung](#fehlerbehebung)
@@ -557,18 +557,16 @@ Diese Entities erlauben dir Parameter direkt in HA anzupassen ohne den Setup-Ass
 
 ## Dashboard-Kacheln einrichten
 
-Der Smart Battery Optimizer bringt **drei Custom Cards** mit die dir auf einen Blick zeigen was gerade passiert, was geplant ist und wie viel du gespart hast. Alle Kacheln werden automatisch als Lovelace-Ressource registriert wenn die Integration installiert ist — du musst sie nur noch in dein Dashboard einbauen.
-
-Zusätzlich dokumentieren wir eine **ApexCharts-Vorlage** für ein erweitertes Prognose-Diagramm (erfordert das separate HACS-Plugin `apexcharts-card`).
+Der Smart Battery Optimizer bringt **vier Custom Cards** mit die dir auf einen Blick zeigen was gerade passiert, was geplant ist und wie viel du gespart hast. Alle Kacheln werden automatisch als Lovelace-Ressource registriert wenn die Integration installiert ist — du musst sie nur noch in dein Dashboard einbauen.
 
 ---
 
-### Bonus: Batterie & Dispatch Prognose (ApexCharts)
+### Kachel 1: Forecast Chart Card (Prognose-Diagramm)
 
-Diese Kachel ist **kein mitgelieferter Custom Card** sondern eine YAML-Vorlage für das separate HACS-Plugin `apexcharts-card`. Sie zeigt in einem Zeitdiagramm:
+Die **Hauptansicht** des Optimizers — ein Canvas-basiertes Zeitdiagramm ohne externe Abhängigkeiten. Es zeigt:
 
-- Den **aktuellen und geplanten Batteriestand** als Kurve (linke Y-Achse, %)
-- Den **Tibber-Strompreis** als Kurve (rechte Y-Achse, ct/kWh)
+- Den **geplanten Batteriestand** als gefüllte Kurve (linke Y-Achse, %)
+- Den **Tibber-Strompreis** als gestrichelte Linie (rechte Y-Achse, €/ct)
 - Die **geplante Aktion** für jede Stunde als farbigen Hintergrund
 
 **Farblegende der Aktionen:**
@@ -584,25 +582,29 @@ Diese Kachel ist **kein mitgelieferter Custom Card** sondern eine YAML-Vorlage f
 | ⬛ Grau | MIN | Batterie am Minimum |
 | 🩵 Cyan | PRE | Laderaum-Vorbereitung — Nacht-Entladung vor sonnigem Tag |
 
-**Voraussetzung:** Die Kachel basiert auf `custom:apexcharts-card` das du zuerst via HACS installieren musst:
-HACS → Frontend → „ApexCharts Card" suchen → Installieren → HA neu laden.
+**Keine externen Abhängigkeiten** — die Karte rendert alles selbst per Canvas. Kein ApexCharts HACS-Plugin nötig.
 
-**Installation der Kachel:**
+**Installation:**
 
-1. Die Datei `dashboard_card.yaml` aus diesem Repository öffnen
-2. Die zwei markierten Zeilen anpassen:
-   ```yaml
-   entity: sensor.DEIN_AKKU_SENSOR    # <-- z.B. sensor.battery_soc
-   entity: sensor.DEIN_PLAN_SENSOR    # <-- z.B. sensor.smart_battery_optimizer_tagesplan_vorhersage
-   ```
-3. In HA ein Dashboard öffnen → Bearbeiten → Karte hinzufügen → **„Manuell"** wählen
-4. Den angepassten YAML-Code einfügen → Speichern
+Wird automatisch als Ressource registriert. Karte hinzufügen → **„Benutzerdefiniert"** → `custom:forecast-chart-card`.
 
-> **Tipp:** Den genauen Namen des Tagesplan-Sensors findest du in HA unter **Einstellungen → Geräte & Dienste → Smart Battery Optimizer → Entities** und suchst nach einer Entity die „Tagesplan" oder „hourly_plan" im Namen hat.
+Minimale Konfiguration:
+```yaml
+type: custom:forecast-chart-card
+entity: sensor.smart_battery_optimizer_tagesplan_vorhersage
+```
+
+Optionale Parameter:
+```yaml
+type: custom:forecast-chart-card
+entity: sensor.smart_battery_optimizer_tagesplan_vorhersage
+hours: 24        # Anzahl der anzuzeigenden Stunden (Standard: 24)
+title: "Mein Prognose-Diagramm"
+```
 
 ---
 
-### Kachel 1: Battery Forecast Card
+### Kachel 2: Battery Forecast Card
 
 Diese Kachel ist die **kompakte Übersichts-Kachel** und zeigt in einer einfachen, übersichtlichen Darstellung:
 
@@ -625,7 +627,7 @@ battery_entity: sensor.dein_batteriestand_sensor
 
 ---
 
-### Kachel 2: Appliance Card (Gerätesteuerung)
+### Kachel 3: Appliance Card (Gerätesteuerung)
 
 Die Appliance Card ist eine **interaktive Steuerkarte** speziell für die Überschuss-Verbraucher. Sie zeigt alle konfigurierten Geräte auf einen Blick und erlaubt es sie manuell zu steuern.
 
@@ -649,7 +651,7 @@ entity: sensor.smart_battery_optimizer_status
 
 ---
 
-### Kachel 3: Savings Card (Ersparnis-Statistik)
+### Kachel 4: Savings Card (Ersparnis-Statistik)
 
 Die Savings Card zeigt dir **wie viel Geld du durch den Optimizer gespart hast** — aufgeteilt in verschiedene Zeiträume.
 
