@@ -22,6 +22,16 @@ from .const import (
     CONF_BATTERY_LEVEL_SENSOR,
     CONF_SOLAR_POWER_SENSOR,
     CONF_BALCONY_POWER_SENSOR,
+    CONF_INVERTER_PROFILE,
+    INVERTER_PROFILE_OPENDTU,
+    INVERTER_PROFILE_POWERSTATION,
+    INVERTER_PROFILE_GENERIC,
+    CONF_PS_DISCHARGE_POWER_ENTITY,
+    CONF_PS_CHARGE_POWER_ENTITY,
+    CONF_PS_AC_OUTPUT_SWITCH,
+    CONF_PS_OUTPUT_SENSOR,
+    CONF_GENERIC_INVERTER_SWITCH,
+    CONF_GENERIC_OUTPUT_SENSOR,
     CONF_OPENDTU_TURN_ON_BUTTON,
     CONF_OPENDTU_TURN_OFF_BUTTON,
     CONF_OPENDTU_PRODUCING_SENSOR,
@@ -317,6 +327,124 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 pass
         return default
 
+    def _inverter_profile(self) -> str:
+        return self.config.get(CONF_INVERTER_PROFILE, INVERTER_PROFILE_OPENDTU)
+
+    def _inverter_output_sensor(self) -> str | None:
+        profile = self._inverter_profile()
+        if profile == INVERTER_PROFILE_POWERSTATION:
+            return self.config.get(CONF_PS_OUTPUT_SENSOR) or self.config.get(CONF_PS_DISCHARGE_POWER_ENTITY)
+        if profile == INVERTER_PROFILE_GENERIC:
+            return self.config.get(CONF_GENERIC_OUTPUT_SENSOR)
+        return self.config.get(CONF_OPENDTU_OUTPUT_SENSOR)
+
+    def _inverter_read_state(self) -> bool:
+        """Returns True if inverter is currently active/on."""
+        profile = self._inverter_profile()
+        if profile == INVERTER_PROFILE_POWERSTATION:
+            discharge_entity = self.config.get(CONF_PS_DISCHARGE_POWER_ENTITY)
+            if discharge_entity:
+                val = self._get_float_state(discharge_entity, -1.0)
+                if val >= 0:
+                    return val > 0
+            ac_switch = self.config.get(CONF_PS_AC_OUTPUT_SWITCH)
+            if ac_switch:
+                s = self.hass.states.get(ac_switch)
+                return s is not None and s.state == "on"
+            return False
+        if profile == INVERTER_PROFILE_GENERIC:
+            sw = self.config.get(CONF_GENERIC_INVERTER_SWITCH)
+            if sw:
+                s = self.hass.states.get(sw)
+                return s is not None and s.state == "on"
+            return False
+        # OpenDTU (default)
+        dpl_entity = self.config.get(CONF_OPENDTU_DPL_MODE_SELECT)
+        if dpl_entity:
+            dpl_state = self.hass.states.get(dpl_entity)
+            if dpl_state and dpl_state.state not in ("unknown", "unavailable"):
+                state_str = str(dpl_state.state).strip()
+                if state_str.startswith("0"):
+                    return True
+                if state_str.startswith("1"):
+                    return False
+                try:
+                    return float(state_str) == 0.0
+                except ValueError:
+                    pass
+        producing_sensor = self.config.get(CONF_OPENDTU_PRODUCING_SENSOR)
+        if producing_sensor:
+            s = self.hass.states.get(producing_sensor)
+            if s:
+                if s.state in ("on", "off"):
+                    return s.state == "on"
+                return str(s.state).lower() in ("on", "true", "1", "producing")
+        return True
+
+    async def _inverter_dispatch(self, turn_on: bool) -> None:
+        """Send on/off command to inverter based on configured profile."""
+        profile = self._inverter_profile()
+        max_w = float(self.config.get(CONF_MAX_INVERTER_POWER_W, 800))
+
+        if profile == INVERTER_PROFILE_POWERSTATION:
+            discharge_entity = self.config.get(CONF_PS_DISCHARGE_POWER_ENTITY)
+            if discharge_entity:
+                domain = discharge_entity.split(".")[0]
+                await self.hass.services.async_call(
+                    domain, "set_value",
+                    {"entity_id": discharge_entity, "value": max_w if turn_on else 0},
+                    blocking=False,
+                )
+            charge_entity = self.config.get(CONF_PS_CHARGE_POWER_ENTITY)
+            if charge_entity and not turn_on:
+                domain = charge_entity.split(".")[0]
+                await self.hass.services.async_call(
+                    domain, "set_value",
+                    {"entity_id": charge_entity, "value": max_w},
+                    blocking=False,
+                )
+            ac_switch = self.config.get(CONF_PS_AC_OUTPUT_SWITCH)
+            if ac_switch:
+                svc = "turn_on" if turn_on else "turn_off"
+                await self.hass.services.async_call("switch", svc, {"entity_id": ac_switch}, blocking=False)
+            return
+
+        if profile == INVERTER_PROFILE_GENERIC:
+            sw = self.config.get(CONF_GENERIC_INVERTER_SWITCH)
+            if sw:
+                svc = "turn_on" if turn_on else "turn_off"
+                await self.hass.services.async_call("switch", svc, {"entity_id": sw}, blocking=False)
+            return
+
+        # OpenDTU (default)
+        turn_on_btn = self.config.get(CONF_OPENDTU_TURN_ON_BUTTON)
+        turn_off_btn = self.config.get(CONF_OPENDTU_TURN_OFF_BUTTON)
+        dpl_entity = self.config.get(CONF_OPENDTU_DPL_MODE_SELECT)
+
+        async def _set_dpl_mode(mode_val: float):
+            if not dpl_entity:
+                return
+            entity_state = self.hass.states.get(dpl_entity)
+            if not entity_state:
+                return
+            domain = dpl_entity.split(".")[0]
+            if domain in ("number", "input_number"):
+                await self.hass.services.async_call(domain, "set_value", {"entity_id": dpl_entity, "value": mode_val}, blocking=False)
+            elif domain in ("select", "input_select"):
+                target_prefix = str(int(mode_val))
+                options = entity_state.attributes.get("options", [])
+                target_option = next((str(o) for o in options if str(o).strip().startswith(target_prefix)), target_prefix)
+                await self.hass.services.async_call(domain, "select_option", {"entity_id": dpl_entity, "option": target_option}, blocking=False)
+
+        if turn_on:
+            if turn_on_btn and self.hass.states.get(turn_on_btn) is not None:
+                await self.hass.services.async_call("button", "press", {"entity_id": turn_on_btn}, blocking=False)
+            await _set_dpl_mode(0.0)
+        else:
+            if turn_off_btn and self.hass.states.get(turn_off_btn) is not None:
+                await self.hass.services.async_call("button", "press", {"entity_id": turn_off_btn}, blocking=False)
+            await _set_dpl_mode(1.0)
+
     async def _get_hourly_forecasts(self) -> list[dict]:
         """Fetch hourly weather forecast to get cloud coverage."""
         weather_entity = self.config.get(CONF_WEATHER_ENTITY)
@@ -395,7 +523,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         tibber_cons = self._get_float_state(self.config[CONF_TIBBER_CONSUMPTION_SENSOR])
         tibber_exp = self._get_float_state(self.config[CONF_TIBBER_EXPORT_SENSOR])
-        opendtu_output = self._get_float_state(self.config[CONF_OPENDTU_OUTPUT_SENSOR])
+        opendtu_output = self._get_float_state(self._inverter_output_sensor() or "")
 
         excluded_power = 0.0
         for entity_id in self.config.get(CONF_EXCLUDED_POWER_SENSORS, []):
@@ -699,7 +827,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         # DTU-Verfügbarkeit prüfen: Wenn der WR-Output-Sensor nicht erreichbar ist,
         # wissen wir nicht ob Solar läuft — alle Überschuss-Verbraucher sperren.
-        _dtu_output_sensor = self.config.get(CONF_OPENDTU_OUTPUT_SENSOR)
+        _dtu_output_sensor = self._inverter_output_sensor()
         _dtu_unavailable = False
         if _dtu_output_sensor:
             _dtu_state = self.hass.states.get(_dtu_output_sensor)
@@ -884,96 +1012,31 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 elif not is_grid_charging and charger_state.state != "off":
                     await self.hass.services.async_call("switch", "turn_off", {"entity_id": grid_charger_switch}, blocking=False)
 
-        dpl_entity = self.config.get(CONF_OPENDTU_DPL_MODE_SELECT)
+        inverter_is_on = self._inverter_read_state()
 
-        inverter_is_on = True # Default to True to force off if unknown
+        min_inverter_interval = int(self.config.get(CONF_MIN_SWITCH_INTERVAL_MINUTES, 15))
+        debounce_active = False
+        if self._last_inverter_command_time is not None:
+            elapsed_mins = (now - self._last_inverter_command_time).total_seconds() / 60.0
+            if elapsed_mins < min_inverter_interval:
+                debounce_active = True
+                _LOGGER.debug(
+                    "Inverter locked for %.1f more min (interval=%d min)",
+                    min_inverter_interval - elapsed_mins, min_inverter_interval
+                )
 
-        if dpl_entity:
-            # DPL configured: Use DPL state to check if inverter is "on" (0/0.0) or "off" (1/1.0)
-            dpl_state = self.hass.states.get(dpl_entity)
-            if dpl_state and dpl_state.state not in ("unknown", "unavailable"):
-                state_str = str(dpl_state.state).strip()
-                if state_str.startswith("0"):
-                    inverter_is_on = True
-                elif state_str.startswith("1"):
-                    inverter_is_on = False
-                else:
-                    try:
-                        dpl_val = float(state_str)
-                        # DPL mode 0 means DPL is active (inverter is ON and follows DPL limits)
-                        # DPL mode 1 means OFF
-                        inverter_is_on = (dpl_val == 0.0)
-                    except ValueError:
-                        pass
-        else:
-            # Fallback to producing sensor
-            producing_sensor = self.config.get(CONF_OPENDTU_PRODUCING_SENSOR)
-            if producing_sensor:
-                producing_state = self.hass.states.get(producing_sensor)
-                if producing_state:
-                    inverter_is_on = producing_state.state == "on"
-                    if producing_state.state not in ("on", "off"):
-                        inverter_is_on = str(producing_state.state).lower() in ("on", "true", "1", "producing")
-
-        try:
-            turn_on_btn = self.config.get(CONF_OPENDTU_TURN_ON_BUTTON)
-            turn_off_btn = self.config.get(CONF_OPENDTU_TURN_OFF_BUTTON)
-
-            # Fire the button if the requested state differs from what we *think* the current state is.
-            # We also fire if our internal requested state changed since last time, just to be sure.
-            # For negative prices, we force the OFF button every time to ensure DPL is definitely set.
-            requested_state_str = "on" if turn_on_inverter else "off"
-
-            async def _set_dpl_mode(mode_val: float):
-                if not dpl_entity:
-                    return
-                entity_state = self.hass.states.get(dpl_entity)
-                if not entity_state:
-                    return
-                domain = dpl_entity.split(".")[0]
-                if domain in ("number", "input_number"):
-                    await self.hass.services.async_call(domain, "set_value", {"entity_id": dpl_entity, "value": mode_val}, blocking=False)
-                elif domain in ("select", "input_select"):
-                    target_prefix = str(int(mode_val))
-                    options = entity_state.attributes.get("options", [])
-
-                    target_option = None
-                    for opt in options:
-                        if str(opt).strip().startswith(target_prefix):
-                            target_option = str(opt)
-                            break
-
-                    if target_option is None:
-                        target_option = target_prefix
-
-                    await self.hass.services.async_call(domain, "select_option", {"entity_id": dpl_entity, "option": target_option}, blocking=False)
-
-            min_inverter_interval = int(self.config.get(CONF_MIN_SWITCH_INTERVAL_MINUTES, 15))
-            debounce_active = False
-            if self._last_inverter_command_time is not None:
-                elapsed_mins = (now - self._last_inverter_command_time).total_seconds() / 60.0
-                if elapsed_mins < min_inverter_interval:
-                    debounce_active = True
-                    _LOGGER.debug(
-                        "Inverter locked for %.1f more min (interval=%d min)",
-                        min_inverter_interval - elapsed_mins, min_inverter_interval
-                    )
-
-            if not debounce_active:
+        if not debounce_active:
+            try:
                 if turn_on_inverter and (not inverter_is_on or self._current_inverter_state != "on"):
-                    if turn_on_btn and self.hass.states.get(turn_on_btn) is not None:
-                        await self.hass.services.async_call("button", "press", {"entity_id": turn_on_btn}, blocking=False)
-                    await _set_dpl_mode(0.0)
+                    await self._inverter_dispatch(True)
                     self._current_inverter_state = "on"
                     self._last_inverter_command_time = now
                 elif not turn_on_inverter and (inverter_is_on or self._current_inverter_state != "off"):
-                    if turn_off_btn and self.hass.states.get(turn_off_btn) is not None:
-                        await self.hass.services.async_call("button", "press", {"entity_id": turn_off_btn}, blocking=False)
-                    await _set_dpl_mode(1.0)
+                    await self._inverter_dispatch(False)
                     self._current_inverter_state = "off"
                     self._last_inverter_command_time = now
-        except Exception as e:
-            _LOGGER.error("Failed to press OpenDTU button: %s", e)
+            except Exception as e:
+                _LOGGER.error("Inverter dispatch failed: %s", e)
 
         return {
             "calculated_house_consumption": self.calculated_house_consumption,

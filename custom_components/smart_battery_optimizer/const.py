@@ -16,6 +16,22 @@ CONF_OPENDTU_TURN_OFF_BUTTON = "opendtu_turn_off_button"
 CONF_OPENDTU_PRODUCING_SENSOR = "opendtu_producing_sensor"
 CONF_OPENDTU_OUTPUT_SENSOR = "opendtu_output_sensor"
 CONF_OPENDTU_DPL_MODE_SELECT = "opendtu_dpl_mode_select"
+
+# Wechselrichter-Profil
+CONF_INVERTER_PROFILE = "inverter_profile"
+INVERTER_PROFILE_OPENDTU = "opendtu"
+INVERTER_PROFILE_POWERSTATION = "powerstation"
+INVERTER_PROFILE_GENERIC = "generic_switch"
+
+# Powerstation-Profil (EcoFlow, Anker, Bluetti, Victron All-in-One ...)
+CONF_PS_DISCHARGE_POWER_ENTITY = "ps_discharge_power_entity"
+CONF_PS_CHARGE_POWER_ENTITY = "ps_charge_power_entity"
+CONF_PS_AC_OUTPUT_SWITCH = "ps_ac_output_switch"
+CONF_PS_OUTPUT_SENSOR = "ps_output_sensor"
+
+# Generisches Schalter-Profil
+CONF_GENERIC_INVERTER_SWITCH = "generic_inverter_switch"
+CONF_GENERIC_OUTPUT_SENSOR = "generic_output_sensor"
 CONF_WEATHER_ENTITY = "weather_entity"
 CONF_SOLAR_CHARGE_STATE_SENSOR = "solar_charge_state_sensor"
 

@@ -38,27 +38,65 @@
         }
       },
       "solar_inverter": {
-        "title": "Solar & Inverter (OpenDTU)",
-        "description": "Connect the optimizer to your solar array and OpenDTU inverter. OpenDTU controls whether the inverter feeds battery power into the home.",
+        "title": "Solar & Inverter",
+        "description": "Connect the optimizer to your solar array. Then choose what type of storage or inverter you have.",
         "data": {
           "solar_power_sensor": "Solar Power Sensor(s) (W)",
           "balcony_power_sensor": "Balcony Power Plant Sensor (optional)",
-          "opendtu_turn_on_button": "OpenDTU: Turn On Button",
-          "opendtu_turn_off_button": "OpenDTU: Turn Off Button",
-          "opendtu_producing_sensor": "OpenDTU: Producing Binary Sensor",
-          "opendtu_output_sensor": "OpenDTU: Output Power Sensor (W)",
-          "opendtu_dpl_mode_select": "OpenDTU: DPL Mode Entity (optional)",
-          "max_inverter_power_w": "Maximum Inverter Output (W)"
+          "max_inverter_power_w": "Maximum Inverter Output (W)",
+          "inverter_profile": "Storage / Inverter Type"
         },
         "data_description": {
           "solar_power_sensor": "All sensors measuring current solar production in watts. Select multiple if you have multiple strings or inverters.",
           "balcony_power_sensor": "Optional: Sensor for a plug-in balcony power plant (micro-PV without battery connection) measured separately.",
-          "opendtu_turn_on_button": "Button entity in Home Assistant that turns the OpenDTU inverter on (starts battery discharge).",
-          "opendtu_turn_off_button": "Button entity in Home Assistant that turns the OpenDTU inverter off (stops battery discharge).",
+          "max_inverter_power_w": "Maximum allowed output of the inverter in watts. In Germany legally limited to 800 W for plug-in PV systems.",
+          "inverter_profile": "Choose your device type: OpenDTU/Hoymiles, an all-in-one powerstation (EcoFlow, Anker, Bluetti...) or a generic switch."
+        }
+      },
+      "inverter_opendtu": {
+        "title": "OpenDTU / Hoymiles Configuration",
+        "description": "Connect the optimizer to your OpenDTU inverter.",
+        "data": {
+          "opendtu_turn_on_button": "Turn On Button",
+          "opendtu_turn_off_button": "Turn Off Button",
+          "opendtu_producing_sensor": "Producing Binary Sensor",
+          "opendtu_output_sensor": "Output Power Sensor (W)",
+          "opendtu_dpl_mode_select": "DPL Mode Entity (optional)"
+        },
+        "data_description": {
+          "opendtu_turn_on_button": "Button entity in Home Assistant that turns the inverter on (starts battery discharge).",
+          "opendtu_turn_off_button": "Button entity in Home Assistant that turns the inverter off (stops battery discharge).",
           "opendtu_producing_sensor": "Binary sensor indicating whether the inverter is currently producing power (true = on, false = off).",
-          "opendtu_output_sensor": "Sensor reporting the current output power of the OpenDTU inverter in watts.",
-          "opendtu_dpl_mode_select": "Optional: Entity to control the 'Dynamic Power Limiter' mode in OpenDTU. If set, the inverter is throttled smoothly instead of hard on/off switching.",
-          "max_inverter_power_w": "Maximum allowed output of the inverter in watts. In Germany legally limited to 800 W for plug-in PV systems."
+          "opendtu_output_sensor": "Sensor reporting the current output power of the inverter in watts.",
+          "opendtu_dpl_mode_select": "Optional: Entity to control the 'Dynamic Power Limiter' mode in OpenDTU. If set, the inverter is throttled smoothly instead of hard on/off switching."
+        }
+      },
+      "inverter_powerstation": {
+        "title": "Powerstation (EcoFlow / Anker / Bluetti ...)",
+        "description": "Configure your all-in-one powerstation. The optimizer controls the discharge power directly via a number entity.",
+        "data": {
+          "ps_discharge_power_entity": "Discharge Power Entity (number.*)",
+          "ps_charge_power_entity": "Charge Power Entity (number.*, optional)",
+          "ps_ac_output_switch": "AC Output Switch (optional)",
+          "ps_output_sensor": "Output Power Sensor (optional)"
+        },
+        "data_description": {
+          "ps_discharge_power_entity": "Number entity on your powerstation controlling maximum discharge power in watts. The optimizer sets this to 0 W (off) or to the configured maximum (on).",
+          "ps_charge_power_entity": "Optional: Number entity for maximum charge power. If set, the optimizer increases charge power when the battery should not discharge.",
+          "ps_ac_output_switch": "Optional: Switch that enables/disables the AC output of the powerstation (e.g. 'Enable AC output' on EcoFlow devices).",
+          "ps_output_sensor": "Optional: Sensor measuring current output power in watts. Improves excess power calculations."
+        }
+      },
+      "inverter_generic": {
+        "title": "Generic Switch",
+        "description": "Control your inverter or storage via a simple on/off switch in Home Assistant.",
+        "data": {
+          "generic_inverter_switch": "Inverter Switch (switch.*)",
+          "generic_output_sensor": "Output Power Sensor (optional)"
+        },
+        "data_description": {
+          "generic_inverter_switch": "Switch entity that turns your inverter or storage on and off. Any switch available in HA can be used here.",
+          "generic_output_sensor": "Optional: Sensor measuring current output power in watts. Improves excess power calculations."
         }
       },
       "system": {
@@ -176,27 +214,65 @@
         }
       },
       "solar_inverter": {
-        "title": "Solar & Inverter (OpenDTU)",
-        "description": "Solar array and OpenDTU inverter for battery discharge.",
+        "title": "Solar & Inverter",
+        "description": "Solar array and storage/inverter type for battery discharge.",
         "data": {
           "solar_power_sensor": "Solar Power Sensor(s) (W)",
           "balcony_power_sensor": "Balcony Power Plant Sensor (optional)",
-          "opendtu_turn_on_button": "OpenDTU: Turn On Button",
-          "opendtu_turn_off_button": "OpenDTU: Turn Off Button",
-          "opendtu_producing_sensor": "OpenDTU: Producing Binary Sensor",
-          "opendtu_output_sensor": "OpenDTU: Output Power Sensor (W)",
-          "opendtu_dpl_mode_select": "OpenDTU: DPL Mode Entity (optional)",
-          "max_inverter_power_w": "Maximum Inverter Output (W)"
+          "max_inverter_power_w": "Maximum Inverter Output (W)",
+          "inverter_profile": "Storage / Inverter Type"
         },
         "data_description": {
           "solar_power_sensor": "All sensors measuring current solar production in watts. Select multiple for multiple strings/inverters.",
           "balcony_power_sensor": "Optional: Sensor for a plug-in balcony power plant measured separately.",
-          "opendtu_turn_on_button": "Button entity that turns the OpenDTU inverter on (starts battery discharge).",
-          "opendtu_turn_off_button": "Button entity that turns the OpenDTU inverter off (stops battery discharge).",
+          "max_inverter_power_w": "Maximum allowed output of the inverter in watts (e.g. 800 W legal limit in Germany).",
+          "inverter_profile": "Choose your device type: OpenDTU/Hoymiles, an all-in-one powerstation (EcoFlow, Anker, Bluetti...) or a generic switch."
+        }
+      },
+      "inverter_opendtu": {
+        "title": "OpenDTU / Hoymiles Configuration",
+        "description": "OpenDTU inverter for battery discharge.",
+        "data": {
+          "opendtu_turn_on_button": "Turn On Button",
+          "opendtu_turn_off_button": "Turn Off Button",
+          "opendtu_producing_sensor": "Producing Binary Sensor",
+          "opendtu_output_sensor": "Output Power Sensor (W)",
+          "opendtu_dpl_mode_select": "DPL Mode Entity (optional)"
+        },
+        "data_description": {
+          "opendtu_turn_on_button": "Button entity that turns the inverter on (starts battery discharge).",
+          "opendtu_turn_off_button": "Button entity that turns the inverter off (stops battery discharge).",
           "opendtu_producing_sensor": "Binary sensor indicating whether the inverter is currently producing power.",
-          "opendtu_output_sensor": "Sensor reporting the current output power of the OpenDTU inverter in watts.",
-          "opendtu_dpl_mode_select": "Optional: Entity to control the 'Dynamic Power Limiter' mode in OpenDTU for smooth throttling.",
-          "max_inverter_power_w": "Maximum allowed output of the inverter in watts (e.g. 800 W legal limit in Germany)."
+          "opendtu_output_sensor": "Sensor reporting the current output power of the inverter in watts.",
+          "opendtu_dpl_mode_select": "Optional: Entity to control the 'Dynamic Power Limiter' mode in OpenDTU for smooth throttling."
+        }
+      },
+      "inverter_powerstation": {
+        "title": "Powerstation (EcoFlow / Anker / Bluetti ...)",
+        "description": "All-in-one powerstation for battery discharge.",
+        "data": {
+          "ps_discharge_power_entity": "Discharge Power Entity (number.*)",
+          "ps_charge_power_entity": "Charge Power Entity (number.*, optional)",
+          "ps_ac_output_switch": "AC Output Switch (optional)",
+          "ps_output_sensor": "Output Power Sensor (optional)"
+        },
+        "data_description": {
+          "ps_discharge_power_entity": "Number entity controlling maximum discharge power in watts.",
+          "ps_charge_power_entity": "Optional: Number entity for maximum charge power.",
+          "ps_ac_output_switch": "Optional: Switch enabling/disabling the AC output of the powerstation.",
+          "ps_output_sensor": "Optional: Sensor measuring current output power in watts."
+        }
+      },
+      "inverter_generic": {
+        "title": "Generic Switch",
+        "description": "Control your inverter or storage via a simple on/off switch.",
+        "data": {
+          "generic_inverter_switch": "Inverter Switch (switch.*)",
+          "generic_output_sensor": "Output Power Sensor (optional)"
+        },
+        "data_description": {
+          "generic_inverter_switch": "Switch entity that turns your inverter or storage on and off.",
+          "generic_output_sensor": "Optional: Sensor measuring current output power in watts."
         }
       },
       "system": {

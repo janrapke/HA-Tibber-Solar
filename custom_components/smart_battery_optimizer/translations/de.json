@@ -38,27 +38,65 @@
         }
       },
       "solar_inverter": {
-        "title": "Solar & Wechselrichter (OpenDTU)",
-        "description": "Verbinde den Optimizer mit deiner Solaranlage und dem OpenDTU-Wechselrichter. OpenDTU steuert, ob der Wechselrichter Batteriestrom ins Haus einspeist.",
+        "title": "Solar & Wechselrichter",
+        "description": "Verbinde den Optimizer mit deiner Solaranlage. Wähle danach welche Art von Speicher/Wechselrichter du hast.",
         "data": {
           "solar_power_sensor": "Solarleistungs-Sensoren (W)",
           "balcony_power_sensor": "Balkonkraftwerk-Sensor (optional)",
-          "opendtu_turn_on_button": "OpenDTU: Einschalten-Button",
-          "opendtu_turn_off_button": "OpenDTU: Ausschalten-Button",
-          "opendtu_producing_sensor": "OpenDTU: Produziert-Sensor (Binär)",
-          "opendtu_output_sensor": "OpenDTU: Ausgangsleistungs-Sensor (W)",
-          "opendtu_dpl_mode_select": "OpenDTU: DPL-Modus-Entity (optional)",
-          "max_inverter_power_w": "Maximale Wechselrichterleistung (W)"
+          "max_inverter_power_w": "Maximale Wechselrichterleistung (W)",
+          "inverter_profile": "Speicher-/Wechselrichter-Typ"
         },
         "data_description": {
           "solar_power_sensor": "Alle Sensoren, die aktuelle Solarproduktion in Watt messen. Mehrere Sensoren wählen wenn mehrere Strings/Wechselrichter vorhanden sind.",
           "balcony_power_sensor": "Optional: Sensor eines Balkonkraftwerks (Stecker-PV ohne Speicheranbindung), das separat gemessen wird.",
-          "opendtu_turn_on_button": "Button-Entity in Home Assistant, die den OpenDTU-Wechselrichter einschaltet (Batterieentladung startet).",
-          "opendtu_turn_off_button": "Button-Entity in Home Assistant, die den OpenDTU-Wechselrichter ausschaltet (Batterieentladung stoppt).",
+          "max_inverter_power_w": "Maximale erlaubte Ausgangsleistung des Wechselrichters in Watt. In Deutschland gesetzlich auf 800 W für Stecker-PV begrenzt.",
+          "inverter_profile": "Wähle deinen Gerätetyp: OpenDTU/Hoymiles, eine All-in-One Powerstation (EcoFlow, Anker, Bluetti...) oder einen generischen Schalter."
+        }
+      },
+      "inverter_opendtu": {
+        "title": "OpenDTU / Hoymiles Konfiguration",
+        "description": "Verbinde den Optimizer mit deinem OpenDTU-Wechselrichter.",
+        "data": {
+          "opendtu_turn_on_button": "Einschalten-Button",
+          "opendtu_turn_off_button": "Ausschalten-Button",
+          "opendtu_producing_sensor": "Produziert-Sensor (Binär)",
+          "opendtu_output_sensor": "Ausgangsleistungs-Sensor (W)",
+          "opendtu_dpl_mode_select": "DPL-Modus-Entity (optional)"
+        },
+        "data_description": {
+          "opendtu_turn_on_button": "Button-Entity in Home Assistant, die den Wechselrichter einschaltet (Batterieentladung startet).",
+          "opendtu_turn_off_button": "Button-Entity in Home Assistant, die den Wechselrichter ausschaltet (Batterieentladung stoppt).",
           "opendtu_producing_sensor": "Binärer Sensor, der anzeigt ob der Wechselrichter gerade aktiv Strom erzeugt (true = an, false = aus).",
-          "opendtu_output_sensor": "Sensor, der die aktuelle Ausgangsleistung des OpenDTU-Wechselrichters in Watt anzeigt.",
-          "opendtu_dpl_mode_select": "Optional: Entity zur Steuerung des 'Dynamic Power Limiter' in OpenDTU. Wenn gesetzt, wird der Wechselrichter stufenlos gedrosselt statt hart an/aus geschaltet.",
-          "max_inverter_power_w": "Maximale erlaubte Ausgangsleistung des Wechselrichters in Watt. In Deutschland gesetzlich auf 800 W für Stecker-PV begrenzt."
+          "opendtu_output_sensor": "Sensor, der die aktuelle Ausgangsleistung des Wechselrichters in Watt anzeigt.",
+          "opendtu_dpl_mode_select": "Optional: Entity zur Steuerung des 'Dynamic Power Limiter' in OpenDTU. Wenn gesetzt, wird der Wechselrichter stufenlos gedrosselt statt hart an/aus geschaltet."
+        }
+      },
+      "inverter_powerstation": {
+        "title": "Powerstation (EcoFlow / Anker / Bluetti ...)",
+        "description": "Konfiguriere deine All-in-One Powerstation. Der Optimizer steuert die Entladeleistung direkt über eine Number-Entity.",
+        "data": {
+          "ps_discharge_power_entity": "Entladeleistung-Entity (number.*)",
+          "ps_charge_power_entity": "Ladeleistung-Entity (number.*, optional)",
+          "ps_ac_output_switch": "AC-Ausgang Schalter (optional)",
+          "ps_output_sensor": "Ausgangsleistungs-Sensor (optional)"
+        },
+        "data_description": {
+          "ps_discharge_power_entity": "Number-Entity deiner Powerstation, die die maximale Entladeleistung in Watt steuert. Der Optimizer setzt diese auf 0 W (aus) oder auf die konfigurierte Maximalleistung (an).",
+          "ps_charge_power_entity": "Optional: Number-Entity für die maximale Ladeleistung. Wenn gesetzt, erhöht der Optimizer die Ladeleistung wenn die Batterie entladen werden soll.",
+          "ps_ac_output_switch": "Optional: Schalter der den AC-Ausgang der Powerstation aktiviert/deaktiviert (z. B. bei EcoFlow 'AC-Ausgang aktivieren').",
+          "ps_output_sensor": "Optional: Sensor der die aktuelle Ausgangsleistung in Watt misst. Verbessert die Überschuss-Berechnung."
+        }
+      },
+      "inverter_generic": {
+        "title": "Generischer Schalter",
+        "description": "Steuere deinen Wechselrichter oder Speicher über einen einfachen Ein/Aus-Schalter in Home Assistant.",
+        "data": {
+          "generic_inverter_switch": "Wechselrichter-Schalter (switch.*)",
+          "generic_output_sensor": "Ausgangsleistungs-Sensor (optional)"
+        },
+        "data_description": {
+          "generic_inverter_switch": "Switch-Entity die deinen Wechselrichter oder Speicher ein- und ausschaltet. Jeder in HA verfügbare Schalter kann hier verwendet werden.",
+          "generic_output_sensor": "Optional: Sensor der die aktuelle Ausgangsleistung in Watt misst. Verbessert die Überschuss-Berechnung."
         }
       },
       "system": {
@@ -176,27 +214,65 @@
         }
       },
       "solar_inverter": {
-        "title": "Solar & Wechselrichter (OpenDTU)",
-        "description": "Solaranlage und OpenDTU-Wechselrichter für die Batterieentladung.",
+        "title": "Solar & Wechselrichter",
+        "description": "Solaranlage und Speicher-/Wechselrichter-Typ für die Batterieentladung.",
         "data": {
           "solar_power_sensor": "Solarleistungs-Sensoren (W)",
           "balcony_power_sensor": "Balkonkraftwerk-Sensor (optional)",
-          "opendtu_turn_on_button": "OpenDTU: Einschalten-Button",
-          "opendtu_turn_off_button": "OpenDTU: Ausschalten-Button",
-          "opendtu_producing_sensor": "OpenDTU: Produziert-Sensor (Binär)",
-          "opendtu_output_sensor": "OpenDTU: Ausgangsleistungs-Sensor (W)",
-          "opendtu_dpl_mode_select": "OpenDTU: DPL-Modus-Entity (optional)",
-          "max_inverter_power_w": "Maximale Wechselrichterleistung (W)"
+          "max_inverter_power_w": "Maximale Wechselrichterleistung (W)",
+          "inverter_profile": "Speicher-/Wechselrichter-Typ"
         },
         "data_description": {
           "solar_power_sensor": "Alle Sensoren, die aktuelle Solarproduktion in Watt messen. Mehrere Sensoren wählen wenn mehrere Strings/Wechselrichter vorhanden sind.",
           "balcony_power_sensor": "Optional: Sensor eines Balkonkraftwerks (Stecker-PV ohne Speicheranbindung), das separat gemessen wird.",
-          "opendtu_turn_on_button": "Button-Entity in Home Assistant, die den OpenDTU-Wechselrichter einschaltet (Batterieentladung startet).",
-          "opendtu_turn_off_button": "Button-Entity in Home Assistant, die den OpenDTU-Wechselrichter ausschaltet (Batterieentladung stoppt).",
+          "max_inverter_power_w": "Maximale erlaubte Ausgangsleistung des Wechselrichters in Watt. In Deutschland gesetzlich auf 800 W für Stecker-PV begrenzt.",
+          "inverter_profile": "Wähle deinen Gerätetyp: OpenDTU/Hoymiles, eine All-in-One Powerstation (EcoFlow, Anker, Bluetti...) oder einen generischen Schalter."
+        }
+      },
+      "inverter_opendtu": {
+        "title": "OpenDTU / Hoymiles Konfiguration",
+        "description": "Verbinde den Optimizer mit deinem OpenDTU-Wechselrichter.",
+        "data": {
+          "opendtu_turn_on_button": "Einschalten-Button",
+          "opendtu_turn_off_button": "Ausschalten-Button",
+          "opendtu_producing_sensor": "Produziert-Sensor (Binär)",
+          "opendtu_output_sensor": "Ausgangsleistungs-Sensor (W)",
+          "opendtu_dpl_mode_select": "DPL-Modus-Entity (optional)"
+        },
+        "data_description": {
+          "opendtu_turn_on_button": "Button-Entity in Home Assistant, die den Wechselrichter einschaltet (Batterieentladung startet).",
+          "opendtu_turn_off_button": "Button-Entity in Home Assistant, die den Wechselrichter ausschaltet (Batterieentladung stoppt).",
           "opendtu_producing_sensor": "Binärer Sensor, der anzeigt ob der Wechselrichter gerade aktiv Strom erzeugt (true = an, false = aus).",
-          "opendtu_output_sensor": "Sensor, der die aktuelle Ausgangsleistung des OpenDTU-Wechselrichters in Watt anzeigt.",
-          "opendtu_dpl_mode_select": "Optional: Entity zur Steuerung des 'Dynamic Power Limiter' in OpenDTU. Wenn gesetzt, wird der Wechselrichter stufenlos gedrosselt statt hart an/aus geschaltet.",
-          "max_inverter_power_w": "Maximale erlaubte Ausgangsleistung des Wechselrichters in Watt. In Deutschland gesetzlich auf 800 W für Stecker-PV begrenzt."
+          "opendtu_output_sensor": "Sensor, der die aktuelle Ausgangsleistung des Wechselrichters in Watt anzeigt.",
+          "opendtu_dpl_mode_select": "Optional: Entity zur Steuerung des 'Dynamic Power Limiter' in OpenDTU. Wenn gesetzt, wird der Wechselrichter stufenlos gedrosselt statt hart an/aus geschaltet."
+        }
+      },
+      "inverter_powerstation": {
+        "title": "Powerstation (EcoFlow / Anker / Bluetti ...)",
+        "description": "Konfiguriere deine All-in-One Powerstation.",
+        "data": {
+          "ps_discharge_power_entity": "Entladeleistung-Entity (number.*)",
+          "ps_charge_power_entity": "Ladeleistung-Entity (number.*, optional)",
+          "ps_ac_output_switch": "AC-Ausgang Schalter (optional)",
+          "ps_output_sensor": "Ausgangsleistungs-Sensor (optional)"
+        },
+        "data_description": {
+          "ps_discharge_power_entity": "Number-Entity deiner Powerstation, die die maximale Entladeleistung in Watt steuert.",
+          "ps_charge_power_entity": "Optional: Number-Entity für die maximale Ladeleistung.",
+          "ps_ac_output_switch": "Optional: Schalter der den AC-Ausgang der Powerstation aktiviert/deaktiviert.",
+          "ps_output_sensor": "Optional: Sensor der die aktuelle Ausgangsleistung in Watt misst."
+        }
+      },
+      "inverter_generic": {
+        "title": "Generischer Schalter",
+        "description": "Steuere deinen Wechselrichter oder Speicher über einen einfachen Ein/Aus-Schalter.",
+        "data": {
+          "generic_inverter_switch": "Wechselrichter-Schalter (switch.*)",
+          "generic_output_sensor": "Ausgangsleistungs-Sensor (optional)"
+        },
+        "data_description": {
+          "generic_inverter_switch": "Switch-Entity die deinen Wechselrichter oder Speicher ein- und ausschaltet.",
+          "generic_output_sensor": "Optional: Sensor der die aktuelle Ausgangsleistung in Watt misst."
         }
       },
       "system": {

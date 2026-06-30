@@ -47,6 +47,16 @@ from .const import (
     CLIMATE_TYPE_COOLING,
     CLIMATE_TYPE_HEAT_PUMP,
     CLIMATE_LABEL_TO_INTERNAL,
+    CONF_INVERTER_PROFILE,
+    INVERTER_PROFILE_OPENDTU,
+    INVERTER_PROFILE_POWERSTATION,
+    INVERTER_PROFILE_GENERIC,
+    CONF_PS_DISCHARGE_POWER_ENTITY,
+    CONF_PS_CHARGE_POWER_ENTITY,
+    CONF_PS_AC_OUTPUT_SWITCH,
+    CONF_PS_OUTPUT_SENSOR,
+    CONF_GENERIC_INVERTER_SWITCH,
+    CONF_GENERIC_OUTPUT_SENSOR,
 )
 
 
@@ -86,6 +96,8 @@ def _schema_battery(d: dict) -> vol.Schema:
 
 
 def _schema_solar_inverter(d: dict) -> vol.Schema:
+    """Gemeinsame Solar-Felder + Profil-Auswahl."""
+    current_profile = d.get(CONF_INVERTER_PROFILE, INVERTER_PROFILE_OPENDTU)
     return vol.Schema({
         vol.Required(CONF_SOLAR_POWER_SENSOR, default=_get(CONF_SOLAR_POWER_SENSOR, d)): selector.EntitySelector(
             selector.EntitySelectorConfig(domain="sensor", device_class="power", multiple=True)
@@ -93,6 +105,19 @@ def _schema_solar_inverter(d: dict) -> vol.Schema:
         vol.Optional(CONF_BALCONY_POWER_SENSOR, default=_get(CONF_BALCONY_POWER_SENSOR, d)): selector.EntitySelector(
             selector.EntitySelectorConfig(domain="sensor", device_class="power")
         ),
+        vol.Required(CONF_MAX_INVERTER_POWER_W, default=_get(CONF_MAX_INVERTER_POWER_W, d, 800)): int,
+        vol.Required(CONF_INVERTER_PROFILE, default=current_profile): selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=[INVERTER_PROFILE_OPENDTU, INVERTER_PROFILE_POWERSTATION, INVERTER_PROFILE_GENERIC],
+                translation_key="inverter_profile",
+                mode=selector.SelectSelectorMode.DROPDOWN,
+            )
+        ),
+    })
+
+
+def _schema_inverter_opendtu(d: dict) -> vol.Schema:
+    return vol.Schema({
         vol.Required(CONF_OPENDTU_TURN_ON_BUTTON, default=_get(CONF_OPENDTU_TURN_ON_BUTTON, d)): selector.EntitySelector(
             selector.EntitySelectorConfig(domain="button")
         ),
@@ -108,7 +133,34 @@ def _schema_solar_inverter(d: dict) -> vol.Schema:
         vol.Optional(CONF_OPENDTU_DPL_MODE_SELECT, default=_get(CONF_OPENDTU_DPL_MODE_SELECT, d)): selector.EntitySelector(
             selector.EntitySelectorConfig(domain=["select", "number", "input_number", "input_select"])
         ),
-        vol.Required(CONF_MAX_INVERTER_POWER_W, default=_get(CONF_MAX_INVERTER_POWER_W, d, 800)): int,
+    })
+
+
+def _schema_inverter_powerstation(d: dict) -> vol.Schema:
+    return vol.Schema({
+        vol.Required(CONF_PS_DISCHARGE_POWER_ENTITY, default=_get(CONF_PS_DISCHARGE_POWER_ENTITY, d)): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain=["number", "input_number"])
+        ),
+        vol.Optional(CONF_PS_CHARGE_POWER_ENTITY, default=_get(CONF_PS_CHARGE_POWER_ENTITY, d)): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain=["number", "input_number"])
+        ),
+        vol.Optional(CONF_PS_AC_OUTPUT_SWITCH, default=_get(CONF_PS_AC_OUTPUT_SWITCH, d)): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="switch")
+        ),
+        vol.Optional(CONF_PS_OUTPUT_SENSOR, default=_get(CONF_PS_OUTPUT_SENSOR, d)): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="sensor", device_class="power")
+        ),
+    })
+
+
+def _schema_inverter_generic(d: dict) -> vol.Schema:
+    return vol.Schema({
+        vol.Required(CONF_GENERIC_INVERTER_SWITCH, default=_get(CONF_GENERIC_INVERTER_SWITCH, d)): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="switch")
+        ),
+        vol.Optional(CONF_GENERIC_OUTPUT_SENSOR, default=_get(CONF_GENERIC_OUTPUT_SENSOR, d)): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="sensor", device_class="power")
+        ),
     })
 
 
@@ -189,8 +241,31 @@ class SmartBatteryOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_solar_inverter(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         if user_input is not None:
             self._data.update(user_input)
-            return await self.async_step_system()
+            profile = user_input.get(CONF_INVERTER_PROFILE, INVERTER_PROFILE_OPENDTU)
+            if profile == INVERTER_PROFILE_POWERSTATION:
+                return await self.async_step_inverter_powerstation()
+            if profile == INVERTER_PROFILE_GENERIC:
+                return await self.async_step_inverter_generic()
+            return await self.async_step_inverter_opendtu()
         return self.async_show_form(step_id="solar_inverter", data_schema=_schema_solar_inverter(self._data))
+
+    async def async_step_inverter_opendtu(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        if user_input is not None:
+            self._data.update(user_input)
+            return await self.async_step_system()
+        return self.async_show_form(step_id="inverter_opendtu", data_schema=_schema_inverter_opendtu(self._data))
+
+    async def async_step_inverter_powerstation(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        if user_input is not None:
+            self._data.update(user_input)
+            return await self.async_step_system()
+        return self.async_show_form(step_id="inverter_powerstation", data_schema=_schema_inverter_powerstation(self._data))
+
+    async def async_step_inverter_generic(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        if user_input is not None:
+            self._data.update(user_input)
+            return await self.async_step_system()
+        return self.async_show_form(step_id="inverter_generic", data_schema=_schema_inverter_generic(self._data))
 
     async def async_step_system(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         if user_input is not None:
@@ -245,8 +320,32 @@ class SmartBatteryOptimizerOptionsFlowHandler(config_entries.OptionsFlow):
 
     async def async_step_solar_inverter(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         if user_input is not None:
-            return self._save_section(user_input)
+            self._pending = user_input
+            profile = user_input.get(CONF_INVERTER_PROFILE, INVERTER_PROFILE_OPENDTU)
+            if profile == INVERTER_PROFILE_POWERSTATION:
+                return await self.async_step_inverter_powerstation()
+            if profile == INVERTER_PROFILE_GENERIC:
+                return await self.async_step_inverter_generic()
+            return await self.async_step_inverter_opendtu()
         return self.async_show_form(step_id="solar_inverter", data_schema=_schema_solar_inverter(self._current()))
+
+    async def async_step_inverter_opendtu(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        if user_input is not None:
+            merged = {**getattr(self, "_pending", {}), **user_input}
+            return self._save_section(merged)
+        return self.async_show_form(step_id="inverter_opendtu", data_schema=_schema_inverter_opendtu(self._current()))
+
+    async def async_step_inverter_powerstation(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        if user_input is not None:
+            merged = {**getattr(self, "_pending", {}), **user_input}
+            return self._save_section(merged)
+        return self.async_show_form(step_id="inverter_powerstation", data_schema=_schema_inverter_powerstation(self._current()))
+
+    async def async_step_inverter_generic(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        if user_input is not None:
+            merged = {**getattr(self, "_pending", {}), **user_input}
+            return self._save_section(merged)
+        return self.async_show_form(step_id="inverter_generic", data_schema=_schema_inverter_generic(self._current()))
 
     async def async_step_system(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         if user_input is not None:
