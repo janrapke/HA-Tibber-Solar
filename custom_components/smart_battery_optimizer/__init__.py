@@ -3,6 +3,7 @@ import logging
 import pathlib
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceEntry
 
@@ -36,18 +37,21 @@ async def _register_static_paths(hass: HomeAssistant) -> None:
 
 
 async def _ensure_lovelace_resources(hass: HomeAssistant) -> None:
-    """Register card JS as Lovelace resources (like HACS — survives restarts, reliable)."""
+    """Register card JS as Lovelace resources using HA's own collection."""
     try:
         from homeassistant.components.lovelace.resources import ResourceStorageCollection
 
-        # Reuse HA's already-loaded collection if available (avoids duplicate store handles)
-        resources = hass.data.get("lovelace", {}).get("resources")
+        # Use HA's live collection — hass.data["lovelace"] is a LovelaceData namedtuple
+        # with a .resources attribute set by the lovelace component on startup.
+        lovelace_data = hass.data.get("lovelace")
+        resources = getattr(lovelace_data, "resources", None)
+
         if not isinstance(resources, ResourceStorageCollection):
-            try:
-                resources = ResourceStorageCollection(hass, "core")
-            except TypeError:
-                resources = ResourceStorageCollection(hass)
-            await resources.async_load()
+            _LOGGER.warning(
+                "Lovelace ResourceStorageCollection not found in hass.data['lovelace']. "
+                "Cards may need to be added manually in Settings → Dashboards → Resources."
+            )
+            return
 
         existing = {item["url"] for item in resources.async_items()}
         for url in _CARD_RESOURCE_URLS:
@@ -57,30 +61,29 @@ async def _ensure_lovelace_resources(hass: HomeAssistant) -> None:
             else:
                 _LOGGER.debug("Lovelace resource already present: %s", url)
     except Exception as err:
-        _LOGGER.warning(
-            "Auto-registration of Lovelace resources failed (%s). "
-            "Falling back to add_extra_js_url. If cards still don't load, add manually in "
-            "Settings → Dashboards → Resources (type JavaScript-Modul): %s",
-            err,
-            ", ".join(_CARD_RESOURCE_URLS),
-        )
-        try:
-            from homeassistant.components.frontend import add_extra_js_url
-            for url in _CARD_RESOURCE_URLS:
-                add_extra_js_url(hass, url)
-        except Exception:
-            pass
+        _LOGGER.warning("Lovelace resource registration failed: %s", err)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Smart Battery Optimizer from a config entry."""
     hass.data.setdefault(DOMAIN, {})
 
-    # Register custom Lovelace cards (once per HA instance, not once per config entry reload)
-    if not hass.data[DOMAIN].get("_cards_registered"):
+    # Register static paths on first setup (survives entry reloads)
+    if not hass.data[DOMAIN].get("_paths_registered"):
         await _register_static_paths(hass)
-        await _ensure_lovelace_resources(hass)
-        hass.data[DOMAIN]["_cards_registered"] = True
+        hass.data[DOMAIN]["_paths_registered"] = True
+
+    # Register Lovelace card resources once HA is fully started so lovelace is ready.
+    # If HA is already running (e.g. integration reload), call immediately.
+    if not hass.data[DOMAIN].get("_cards_registered"):
+        async def _register_cards(_event=None) -> None:
+            await _ensure_lovelace_resources(hass)
+            hass.data[DOMAIN]["_cards_registered"] = True
+
+        if hass.is_running:
+            await _register_cards()
+        else:
+            hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _register_cards)
 
     # Store config entry data
     hass.data[DOMAIN][entry.entry_id] = {}
