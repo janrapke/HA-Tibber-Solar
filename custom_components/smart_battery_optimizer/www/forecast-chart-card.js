@@ -300,7 +300,7 @@ customElements.define("forecast-chart-card", ForecastChartCard);
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "forecast-chart-card",
-  name: "Forecast Chart Card",
+  name: "Smart Battery: Prognose-Diagramm",
   description: "Batterie & Dispatch Prognose – Akkulevel + Tibber-Preis + Aktions-Farbkodierung",
   preview: true,
 });
