@@ -23,6 +23,11 @@ Ein Custom Component für Home Assistant, das deinen Batteriespeicher intelligen
   - [Schritt 6: Netzladegerät (optional)](#schritt-6-netzladegerät-optional)
 - [Wie funktioniert die Optimierung?](#wie-funktioniert-die-optimierung)
 - [Alle Steuerungsentitäten im Überblick](#alle-steuerungsentitäten-im-überblick)
+- [Dashboard-Kacheln einrichten](#dashboard-kacheln-einrichten)
+  - [Kachel 1: Batterie & Dispatch Prognose (ApexCharts)](#kachel-1-batterie--dispatch-prognose-apexcharts)
+  - [Kachel 2: Battery Forecast Card](#kachel-2-battery-forecast-card)
+  - [Kachel 3: Appliance Card (Gerätesteuerung)](#kachel-3-appliance-card-gerätesteuerung)
+  - [Kachel 4: Savings Card (Ersparnis-Statistik)](#kachel-4-savings-card-ersparnis-statistik)
 - [Einstellungen nachträglich ändern](#einstellungen-nachträglich-ändern)
 - [Tipps für den Alltag](#tipps-für-den-alltag)
 - [Fehlerbehebung](#fehlerbehebung)
@@ -298,27 +303,75 @@ Diese Werte beschreiben dein Energiesystem und fließen in alle Vorhersage- und 
 
 ### Schritt 5: Überschuss-Verbraucher (optional)
 
-Wenn die Batterie voll ist und die Sonne noch immer mehr produziert als du verbrauchst, würde der Überschuss ins Netz eingespeist — oft zu schlechten Einspeisevergütungen. Stattdessen kannst du Geräte definieren die dann automatisch eingeschaltet werden.
+Wenn Solarstrom produziert wird der weder direkt verbraucht noch in der Batterie gespeichert werden kann, würde er ins Netz eingespeist — oft zu sehr schlechten Vergütungen (in Deutschland häufig unter 10 ct/kWh). Stattdessen kannst du Geräte definieren die der Optimizer dann automatisch einschaltet um den Überschuss selbst zu nutzen.
 
-**Drei Prioritätsstufen:**
+Das System arbeitet mit **drei Prioritätsstufen** und einer separaten Kategorie für den frühen Morgen.
 
-**Primäre Verbraucher (höchste Priorität)**
-Werden als erstes eingeschaltet wenn Solarüberschuss vorhanden ist. Geeignet für: Waschmaschine, Spülmaschine, Warmwasserbereiter, Pool-Pumpe.
+---
 
-**Sekundäre Verbraucher (zweite Priorität)**
-Werden nur eingeschaltet wenn nach den primären Verbrauchern noch Überschuss übrig ist. Geeignet für: Infrarotheizung, Luftentfeuchter, Lüftungsanlage.
+#### Primäre Verbraucher (höchste Priorität)
 
-**Frühe Überschuss-Verbraucher (Vormittag)**
-Eine besondere Kategorie: Diese Geräte werden schon früh morgens eingeschaltet, noch bevor voller Solarüberschuss vorhanden ist — solange die Batterie über einem Mindeststand liegt. Geeignet für: Warmwasserbereiter der um 7 Uhr morgens laufen soll, Gefrierschrank der nachts geladen wurde.
+Das sind die Geräte die **zuerst** eingeschaltet werden sobald Solarüberschuss erkannt wird. Sie haben Vorrang vor allem anderen.
 
-| Feld | Beschreibung |
-|---|---|
-| **Primäre Verbraucher** | Liste von `switch.*`-Entities, höchste Priorität |
-| **Sekundäre Verbraucher** | Liste von `switch.*`-Entities, zweite Priorität |
-| **Frühe Überschuss-Verbraucher** | Liste von `switch.*`-Entities, morgens bei Akku > Mindeststand |
-| **Erwarteter Verbrauch früher Verbraucher (W)** | Wieviel Watt die frühen Verbraucher typischerweise ziehen |
-| **Mindest-Batteriestand für frühe Verbraucher (%)** | z. B. `30` — Schutz vor zu starker Entladung am Morgen |
-| **Mindestlaufzeit pro Einschaltvorgang (min)** | z. B. `10` — verhindert nervöses Ein/Ausschalten alle paar Minuten |
+**Typische Kandidaten:**
+- Warmwasserbereiter / Boiler (großer Verbraucher, ideal für Überschuss)
+- Waschmaschine (wenn du sie morgens vorbereitest und sie dann automatisch starten lassen willst)
+- Spülmaschine
+- Pool-Pumpe oder Pool-Heizung
+- Ladestation für E-Bike oder Rasenmähroboter
+
+**Wie es funktioniert:** Sobald der Optimizer mehr Solarproduktion als Hausverbrauch + Batterieladeleistung sieht, schaltet er die primären Verbraucher ein. Er schaltet sie wieder aus wenn der Überschuss wegfällt (z. B. Wolken) — aber erst nach der konfigurierten Mindestlaufzeit.
+
+---
+
+#### Sekundäre Verbraucher (zweite Priorität)
+
+Diese Geräte werden **nur dann** eingeschaltet wenn nach dem Einschalten aller primären Verbraucher noch immer Überschuss übrig ist.
+
+**Typische Kandidaten:**
+- Infrarotheizung im Badezimmer
+- Luftentfeuchter im Keller
+- Lüftungsanlage auf höherer Stufe
+- Zusätzliche Pool-Heizung
+
+**Wann sinnvoll:** Wenn du z. B. einen 2000-W-Boiler als primären Verbraucher hast und an sehr sonnigen Tagen noch 1000 W zusätzlicher Überschuss anfällt, kannst du diesen mit einem sekundären Verbraucher nutzen.
+
+---
+
+#### Frühe Überschuss-Verbraucher (Vormittag)
+
+Dies ist eine besondere Kategorie die **unabhängig vom aktuellen Solarüberschuss** funktioniert. Diese Geräte werden schon **früh morgens** eingeschaltet — noch bevor voller Solarüberschuss vorhanden ist — solange die Batterie über einem Mindeststand liegt.
+
+**Idee dahinter:** An einem sonnigen Tag weißt du morgens um 7 Uhr bereits dass du bis mittag mehr produzieren wirst als du brauchst. Du könntest den Boiler jetzt schon vorwärmen, obwohl die Sonne noch nicht voll scheint — weil du weißt dass die Batterie das kurz kompensieren kann und sich später wieder füllt.
+
+**Typische Kandidaten:**
+- Warmwasserbereiter / Boiler (morgens vorwärmen bevor Duschen)
+- Fußbodenheizung im Bad
+- Geräte die eine Vorlaufzeit brauchen
+
+**Konfigurationsfelder für frühe Verbraucher:**
+
+| Feld | Empfehlung | Erklärung |
+|---|---|---|
+| **Erwarteter Verbrauch (W)** | Tatsächliche Wattzahl des Geräts | Wieviel die frühen Verbraucher zusammen ziehen — damit der Optimizer abschätzen kann ob genug Solar kommen wird |
+| **Mindest-Batteriestand (%)** | `25–40 %` | Die Batterie muss mindestens diesen Stand haben bevor frühe Verbraucher eingeschaltet werden. Schutz vor Entladen bei trübem Morgen |
+
+---
+
+#### Alle konfigurierbaren Felder für Überschuss-Verbraucher
+
+| Feld | Beschreibung | Empfehlung |
+|---|---|---|
+| **Primäre Verbraucher** | `switch.*`-Entities, höchste Priorität | Geräte mit hohem Verbrauch die viel Überschuss aufnehmen können |
+| **Sekundäre Verbraucher** | `switch.*`-Entities, zweite Priorität | Geräte die nur bei sehr viel Überschuss laufen sollen |
+| **Frühe Überschuss-Verbraucher** | `switch.*`-Entities, morgens | Geräte die Vorlaufzeit brauchen |
+| **Erwarteter Verbrauch früher Verbraucher (W)** | Wattzahl der frühen Geräte | z. B. `2000` für einen 2-kW-Boiler |
+| **Mindest-Batteriestand für frühe Verbraucher (%)** | Prozent | z. B. `30` — Schutz bei trübem Morgen |
+| **Mindestlaufzeit pro Einschaltvorgang (min)** | Minuten | z. B. `10`–`20` — verhindert nervöses Ein-/Ausschalten bei wechselhafter Bewölkung |
+
+> **Tipp:** Geräte die in HA als Switch vorhanden sind können direkt eingetragen werden. Wenn dein Boiler keinen Switch hat, lässt er sich oft über einen Shelly oder Sonoff nachrüsten — dann erscheint er als `switch.*` in HA.
+
+> **Tipp Mindestlaufzeit:** Setze diesen Wert nicht zu niedrig. Bei 5 Minuten könnte eine kurze Wolke dazu führen dass der Boiler ständig ein- und ausgeschaltet wird. 10–15 Minuten sind ein guter Kompromiss zwischen Reaktionsgeschwindigkeit und Stabilität.
 
 ---
 
@@ -397,6 +450,161 @@ Diese Entities erlauben dir Parameter direkt in HA anzupassen ohne den Setup-Ass
 | **Preis-Schwellwert Entladen (ct/kWh)** | Number | Über diesem Preis entlädt der Optimizer die Batterie |
 | **Mindest-Intervall Umschaltung (min)** | Number | Wie oft maximal umgeschaltet werden darf — verhindert Relais-Verschleiß |
 | **Überschuss: Einschalten ab (%)** | Number | Ab welchem Solarüberschuss primäre Verbraucher eingeschaltet werden |
+
+---
+
+## Dashboard-Kacheln einrichten
+
+Der Smart Battery Optimizer bringt **vier Dashboard-Kacheln** mit die dir auf einen Blick zeigen was gerade passiert, was geplant ist und wie viel du gespart hast. Alle Kacheln werden automatisch mit der Integration installiert — du musst sie nur noch in dein Dashboard einbauen.
+
+---
+
+### Kachel 1: Batterie & Dispatch Prognose (ApexCharts)
+
+Diese Kachel ist die **Hauptansicht** des Optimizers. Sie zeigt in einem Zeitdiagramm:
+
+- Den **aktuellen und geplanten Batteriestand** als Kurve (linke Y-Achse, %)
+- Den **Tibber-Strompreis** als Kurve (rechte Y-Achse, ct/kWh)
+- Die **geplante Aktion** für jede Stunde als farbigen Hintergrund
+
+**Farblegende der Aktionen:**
+
+| Farbe | Kürzel | Bedeutung |
+|---|---|---|
+| 🟢 Grün | DIS | Dispatch aktiv — Batterie entlädt (teuerste Stunden) |
+| 🔴 Rot | SAV | Akku sparen — Wechselrichter aus (günstige Stunden) |
+| 🟠 Orange | OVF | Überschussvermeidung — Batterie fast voll |
+| 🔵 Blau | LAD | Netzladen — Strom ist sehr günstig |
+| 🟡 Hellgrün | FUL | Batterie voll |
+| 🟣 Lila | NEG | Negativpreis — Wechselrichter bleibt aus |
+| ⬛ Grau | MIN | Batterie am Minimum |
+| 🩵 Cyan | PRE | Laderaum-Vorbereitung — Nacht-Entladung vor sonnigem Tag |
+
+**Voraussetzung:** Die Kachel basiert auf `custom:apexcharts-card` das du zuerst via HACS installieren musst:
+HACS → Frontend → „ApexCharts Card" suchen → Installieren → HA neu laden.
+
+**Installation der Kachel:**
+
+1. Die Datei `dashboard_card.yaml` aus diesem Repository öffnen
+2. Die zwei markierten Zeilen anpassen:
+   ```yaml
+   entity: sensor.DEIN_AKKU_SENSOR    # <-- z.B. sensor.battery_soc
+   entity: sensor.DEIN_PLAN_SENSOR    # <-- z.B. sensor.smart_battery_optimizer_tagesplan_vorhersage
+   ```
+3. In HA ein Dashboard öffnen → Bearbeiten → Karte hinzufügen → **„Manuell"** wählen
+4. Den angepassten YAML-Code einfügen → Speichern
+
+> **Tipp:** Den genauen Namen des Tagesplan-Sensors findest du in HA unter **Einstellungen → Geräte & Dienste → Smart Battery Optimizer → Entities** und suchst nach einer Entity die „Tagesplan" oder „hourly_plan" im Namen hat.
+
+---
+
+### Kachel 2: Battery Forecast Card
+
+Diese Kachel ist die **kompakte Übersichts-Kachel** und zeigt in einer einfachen, übersichtlichen Darstellung:
+
+- Den aktuellen Batteriestand als Balkengrafik
+- Die geplanten Aktionen für die nächsten Stunden als farbige Timeline
+- Den aktuellen Strompreis und Betriebsmodus
+
+Sie eignet sich gut für die **Hauptübersicht** deines Dashboards weil sie wenig Platz braucht aber alle wichtigen Infos auf einen Blick zeigt.
+
+**Installation:**
+
+Die Kachel wird automatisch als Lovelace-Ressource registriert wenn die Integration installiert ist. Karte hinzufügen → **„Benutzerdefiniert"** → `custom:battery-forecast-card` auswählen.
+
+Minimale Konfiguration:
+```yaml
+type: custom:battery-forecast-card
+entity: sensor.smart_battery_optimizer_tagesplan_vorhersage
+battery_entity: sensor.dein_batteriestand_sensor
+```
+
+---
+
+### Kachel 3: Appliance Card (Gerätesteuerung)
+
+Die Appliance Card ist eine **interaktive Steuerkarte** speziell für die Überschuss-Verbraucher. Sie zeigt alle konfigurierten Geräte auf einen Blick und erlaubt es sie manuell zu steuern.
+
+**Was die Karte zeigt:**
+- Alle primären, sekundären und frühen Verbraucher in einer Liste
+- Ob jedes Gerät gerade automatisch (vom Optimizer) oder manuell gesteuert wird
+- Den aktuellen Schaltzustand jedes Geräts
+- Einen visuellen Editor zum Bearbeiten der Gerätezuordnung direkt aus dem Dashboard
+
+**Warum eine eigene Karte?** Die Standard-HA-Schalter zeigen nur Ein/Aus. Die Appliance Card zeigt zusätzlich ob der Optimizer das Gerät gesteuert hat oder ob du manuell eingegriffen hast — das vermeidet Verwirrung wenn ein Gerät unerwwartet ein oder aus ist.
+
+**Installation:**
+
+Wird automatisch als Ressource registriert. Karte hinzufügen → **„Benutzerdefiniert"** → `custom:appliance-card`.
+
+Minimale Konfiguration:
+```yaml
+type: custom:appliance-card
+entity: sensor.smart_battery_optimizer_status
+```
+
+---
+
+### Kachel 4: Savings Card (Ersparnis-Statistik)
+
+Die Savings Card zeigt dir **wie viel Geld du durch den Optimizer gespart hast** — aufgeteilt in verschiedene Zeiträume.
+
+**Was die Karte anzeigt:**
+
+- **Heute**: Ersparnis am heutigen Tag
+- **7 Tage**: Ersparnis der letzten Woche
+- **30 Tage**: Ersparnis des letzten Monats
+- **Gesamt**: Gesamtersparnis seit Inbetriebnahme
+
+Die Berechnung basiert auf dem Vergleich: Was hat der Strom mit Optimizer gekostet vs. was hätte er ohne Optimizer gekostet (immer zum aktuellen Tibber-Preis kaufen).
+
+**Installation:**
+
+Wird automatisch als Ressource registriert. Karte hinzufügen → **„Benutzerdefiniert"** → `custom:savings-card`.
+
+Minimale Konfiguration:
+```yaml
+type: custom:savings-card
+entity: sensor.smart_battery_optimizer_ersparnis
+```
+
+---
+
+### Komplettes Dashboard-Beispiel
+
+So könnte ein vollständiges Dashboard aussehen:
+
+```yaml
+title: Energie
+views:
+  - title: Batterie
+    cards:
+      # Hauptkarte: Prognose-Chart
+      - type: custom:battery-forecast-card
+        entity: sensor.smart_battery_optimizer_tagesplan_vorhersage
+        battery_entity: sensor.dein_batteriestand_sensor
+
+      # Ersparnis-Statistik
+      - type: custom:savings-card
+        entity: sensor.smart_battery_optimizer_ersparnis
+
+      # Gerätesteuerung
+      - type: custom:appliance-card
+        entity: sensor.smart_battery_optimizer_status
+
+      # Hauptschalter als einfache Entitätskarte
+      - type: entities
+        title: Optimizer Steuerung
+        entities:
+          - entity: switch.smart_battery_optimizer_aktiv
+          - entity: switch.smart_battery_optimizer_ueberschuss_automatik
+          - entity: switch.smart_battery_optimizer_netzladen
+          - entity: switch.smart_battery_optimizer_laderaum_vorbereiten
+          - entity: sensor.smart_battery_optimizer_betriebsmodus
+
+      # Detaillierter ApexCharts-Chart (braucht apexcharts-card aus HACS)
+      # → Inhalt aus dashboard_card.yaml einfügen
+```
 
 ---
 
