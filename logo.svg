@@ -1,0 +1,86 @@
+<svg width="100%" viewBox="0 0 680 340" role="img" xmlns="http://www.w3.org/2000/svg">
+  <title>Smart Battery Optimizer Logo</title>
+  <desc>Logo showing a battery with solar rays and a lightning bolt, representing smart energy optimization</desc>
+  <style>
+    @media (prefers-color-scheme: dark) {
+      .bg-main { fill: #0f1117; }
+      .ring-outer { stroke: #1e2640; }
+      .ring-inner { stroke: #2a3560; }
+      .wordmark { fill: #e8eaf6; }
+      .tagline { fill: #7986cb; }
+      .batt-body { fill: #1a2340; stroke: #3949ab; }
+      .batt-pole { fill: #3949ab; }
+      .batt-fill-1 { fill: #1565c0; }
+      .batt-fill-2 { fill: #1976d2; }
+      .batt-fill-3 { fill: #42a5f5; }
+      .bolt { fill: #ffd54f; }
+      .ray { stroke: #ffb300; }
+      .dot-accent { fill: #5c6bc0; }
+    }
+    .bg-main { fill: #f0f4ff; }
+    .ring-outer { stroke: #c5cae9; fill: none; }
+    .ring-inner { stroke: #9fa8da; fill: none; }
+    .wordmark { fill: #1a237e; }
+    .tagline { fill: #3949ab; }
+    .batt-body { fill: #e8eaf6; stroke: #3949ab; }
+    .batt-pole { fill: #3949ab; }
+    .batt-fill-1 { fill: #1565c0; }
+    .batt-fill-2 { fill: #1976d2; }
+    .batt-fill-3 { fill: #42a5f5; }
+    .bolt { fill: #f9a825; }
+    .ray { stroke: #f9a825; fill: none; stroke-linecap: round; }
+    .dot-accent { fill: #9fa8da; }
+  </style>
+
+  <rect width="680" height="340" rx="20" class="bg-main"/>
+
+  <circle cx="170" cy="170" r="118" class="ring-outer" stroke-width="1"/>
+  <circle cx="170" cy="170" r="90" class="ring-inner" stroke-width="0.8" stroke-dasharray="4 6"/>
+
+  <g class="ray" stroke-width="3">
+    <line x1="170" y1="36"  x2="170" y2="22"/>
+    <line x1="170" y1="304" x2="170" y2="318"/>
+    <line x1="36"  y1="170" x2="22"  y2="170"/>
+    <line x1="304" y1="170" x2="318" y2="170"/>
+    <line x1="76"  y1="76"  x2="66"  y2="66"/>
+    <line x1="264" y1="76"  x2="274" y2="66"/>
+    <line x1="76"  y1="264" x2="66"  y2="274"/>
+    <line x1="264" y1="264" x2="274" y2="274"/>
+  </g>
+
+  <rect x="94" y="116" width="136" height="84" rx="10" class="batt-body" stroke-width="3"/>
+  <rect x="230" y="149" width="12" height="22" rx="4" class="batt-pole"/>
+
+  <rect x="102" y="124" width="26" height="68" rx="5" class="batt-fill-1"/>
+  <rect x="133" y="124" width="26" height="68" rx="5" class="batt-fill-2"/>
+  <rect x="164" y="124" width="26" height="68" rx="5" class="batt-fill-3"/>
+  <rect x="195" y="124" width="26" height="68" rx="5" class="batt-body" stroke-width="1.5" stroke-dasharray="3 2"/>
+
+  <polygon points="175,108 155,172 168,172 162,200 185,138 172,138" class="bolt"/>
+
+  <polyline points="108,222 120,210 132,218 144,200 156,207 168,195 180,202 192,185 204,190 216,178 228,186" class="ray" stroke-width="2.5"/>
+
+  <text x="345" y="138" font-family="system-ui, sans-serif" font-size="42" font-weight="700" letter-spacing="-1" class="wordmark">Smart Battery</text>
+  <text x="345" y="188" font-family="system-ui, sans-serif" font-size="42" font-weight="700" letter-spacing="-1" class="wordmark">Optimizer</text>
+
+  <text x="347" y="222" font-family="system-ui, sans-serif" font-size="17" font-weight="400" letter-spacing="1" class="tagline">for Home Assistant · powered by Tibber</text>
+
+  <line x1="345" y1="240" x2="620" y2="240" stroke-width="1" class="ring-inner" opacity="0.6"/>
+
+  <g font-family="system-ui, sans-serif" font-size="13" font-weight="500">
+    <rect x="345" y="256" width="82" height="24" rx="12" class="batt-fill-1" opacity="0.15"/>
+    <text x="386" y="273" text-anchor="middle" class="tagline">Tibber Preise</text>
+
+    <rect x="437" y="256" width="74" height="24" rx="12" class="batt-fill-1" opacity="0.15"/>
+    <text x="474" y="273" text-anchor="middle" class="tagline">Solarstrom</text>
+
+    <rect x="521" y="256" width="94" height="24" rx="12" class="batt-fill-1" opacity="0.15"/>
+    <text x="568" y="273" text-anchor="middle" class="tagline">Lernalgorithmus</text>
+
+    <rect x="345" y="288" width="108" height="24" rx="12" class="batt-fill-1" opacity="0.15"/>
+    <text x="399" y="305" text-anchor="middle" class="tagline">Überschuss-Steuerung</text>
+
+    <rect x="463" y="288" width="152" height="24" rx="12" class="batt-fill-1" opacity="0.15"/>
+    <text x="539" y="305" text-anchor="middle" class="tagline">EcoFlow · Hoymiles · Anker</text>
+  </g>
+</svg>

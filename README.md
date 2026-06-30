@@ -1,5 +1,9 @@
 # Smart Battery Optimizer for Home Assistant
 
+<p align="center">
+  <img src="logo.svg" alt="Smart Battery Optimizer Logo" width="680"/>
+</p>
+
 Ein Custom Component für Home Assistant, das deinen Batteriespeicher intelligent steuert — auf Basis von Tibber-Strompreisen, aktueller Solarproduktion, Wettervorhersage und einem lernenden Algorithmus der deinen Hausverbrauch kennt.
 
 **Kompatibel mit:** OpenDTU / Hoymiles · EcoFlow · Anker SOLIX · Bluetti · Victron · und jedem anderen Speicher mit Home Assistant Integration
