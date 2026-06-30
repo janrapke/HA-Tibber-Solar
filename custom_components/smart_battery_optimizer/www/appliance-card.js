@@ -237,8 +237,9 @@ class ApplianceCard extends HTMLElement {
       this._pressButton(ents.cancel));
 
     this.shadowRoot.querySelector('.btn-reload')?.addEventListener('click', () => {
-      if (ents.select && this._hass)
-        this._hass.callService('homeassistant', 'update_entity', { entity_id: ents.select });
+      if (!this._hass) return;
+      // Refresh coordinator via the status sensor (CoordinatorEntity → async_request_refresh)
+      this._hass.callService('homeassistant', 'update_entity', { entity_id: ents.status });
     });
 
     this.shadowRoot.querySelector('#earliest-start')?.addEventListener('change', e =>
@@ -295,6 +296,11 @@ class ApplianceCard extends HTMLElement {
       `<option value="${i}" ${i === h ? 'selected' : ''}>${String(i).padStart(2,'0')}:00 Uhr</option>`
     ).join('');
 
+    const currentHour = new Date().getHours();
+    const nextDayHint = latestVal !== null && latestVal < currentHour
+      ? `<div style="font-size:0.75em;color:var(--secondary-text-color);margin-top:3px">→ morgen ${String(latestVal).padStart(2,'0')}:00 Uhr</div>`
+      : '';
+
     const timeRow = (earliestVal !== null || latestVal !== null) ? `
       <div class="time-row">
         ${earliestVal !== null ? `
@@ -306,6 +312,7 @@ class ApplianceCard extends HTMLElement {
           <div class="time-field">
             <div class="time-label">Fertig bis</div>
             <select id="latest-end" class="time-select">${hourOpts(latestVal)}</select>
+            ${nextDayHint}
           </div>` : ''}
       </div>
       <div class="divider"></div>

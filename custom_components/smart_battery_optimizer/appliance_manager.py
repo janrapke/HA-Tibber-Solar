@@ -350,7 +350,9 @@ class ProposalCalculator:
         self._cache: dict[str, dict] = {}
 
     def invalidate(self, sensor_id: str):
-        self._cache.pop(sensor_id, None)
+        # Cache keys are "{sensor_id}_{program_id}" — clear all entries for this sensor
+        for k in [k for k in self._cache if k.startswith(f"{sensor_id}_")]:
+            self._cache.pop(k, None)
 
     def calculate_proposals(self, sensor_id: str) -> list[Proposal]:
         """Generate proposals for a device. Uses most recently run program if learned, else 3h bootstrap window."""
@@ -424,12 +426,16 @@ class ProposalCalculator:
         latest_end_h = int(settings.get("latest_end_hour", 23))
 
         if earliest_h > 0 or latest_end_h < 23:
+            today = now.date()
             filtered = []
             for slot in all_slots:
-                if slot.start_time.hour < earliest_h:
-                    continue
                 end_time = slot.start_time + timedelta(minutes=duration_minutes)
-                # latest_end_h means "must be done by HH:59" — allow any minute within that hour
+                # earliest_h: only restrict start on today's slots.
+                # Future-day slots are allowed to start at any hour (their window repeats next night).
+                if slot.start_time.date() == today and slot.start_time.hour < earliest_h:
+                    continue
+                # latest_end_h: compare end hour only — works correctly across midnight
+                # because slots ending 00:00-latest_end_h on any day satisfy "done by HH:00".
                 if end_time.hour > latest_end_h or (end_time.hour == latest_end_h and end_time.minute > 59):
                     continue
                 filtered.append(slot)
