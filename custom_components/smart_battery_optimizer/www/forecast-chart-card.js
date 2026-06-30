@@ -34,7 +34,6 @@ class ForecastChartCard extends HTMLElement {
   }
 
   setConfig(config) {
-    if (!config.entity) throw new Error("forecast-chart-card: 'entity' is required");
     this._config = { hours: 24, title: "Batterie & Dispatch Prognose", ...config };
     this._build();
   }
@@ -77,10 +76,23 @@ class ForecastChartCard extends HTMLElement {
     if (this._resizeObserver) this._resizeObserver.disconnect();
   }
 
-  _render() {
-    if (!this._hass || !this._config.entity) return;
+  _autoEntity() {
+    // Find the tagesplan sensor by scanning for hourly_plan attribute
+    return Object.keys(this._hass.states).find(id =>
+      id.startsWith("sensor.") && this._hass.states[id].attributes?.hourly_plan
+    );
+  }
 
-    const stateObj = this._hass.states[this._config.entity];
+  _render() {
+    if (!this._hass) return;
+
+    const entityId = this._config.entity || this._autoEntity();
+    if (!entityId) {
+      this._showNoData("Kein Tagesplan-Sensor gefunden");
+      return;
+    }
+
+    const stateObj = this._hass.states[entityId];
     if (!stateObj) {
       this._showNoData("Entity nicht gefunden");
       return;
@@ -288,7 +300,7 @@ class ForecastChartCard extends HTMLElement {
   }
 
   static getStubConfig() {
-    return { entity: "" };
+    return {};
   }
 
   getCardSize() { return 4; }
