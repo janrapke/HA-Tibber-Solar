@@ -29,13 +29,23 @@ async def _register_static_paths(hass: HomeAssistant) -> None:
     """Register static file paths, compatible with old and new HA APIs."""
     try:
         from homeassistant.components.http import StaticPathConfig
-        await hass.http.async_register_static_paths([
+        configs = [
             StaticPathConfig(url, str(_WWW / filename), cache_headers=False)
             for filename, url in _CARD_FILES
-        ])
+            if (_WWW / filename).exists()
+        ]
+        if configs:
+            await hass.http.async_register_static_paths(configs)
     except (ImportError, AttributeError):
         for filename, url in _CARD_FILES:
-            hass.http.register_static_path(url, str(_WWW / filename), cache_headers=False)
+            if not (_WWW / filename).exists():
+                continue
+            try:
+                hass.http.register_static_path(url, str(_WWW / filename), cache_headers=False)
+            except Exception:
+                pass
+    except Exception as err:
+        _LOGGER.warning("Static path registration failed: %s", err)
 
 
 async def _ensure_lovelace_resources(hass: HomeAssistant) -> None:
