@@ -566,12 +566,20 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         for entity_id in solar_sensors:
             current_solar += self._get_float_state(entity_id)
 
-        charge_state_sensor = self.config.get(CONF_SOLAR_CHARGE_STATE_SENSOR)
+        charge_state_sensors = self.config.get(CONF_SOLAR_CHARGE_STATE_SENSOR, [])
+        if isinstance(charge_state_sensors, str):
+            charge_state_sensors = [charge_state_sensors]
+        absorption_states = {"absorption", "float", "ausgleichsladung", "equalization"}
         charge_state = None
-        if charge_state_sensor:
-            charge_state_obj = self.hass.states.get(charge_state_sensor)
-            if charge_state_obj:
-                charge_state = charge_state_obj.state
+        for _cs in charge_state_sensors:
+            _obj = self.hass.states.get(_cs)
+            if _obj and _obj.state.lower() in absorption_states:
+                charge_state = "Absorption"
+                break
+        if charge_state is None and charge_state_sensors:
+            _obj = self.hass.states.get(charge_state_sensors[0])
+            if _obj:
+                charge_state = _obj.state
 
         await self.learning_engine.record_consumption(current_quarter, self.calculated_house_consumption)
         await self.learning_engine.record_solar(current_quarter, current_solar, cloud_cover, charge_state)

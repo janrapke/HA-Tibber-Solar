@@ -26,7 +26,7 @@
           "battery_min_limit_pct": "Minimum State of Charge (%)",
           "battery_max_limit_pct": "Maximum State of Charge for Grid Charging (%)",
           "battery_efficiency_pct": "Charge/Discharge Efficiency (%)",
-          "solar_charge_state_sensor": "Solar Charger State Sensor (optional)"
+          "solar_charge_state_sensor": "Solar Charger State Sensors (optional, multiple allowed)"
         },
         "data_description": {
           "battery_level_sensor": "Sensor reporting current battery charge level in percent (0–100).",
@@ -34,7 +34,7 @@
           "battery_min_limit_pct": "The battery will not discharge below this level – kept as emergency reserve. Recommended: 10–20 %.",
           "battery_max_limit_pct": "The battery will be charged from the grid up to this level (at cheap prices). Solar surplus can charge beyond this. Recommended: 80–95 %.",
           "battery_efficiency_pct": "Round-trip efficiency of the battery charge/discharge cycle. Typical: 90 % (100 Wh in → 90 Wh usable).",
-          "solar_charge_state_sensor": "Optional: Sensor from your battery charger reporting charge stage (e.g. 'Absorption', 'Float', 'Bulk'). Improves forecast accuracy."
+          "solar_charge_state_sensor": "Optional: One or more MPPT charger sensors reporting the charge stage (e.g. 'Absorption', 'Float', 'Bulk'). As soon as any one is in Absorption, solar samples are excluded from learning. Significantly improves forecast accuracy."
         }
       },
       "solar_inverter": {
@@ -202,7 +202,7 @@
           "battery_min_limit_pct": "Minimum State of Charge (%)",
           "battery_max_limit_pct": "Maximum State of Charge for Grid Charging (%)",
           "battery_efficiency_pct": "Charge/Discharge Efficiency (%)",
-          "solar_charge_state_sensor": "Solar Charger State Sensor (optional)"
+          "solar_charge_state_sensor": "Solar Charger State Sensors (optional, multiple allowed)"
         },
         "data_description": {
           "battery_level_sensor": "Sensor reporting current battery charge level in percent (0–100).",

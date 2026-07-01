@@ -89,8 +89,8 @@ def _schema_battery(d: dict) -> vol.Schema:
         vol.Required(CONF_BATTERY_MIN_LIMIT_PCT, default=_get(CONF_BATTERY_MIN_LIMIT_PCT, d, 10)): vol.All(int, vol.Range(min=0, max=100)),
         vol.Required(CONF_BATTERY_MAX_LIMIT_PCT, default=_get(CONF_BATTERY_MAX_LIMIT_PCT, d, d.get(CONF_EARLY_EXCESS_MAX_BATTERY_PCT, 99))): vol.All(int, vol.Range(min=0, max=100)),
         vol.Required(CONF_BATTERY_EFFICIENCY_PCT, default=_get(CONF_BATTERY_EFFICIENCY_PCT, d, 90)): vol.All(int, vol.Range(min=1, max=100)),
-        vol.Optional(CONF_SOLAR_CHARGE_STATE_SENSOR, default=_get(CONF_SOLAR_CHARGE_STATE_SENSOR, d)): selector.EntitySelector(
-            selector.EntitySelectorConfig(domain="sensor")
+        vol.Optional(CONF_SOLAR_CHARGE_STATE_SENSOR, default=_get(CONF_SOLAR_CHARGE_STATE_SENSOR, d, [])): selector.EntitySelector(
+            selector.EntitySelectorConfig(domain="sensor", multiple=True)
         ),
     })
 
