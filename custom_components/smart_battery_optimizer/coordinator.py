@@ -1491,7 +1491,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 action = f"Dispatch ({round(price,3)}€): DTU an"
                 simulated_batt_wh += pred_solar - sim_discharge
 
-            simulated_batt_wh = max(0, min(batt_cap_wh, simulated_batt_wh))
+            simulated_batt_wh = max(0, min(max_batt_wh, simulated_batt_wh))
 
             plan.append({
                 "hour": fb["dt"].strftime("%H:%M"),
