@@ -3,9 +3,9 @@
 Design rules:
   * Setup never needs the network or valid sensors. A failing step logs and the
     loop continues; the coordinator update itself never raises.
-  * The safe default is "inverter on": the OpenDTU power limiter then runs on
-    its own (zero export, its own SoC stop threshold), exactly as without this
-    integration.
+  * With a known SoC the default is "inverter on" (OpenDTU limiter, zero export).
+    With an unknown SoC the inverter keeps its current state: it is never
+    switched on blindly, because that could deep-discharge the battery.
   * Forecasts come from solar_model / load_model, the schedule from planner.
     Those modules are pure Python and replay-tested against recorded data.
 """
@@ -851,8 +851,10 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         grid_charge = False
         if soc is None:
-            inverter_on = True
-            mode = "Sicherer Modus: Akkustand unbekannt, OpenDTU-Limiter regelt selbst"
+            # unknown SoC: never switch the inverter on blindly (could deep-discharge);
+            # keep its current state and stop grid charging
+            inverter_on = None
+            mode = "Sicherer Modus: Akkustand unbekannt, Wechselrichter-Zustand wird gehalten"
         elif price is not None and price < 0:
             inverter_on = False
             grid_charge = self.grid_charge_enabled and soc < max_pct
@@ -884,12 +886,13 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 nxt = next((s for s in self.plan.steps if s.action == ACT_DISCHARGE), None)
                 if nxt:
                     mode += f" (Entladen ab {dt_util.as_local(nxt.start).strftime('%H:%M')})"
-        if planned is not None:
+        if planned is not None and inverter_on is not None:
             self._last_action = ACT_DISCHARGE if inverter_on else (ACT_GRID_CHARGE if grid_charge else ACT_HOLD)
         self.current_operating_mode = mode
 
         await self._apply_grid_charger(grid_charge)
-        await self._apply_inverter(now, inverter_on)
+        if inverter_on is not None:
+            await self._apply_inverter(now, inverter_on)
         await self._apply_excess(now, soc, absorption, price)
 
     async def _apply_grid_charger(self, on: bool) -> None:
