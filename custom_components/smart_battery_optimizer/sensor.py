@@ -221,7 +221,8 @@ class ForecastPlanSensor(CoordinatorEntity, SensorEntity):
                 optimized_plan.append(optimized_block)
 
             battery_sensor = self.coordinator.config.get("battery_level_sensor", "")
-            return {"hourly_plan": optimized_plan, "battery_sensor": battery_sensor}
+            return {"hourly_plan": optimized_plan, "battery_sensor": battery_sensor,
+                    **self.coordinator.data.get("plan_summary", {})}
         return {}
 
 # ==========================================

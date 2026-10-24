@@ -266,6 +266,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             "solar": self.solar_model.to_dict(),
             "load": self.load_model.to_dict(),
             "bootstrapped": self._bootstrapped,
+            "plan_summary": getattr(self, "plan_summary", {}),
         })
 
     async def async_reset_models(self) -> None:
@@ -743,6 +744,15 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         params = self._battery_params()
         allow_grid = bool(self.grid_charge_enabled and params.grid_charge_w > 0 and self._bootstrapped)
+        if not self.grid_charge_enabled:
+            self._grid_reason = "Schalter 'Aus Netz laden aktiv' ist aus"
+        elif params.grid_charge_w <= 0:
+            self._grid_reason = "Kein Netzladegerät-Schalter in den Einstellungen hinterlegt"
+        elif not self._bootstrapped:
+            self._grid_reason = "Prognosemodell startet noch"
+        else:
+            self._grid_reason = "erlaubt"
+        self._params = params
         if allow_grid and self.grid_charge_buffer:
             # plan grid charging against a reduced solar forecast (safety buffer)
             factor = max(0.0, 1.0 - float(self.grid_charge_buffer) / 100.0)
@@ -793,6 +803,26 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 "planned_action": action,
             })
         self.hourly_plan = blocks
+        # why the plan does (not) charge from the grid: break-even against later prices
+        eff = params.grid_charge_eff * params.efficiency
+        cheapest = min(slots, key=lambda x: x.price) if slots else None
+        priciest = max(slots, key=lambda x: x.price) if slots else None
+        grid_wh = sum(s.grid_import_wh - s.load_w * 0.25 for s in self.plan.steps
+                      if s.action == ACT_GRID_CHARGE)
+        self.plan_summary = {
+            "netzladen": getattr(self, "_grid_reason", "?"),
+            "netzladen_geplant_kwh": round(max(0.0, grid_wh) / 1000, 2),
+            "ladegeraet_w": params.grid_charge_w,
+            "billigster_preis": round(cheapest.price, 3) if cheapest else None,
+            "billigster_zeitpunkt": dt_util.as_local(cheapest.start).strftime("%a %H:%M") if cheapest else None,
+            "teuerster_preis": round(priciest.price, 3) if priciest else None,
+            "teuerster_zeitpunkt": dt_util.as_local(priciest.start).strftime("%a %H:%M") if priciest else None,
+            "lohnt_ab_preis_spaeter": round(cheapest.price / eff + params.grid_charge_margin / params.efficiency, 3)
+            if cheapest and eff > 0 else None,
+            "solar_prognose_heute_rest_kwh": round(rem_solar / 1000, 2),
+            "solar_prognose_morgen_kwh": round(tomorrow_solar / 1000, 2),
+            "plan_bis": dt_util.as_local(slots[-1].start).strftime("%a %H:%M") if slots else None,
+        }
         self.predicted_remaining_solar = rem_solar
         self.predicted_remaining_consumption = rem_load
         self.tomorrow_net_solar_wh = tomorrow_solar - tomorrow_load
@@ -993,4 +1023,5 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             "model": self.solar_model.quality(),
             "load_days": self.load_model.days_known(),
             "bootstrapped": self._bootstrapped,
+            "plan_summary": getattr(self, "plan_summary", {}),
         }
