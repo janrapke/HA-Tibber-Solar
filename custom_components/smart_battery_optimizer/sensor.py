@@ -425,8 +425,17 @@ class LearningStatusSensor(CoordinatorEntity, SensorEntity):
                 f"(Solar: {coverage['solar_quality_pct']:.0f}%, Verbrauch: {coverage['consumption_quality_pct']:.0f}%)."
             )
 
+        data = self.coordinator.data or {}
+        model = data.get("model", {})
+        if data.get("bootstrapped"):
+            hint = (f"Prognosemodell aktiv: {model.get('samples', 0)} Solar-Lernpunkte, "
+                    f"{data.get('load_days', 0)} Tage Verbrauchsprofil.")
         return {
             "hinweis": hint,
+            "v2_modell_gestartet": data.get("bootstrapped", False),
+            "v2_solar_modell": model,
+            "v2_verbrauch_tage": data.get("load_days", 0),
+            "v2_plan_ersparnis_eur": data.get("plan_savings_eur"),
             "solar_qualität_%": coverage["solar_quality_pct"],
             "verbrauch_qualität_%": coverage["consumption_quality_pct"],
             "solar_bias_korrektur": coverage["solar_bias_correction"],

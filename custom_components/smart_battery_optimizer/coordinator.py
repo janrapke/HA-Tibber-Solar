@@ -674,7 +674,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             self._finish_quarter()
         if self._quarter_key != key:
             self._quarter_key = key
-            self._quarter_start = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0)
+            now_utc = dt_util.as_utc(now)
+            self._quarter_start = now_utc.replace(minute=(now_utc.minute // 15) * 15, second=0, microsecond=0)
             self._quarter_acc = {"solar": [], "load": [], "limited": False}
         acc = self._quarter_acc
         if solar is not None:
@@ -718,7 +719,9 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         soc = result.get("soc")
         if soc is None:
             return
-        slot0 = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0)
+        # slots in UTC: local wall-clock arithmetic would skip/duplicate an hour at DST changes
+        now_utc = dt_util.as_utc(now)
+        slot0 = now_utc.replace(minute=(now_utc.minute // 15) * 15, second=0, microsecond=0)
         prices_end = max((p["datetime"] for p in self.tibber_prices), default=None)
         horizon_end = (prices_end + timedelta(minutes=15)) if prices_end else slot0 + timedelta(hours=12)
         horizon_end = max(horizon_end, slot0 + timedelta(hours=6))
