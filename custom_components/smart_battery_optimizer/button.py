@@ -61,4 +61,5 @@ class ResetLearningDataButton(CoordinatorEntity, ButtonEntity):
     async def async_press(self) -> None:
         """Handle the button press."""
         await self.coordinator.learning_engine.hard_reset_data()
+        await self.coordinator.async_reset_models()
         await self.coordinator.async_request_refresh()

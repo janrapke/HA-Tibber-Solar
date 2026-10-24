@@ -4,6 +4,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, CONF_PRESUNNY_SOLAR_MARGIN_PCT
@@ -28,7 +29,25 @@ async def async_setup_entry(
     ]
     async_add_entities(entities)
 
-class GridChargeEnableSwitch(CoordinatorEntity, SwitchEntity):
+class _RestoringSwitch(SwitchEntity, RestoreEntity):
+    """Restores on/off after a Home Assistant restart."""
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last is None or last.state not in ("on", "off"):
+            return
+        try:
+            if last.state == "on":
+                await self.async_turn_on()
+            else:
+                await self.async_turn_off()
+        except Exception:  # noqa: BLE001
+            import logging
+            logging.getLogger(__name__).exception("Restoring %s failed", self.entity_id)
+
+
+class GridChargeEnableSwitch(CoordinatorEntity, _RestoringSwitch):
     """Switch to globally enable/disable charging battery from grid."""
 
     _attr_has_entity_name = True
@@ -56,7 +75,7 @@ class GridChargeEnableSwitch(CoordinatorEntity, SwitchEntity):
         self.coordinator.grid_charge_enabled = False
         await self.coordinator.async_request_refresh()
 
-class OptimizerEnableSwitch(CoordinatorEntity, SwitchEntity):
+class OptimizerEnableSwitch(CoordinatorEntity, _RestoringSwitch):
     """Switch to enable/disable the entire automation."""
 
     _attr_has_entity_name = True
@@ -86,7 +105,7 @@ class OptimizerEnableSwitch(CoordinatorEntity, SwitchEntity):
         self.coordinator.is_enabled = False
         self.async_write_ha_state()
 
-class ManualZeroExportSwitch(CoordinatorEntity, SwitchEntity):
+class ManualZeroExportSwitch(CoordinatorEntity, _RestoringSwitch):
     """Switch to force zero export mode manually."""
 
     _attr_has_entity_name = True
@@ -116,7 +135,7 @@ class ManualZeroExportSwitch(CoordinatorEntity, SwitchEntity):
         self.coordinator.manual_zero_export = False
         await self.coordinator.async_request_refresh()
 
-class PrimaryExcessAutoSwitch(CoordinatorEntity, SwitchEntity):
+class PrimaryExcessAutoSwitch(CoordinatorEntity, _RestoringSwitch):
     """Switch to enable/disable automatic control of primary excess consumers."""
 
     _attr_has_entity_name = True
@@ -144,7 +163,7 @@ class PrimaryExcessAutoSwitch(CoordinatorEntity, SwitchEntity):
         self.coordinator.primary_excess_auto = False
         await self.coordinator.async_request_refresh()
 
-class SecondaryExcessAutoSwitch(CoordinatorEntity, SwitchEntity):
+class SecondaryExcessAutoSwitch(CoordinatorEntity, _RestoringSwitch):
     """Switch to enable/disable automatic control of secondary excess consumers."""
 
     _attr_has_entity_name = True
@@ -172,7 +191,7 @@ class SecondaryExcessAutoSwitch(CoordinatorEntity, SwitchEntity):
         self.coordinator.secondary_excess_auto = False
         await self.coordinator.async_request_refresh()
 
-class EarlyExcessAutoSwitch(CoordinatorEntity, SwitchEntity):
+class EarlyExcessAutoSwitch(CoordinatorEntity, _RestoringSwitch):
     """Switch to enable/disable automatic control of early excess consumers."""
 
     _attr_has_entity_name = True
@@ -232,7 +251,7 @@ class VacationModeSwitch(CoordinatorEntity, SwitchEntity):
         self.async_write_ha_state()
 
 
-class PresunnyDischargeSwitch(CoordinatorEntity, SwitchEntity):
+class PresunnyDischargeSwitch(CoordinatorEntity, _RestoringSwitch):
     """Aktiviert die proaktive Laderaum-Vorbereitung vor sonnigen Tagen.
 
     Wenn aktiv: entlädt die Batterie nachts auf den berechneten Morgen-SOC

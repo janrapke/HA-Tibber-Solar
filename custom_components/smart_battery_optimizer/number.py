@@ -1,6 +1,6 @@
 """Number entities for Smart Battery Optimizer."""
 import logging
-from homeassistant.components.number import NumberEntity, NumberDeviceClass, NumberMode
+from homeassistant.components.number import NumberEntity, NumberDeviceClass, NumberMode, RestoreNumber
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
@@ -36,7 +36,20 @@ async def async_setup_entry(
         *coordinator.appliance_entities.get('number', []),
     ])
 
-class GridChargeMarginNumber(CoordinatorEntity, NumberEntity):
+class _RestoringNumber(RestoreNumber):
+    """Restores the last value after a Home Assistant restart."""
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        try:
+            data = await self.async_get_last_number_data()
+            if data is not None and data.native_value is not None:
+                await self.async_set_native_value(float(data.native_value))
+        except Exception:  # noqa: BLE001
+            logging.getLogger(__name__).exception("Restoring %s failed", self.entity_id)
+
+
+class GridChargeMarginNumber(CoordinatorEntity, _RestoringNumber):
     """Number entity to set the minimum profit margin for grid charging in cents."""
 
     _attr_has_entity_name = True
@@ -69,7 +82,7 @@ class GridChargeMarginNumber(CoordinatorEntity, NumberEntity):
         self.coordinator.grid_charge_margin = value
         self.async_write_ha_state()
 
-class GridChargeEfficiencyNumber(CoordinatorEntity, NumberEntity):
+class GridChargeEfficiencyNumber(CoordinatorEntity, _RestoringNumber):
     """Number entity to set the grid charging efficiency."""
 
     _attr_has_entity_name = True
@@ -102,7 +115,7 @@ class GridChargeEfficiencyNumber(CoordinatorEntity, NumberEntity):
         self.coordinator.grid_charge_efficiency = value
         self.async_write_ha_state()
 
-class GridChargeBufferNumber(CoordinatorEntity, NumberEntity):
+class GridChargeBufferNumber(CoordinatorEntity, _RestoringNumber):
     """Number entity to set the solar safety buffer for grid charging."""
 
     _attr_has_entity_name = True
@@ -135,7 +148,7 @@ class GridChargeBufferNumber(CoordinatorEntity, NumberEntity):
         self.coordinator.grid_charge_buffer = value
         self.async_write_ha_state()
 
-class ExtremePriceThresholdNumber(CoordinatorEntity, NumberEntity):
+class ExtremePriceThresholdNumber(CoordinatorEntity, _RestoringNumber):
     """Number entity to set the extreme price threshold."""
 
     _attr_has_entity_name = True
@@ -170,7 +183,7 @@ class ExtremePriceThresholdNumber(CoordinatorEntity, NumberEntity):
         self.async_write_ha_state()
 
 
-class ExtremePriceFactorNumber(CoordinatorEntity, NumberEntity):
+class ExtremePriceFactorNumber(CoordinatorEntity, _RestoringNumber):
     """Number entity to set the solar reserve factor for extreme prices."""
 
     _attr_has_entity_name = True
@@ -205,7 +218,7 @@ class ExtremePriceFactorNumber(CoordinatorEntity, NumberEntity):
         self.async_write_ha_state()
 
 
-class PrimaryExcessOnThreshold(CoordinatorEntity, NumberEntity):
+class PrimaryExcessOnThreshold(CoordinatorEntity, _RestoringNumber):
     _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:battery-arrow-up"
@@ -236,7 +249,7 @@ class PrimaryExcessOnThreshold(CoordinatorEntity, NumberEntity):
         self.async_write_ha_state()
 
 
-class PrimaryExcessOffThreshold(CoordinatorEntity, NumberEntity):
+class PrimaryExcessOffThreshold(CoordinatorEntity, _RestoringNumber):
     _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:battery-arrow-down"
@@ -267,7 +280,7 @@ class PrimaryExcessOffThreshold(CoordinatorEntity, NumberEntity):
         self.async_write_ha_state()
 
 
-class SecondaryExcessOnThreshold(CoordinatorEntity, NumberEntity):
+class SecondaryExcessOnThreshold(CoordinatorEntity, _RestoringNumber):
     _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:battery-arrow-up"
@@ -298,7 +311,7 @@ class SecondaryExcessOnThreshold(CoordinatorEntity, NumberEntity):
         self.async_write_ha_state()
 
 
-class SecondaryExcessOffThreshold(CoordinatorEntity, NumberEntity):
+class SecondaryExcessOffThreshold(CoordinatorEntity, _RestoringNumber):
     _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:battery-arrow-down"
@@ -329,7 +342,7 @@ class SecondaryExcessOffThreshold(CoordinatorEntity, NumberEntity):
         self.async_write_ha_state()
 
 
-class ExcessCloudToleranceNumber(CoordinatorEntity, NumberEntity):
+class ExcessCloudToleranceNumber(CoordinatorEntity, _RestoringNumber):
     _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.CONFIG
     _attr_icon = "mdi:weather-cloudy"
@@ -359,7 +372,7 @@ class ExcessCloudToleranceNumber(CoordinatorEntity, NumberEntity):
         self.coordinator.excess_cloud_tolerance_mins = value
         self.async_write_ha_state()
 
-class MinSwitchIntervalNumber(CoordinatorEntity, NumberEntity):
+class MinSwitchIntervalNumber(CoordinatorEntity, _RestoringNumber):
     """Minimum time between any ON/OFF state change for consumers and inverter."""
 
     _attr_has_entity_name = True
@@ -392,7 +405,7 @@ class MinSwitchIntervalNumber(CoordinatorEntity, NumberEntity):
         self.async_write_ha_state()
 
 
-class LearningRateNumber(CoordinatorEntity, NumberEntity):
+class LearningRateNumber(CoordinatorEntity, _RestoringNumber):
     """Number entity to set the custom learning rate factor."""
 
     _attr_has_entity_name = True
@@ -425,7 +438,7 @@ class LearningRateNumber(CoordinatorEntity, NumberEntity):
         self.async_write_ha_state()
 
 
-class PresunnySolarMarginNumber(CoordinatorEntity, NumberEntity):
+class PresunnySolarMarginNumber(CoordinatorEntity, _RestoringNumber):
     """Sicherheitspuffer für Solar-Prognose bei der Laderaum-Vorbereitung.
 
     20% bedeutet: nutze nur 80% der vorhergesagten Solar-Energie für die Berechnung.
