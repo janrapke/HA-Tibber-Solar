@@ -1,0 +1,1224 @@
+# ============================================================
+# Package: Klima Wohnzimmer (climate.152832118046533_climate)
+# ============================================================
+#
+# Einbinden in configuration.yaml:
+#   homeassistant:
+#     packages:
+#       klima_wohnzimmer: !include ha_packages/klima_wohnzimmer.yaml
+#
+# Bestehende Entities (nicht hier erstellt):
+#   climate.152832118046533_climate          (Klimaanlage WZ)
+#   sensor.jans_echo_dot_temperatur        (Innentemperatur)
+#   sensor.openweathermap_temperature        (Außentemperatur)
+#   sensor.electricity_price_holunderweg_3   (Tibber Strompreis EUR/kWh)
+#   input_boolean.anwesnedheit_irgendjemand  (Anwesenheit)
+#   sensor.smartshunt_hq2305uvtaz_battery    (Akkustand %)
+#   climate.bt_wohnzimmer_bt_wohnzimmer      (Better Thermostat Wohnzimmer)
+#   climate.bt_esszimmer_bt_esszimmer        (Better Thermostat Esszimmer)
+#   climate.bt_kuche_bt_kuche                (Better Thermostat Küche)
+#   automation.heizung_wohnzimmer            (Heizungsautomation Wohnbereich)
+#   automation.heizung_kuche                 (Heizungsautomation Küche)
+#
+# Logik-Übersicht:
+#   DREI-STUFEN-SCHALTER (input_select.klima_wohnzimmer_schalter):
+#     WICHTIG: Wird durch Automationen NUR geändert wenn externe
+#              Steuerung (Fernbedienung/App) erkannt wird.
+#     auto        → Automation läuft nach Regeln
+#     manuell_an  → Klimaanlage AN (Modus per Außentemp / Modus-Select)
+#     manuell_aus → Klimaanlage AUS (bleibt aus)
+#
+#   STROMPREISBEDINGUNG:
+#     Kühlen darf nur starten wenn Preis ≤ klima_wz_preis_kuehlen_max
+#     Auto-Heizen darf nur starten wenn Preis ≤ klima_wz_preis_heizen_auto_max
+#     Heizung-Ersetzen darf nur laufen wenn Preis ≤ klima_wz_preis_heizen_ersatz_max
+#
+#   MODUS-WAHL (manuell_an + Battery-Modus + Heizung-Ersetzen):
+#     Außentemp > 18°C → Kühlen (24°C Sollwert)
+#     Außentemp ≤ 18°C → Heizen (21°C Sollwert)
+#     Manuell_an: nimmt Wert aus input_select.klima_wohnzimmer_manuell_modus
+#
+#   HEIZUNG ERSETZEN (input_boolean.klima_wz_heizung_ersatz_schalter):
+#     Wenn AN + Preis günstig + 10–22 Uhr:
+#       → heizung_wohnzimmer + heizung_kuche deaktivieren
+#       → BT-Thermostate auf 5°C (Frostschutz)
+#       → Klimaanlage heizt auf 21°C
+#     Wenn AUS oder Preis zu hoch:
+#       → Heizungsautomationen wieder aktivieren + antriggern
+#       → Klimaanlage AUS
+#
+#   FERNBEDIENUNG/APP-ERKENNUNG:
+#     Wenn Klimaanlage sich ändert und NICHT die Automation das tat:
+#       → Schalter auf manuell_an (wenn AN) oder manuell_aus (wenn AUS)
+# ============================================================
+
+# ============================================================
+# HELPER-ENTITIES
+# ============================================================
+
+input_select:
+  klima_wohnzimmer_schalter:
+    name: "Klima WZ Betriebsmodus"
+    options:
+      - auto
+      - manuell_an
+      - manuell_aus
+    initial: auto
+    icon: mdi:air-conditioner
+  klima_wohnzimmer_manuell_modus:
+    name: "Klima WZ Modus"
+    options:
+      - kühlen
+      - heizen
+    initial: kühlen
+    icon: mdi:thermometer-auto
+
+input_boolean:
+  klima_wohnzimmer_battery_modus:
+    name: "Klima WZ Batterie-Modus aktiv"
+    icon: mdi:battery-high
+  klima_wz_heizung_ersatz_schalter:
+    name: "Klima WZ Heizung ersetzen"
+    icon: mdi:heat-wave
+  klima_wz_heizung_ersatz_aktiv:
+    name: "Klima WZ Heizung Ersatz aktiv (intern)"
+    icon: mdi:heat-wave
+  klima_wz_automation_aktiv:
+    name: "Klima WZ Automation aktiv (intern)"
+    icon: mdi:robot
+
+input_number:
+  klima_wz_preis_kuehlen_max:
+    name: "Klima WZ max Preis Kühlen"
+    min: 0.05
+    max: 0.80
+    step: 0.01
+    unit_of_measurement: "EUR/kWh"
+    initial: 0.30
+    mode: box
+    icon: mdi:snowflake
+  klima_wz_preis_heizen_auto_max:
+    name: "Klima WZ max Preis Heizen (Auto)"
+    min: 0.05
+    max: 0.80
+    step: 0.01
+    unit_of_measurement: "EUR/kWh"
+    initial: 0.25
+    mode: box
+    icon: mdi:fire
+  klima_wz_preis_heizen_ersatz_max:
+    name: "Klima WZ max Preis Heizung ersetzen"
+    min: 0.05
+    max: 0.80
+    step: 0.01
+    unit_of_measurement: "EUR/kWh"
+    initial: 0.22
+    mode: box
+    icon: mdi:heat-wave
+  klima_wz_heizung_ersatz_temp_im_raum:
+    name: "Klima WZ Heizung Ersatz Zieltemp (im Wohnbereich)"
+    min: 16
+    max: 25
+    step: 0.5
+    unit_of_measurement: "°C"
+    initial: 21
+    mode: box
+    icon: mdi:sofa-thermometer
+  klima_wz_heizung_ersatz_temp_zuhause:
+    name: "Klima WZ Heizung Ersatz Zieltemp (zuhause, nicht im WZ)"
+    min: 14
+    max: 24
+    step: 0.5
+    unit_of_measurement: "°C"
+    initial: 20
+    mode: box
+    icon: mdi:home-thermometer
+  klima_wz_heizung_ersatz_temp_nacht:
+    name: "Klima WZ Heizung Ersatz Zieltemp (Nacht 0-8 Uhr)"
+    min: 14
+    max: 22
+    step: 0.5
+    unit_of_measurement: "°C"
+    initial: 19
+    mode: box
+    icon: mdi:weather-night
+  klima_wz_heizung_ersatz_temp_niemand:
+    name: "Klima WZ Heizung Ersatz Zieltemp (niemand zuhause)"
+    min: 10
+    max: 20
+    step: 0.5
+    unit_of_measurement: "°C"
+    initial: 18
+    mode: box
+    icon: mdi:home-thermometer-outline
+  klima_wz_heizung_ersatz_aussentemp_max:
+    name: "Klima WZ Heizung Ersatz max Außentemp"
+    min: 0
+    max: 25
+    step: 1
+    unit_of_measurement: "°C"
+    initial: 16
+    mode: box
+    icon: mdi:thermometer-chevron-up
+
+input_datetime:
+  klima_wohnzimmer_letzte_abschaltung:
+    name: "Klima WZ Letzte Abschaltung (Auto)"
+    has_date: true
+    has_time: true
+  klima_wohnzimmer_letzte_einschaltung:
+    name: "Klima WZ Letzte Einschaltung"
+    has_date: true
+    has_time: true
+  klima_wohnzimmer_battery_letzte_abschaltung:
+    name: "Klima WZ Battery-Modus Letzte Abschaltung"
+    has_date: true
+    has_time: true
+  klima_wz_heizung_ersatz_letzte_abschaltung:
+    name: "Klima WZ Heizung Ersatz Letzte Abschaltung"
+    has_date: true
+    has_time: true
+
+# ============================================================
+# AUTOMATIONEN
+# ============================================================
+
+automation:
+
+  # ----------------------------------------------------------
+  # 1. KÜHLEN EINSCHALTEN
+  #    Trigger A: Innentemp > 24.5°C für ≥ 3 Min
+  #    Trigger B: alle 5 Minuten (Intervall-Check)
+  #    Trigger C: Explizit um 10:00 Uhr
+  #    Trigger D: Battery-Modus endet
+  #    Trigger E: Strompreis fällt unter Schwelle
+  #    Bedingungen: auto, zuhause, 10–22h, 1h-Sperre, kein Batterie/Ersatz-Modus,
+  #                 Preis ≤ Schwelle, noch nicht kühlend
+  # ----------------------------------------------------------
+  - id: klima_wz_kuehlen_an
+    alias: "Klima WZ - Kühlen EIN"
+    mode: single
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.jans_echo_dot_temperatur
+        above: 24.5
+        for:
+          minutes: 3
+      - platform: time_pattern
+        minutes: "/5"
+      - platform: time
+        at: "10:00:00"
+      - platform: state
+        entity_id: input_boolean.klima_wohnzimmer_battery_modus
+        to: "off"
+      - platform: template
+        value_template: >
+          {{ states('sensor.electricity_price_holunderweg_3') | float(99) <=
+             states('input_number.klima_wz_preis_kuehlen_max') | float(0) }}
+    condition:
+      - condition: state
+        entity_id: input_select.klima_wohnzimmer_schalter
+        state: auto
+      - condition: state
+        entity_id: input_boolean.anwesnedheit_irgendjemand
+        state: "on"
+      - condition: time
+        after: "10:00:00"
+        before: "22:00:00"
+      - condition: numeric_state
+        entity_id: sensor.jans_echo_dot_temperatur
+        above: 24.5
+      - condition: template
+        value_template: >
+          {% set ts = state_attr('input_datetime.klima_wohnzimmer_letzte_abschaltung', 'timestamp') %}
+          {{ ts == none or (now().timestamp() - ts) > 3600 }}
+      - condition: state
+        entity_id: input_boolean.klima_wohnzimmer_battery_modus
+        state: "off"
+      - condition: state
+        entity_id: input_boolean.klima_wz_heizung_ersatz_aktiv
+        state: "off"
+      - condition: template
+        value_template: >
+          {{ states('sensor.electricity_price_holunderweg_3') | float(99) <=
+             states('input_number.klima_wz_preis_kuehlen_max') | float(0) }}
+      - condition: not
+        conditions:
+          - condition: state
+            entity_id: climate.152832118046533_climate
+            state: cool
+    action:
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.klima_wz_automation_aktiv
+      - service: climate.set_temperature
+        target:
+          entity_id: climate.152832118046533_climate
+        data:
+          hvac_mode: cool
+          temperature: 24
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.klima_wohnzimmer_letzte_einschaltung
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+  # ----------------------------------------------------------
+  # 2. KÜHLEN AUSSCHALTEN (Zieltemperatur erreicht)
+  #    Trigger: Innentemp < 23.2°C
+  #    Mindestlaufzeit: 30 Min
+  # ----------------------------------------------------------
+  - id: klima_wz_kuehlen_aus
+    alias: "Klima WZ - Kühlen AUS (Zieltemp erreicht)"
+    mode: single
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.jans_echo_dot_temperatur
+        below: 23.2
+    condition:
+      - condition: state
+        entity_id: input_select.klima_wohnzimmer_schalter
+        state: auto
+      - condition: state
+        entity_id: climate.152832118046533_climate
+        state: cool
+      - condition: state
+        entity_id: input_boolean.klima_wohnzimmer_battery_modus
+        state: "off"
+      - condition: template
+        value_template: >
+          {% set ts = state_attr('input_datetime.klima_wohnzimmer_letzte_einschaltung', 'timestamp') %}
+          {{ ts == none or (now().timestamp() - ts) > 1800 }}
+    action:
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.klima_wz_automation_aktiv
+      - service: climate.set_hvac_mode
+        target:
+          entity_id: climate.152832118046533_climate
+        data:
+          hvac_mode: "off"
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.klima_wohnzimmer_letzte_abschaltung
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+  # ----------------------------------------------------------
+  # 3. HEIZEN EINSCHALTEN (Auto-Modus)
+  #    Trigger A: Innentemp < 19°C für ≥ 3 Min
+  #    Trigger B: alle 5 Minuten (Intervall-Check)
+  #    Trigger C: 10:00 Uhr
+  #    Trigger D: Battery-Modus endet
+  #    Trigger E: Heizung-Ersatz-Modus endet
+  #    Trigger F: Strompreis fällt unter Schwelle
+  #    Bedingungen: auto, zuhause, 10–22h, 1h-Sperre, Preis ≤ Schwelle,
+  #                 kein Battery/Ersatz-Modus, noch nicht heizend
+  # ----------------------------------------------------------
+  - id: klima_wz_heizen_an
+    alias: "Klima WZ - Heizen EIN (Auto)"
+    mode: single
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.jans_echo_dot_temperatur
+        below: 19
+        for:
+          minutes: 3
+      - platform: time_pattern
+        minutes: "/5"
+      - platform: time
+        at: "10:00:00"
+      - platform: state
+        entity_id: input_boolean.klima_wohnzimmer_battery_modus
+        to: "off"
+      - platform: state
+        entity_id: input_boolean.klima_wz_heizung_ersatz_aktiv
+        to: "off"
+      - platform: template
+        value_template: >
+          {{ states('sensor.electricity_price_holunderweg_3') | float(99) <=
+             states('input_number.klima_wz_preis_heizen_auto_max') | float(0) }}
+    condition:
+      - condition: state
+        entity_id: input_select.klima_wohnzimmer_schalter
+        state: auto
+      - condition: state
+        entity_id: input_boolean.anwesnedheit_irgendjemand
+        state: "on"
+      - condition: time
+        after: "10:00:00"
+        before: "22:00:00"
+      - condition: numeric_state
+        entity_id: sensor.jans_echo_dot_temperatur
+        below: 19
+      - condition: template
+        value_template: >
+          {% set ts = state_attr('input_datetime.klima_wohnzimmer_letzte_abschaltung', 'timestamp') %}
+          {{ ts == none or (now().timestamp() - ts) > 3600 }}
+      - condition: state
+        entity_id: input_boolean.klima_wohnzimmer_battery_modus
+        state: "off"
+      - condition: state
+        entity_id: input_boolean.klima_wz_heizung_ersatz_aktiv
+        state: "off"
+      - condition: template
+        value_template: >
+          {{ states('sensor.electricity_price_holunderweg_3') | float(99) <=
+             states('input_number.klima_wz_preis_heizen_auto_max') | float(0) }}
+      - condition: not
+        conditions:
+          - condition: state
+            entity_id: climate.152832118046533_climate
+            state: heat
+    action:
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.klima_wz_automation_aktiv
+      - service: climate.set_temperature
+        target:
+          entity_id: climate.152832118046533_climate
+        data:
+          hvac_mode: heat
+          temperature: 21
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.klima_wohnzimmer_letzte_einschaltung
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+  # ----------------------------------------------------------
+  # 4a. HEIZEN DROSSELN - Auto-Modus (Zieltemp erreicht)
+  #     Trigger: Raumsensor > 21.5°C, Mindestlaufzeit 30 Min
+  #     Aktion: AC ausschalten, 1h-Sperre setzen
+  # ----------------------------------------------------------
+  - id: klima_wz_heizen_aus
+    alias: "Klima WZ - Heizen AUS (Zieltemp erreicht)"
+    mode: single
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.jans_echo_dot_temperatur
+        above: 21.5
+    condition:
+      - condition: state
+        entity_id: climate.152832118046533_climate
+        state: heat
+      - condition: state
+        entity_id: input_select.klima_wohnzimmer_schalter
+        state: auto
+      - condition: state
+        entity_id: input_boolean.klima_wz_heizung_ersatz_aktiv
+        state: "off"
+      - condition: state
+        entity_id: input_boolean.klima_wohnzimmer_battery_modus
+        state: "off"
+      - condition: template
+        value_template: >
+          {% set ts = state_attr('input_datetime.klima_wohnzimmer_letzte_einschaltung', 'timestamp') %}
+          {{ ts == none or (now().timestamp() - ts) > 1800 }}
+    action:
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.klima_wz_automation_aktiv
+      - service: climate.set_hvac_mode
+        target:
+          entity_id: climate.152832118046533_climate
+        data:
+          hvac_mode: "off"
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.klima_wohnzimmer_letzte_abschaltung
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+  # ----------------------------------------------------------
+  # 4b. HEIZEN DROSSELN - Ersatz-Modus (Zieltemp erreicht)
+  #     Trigger: Raumsensor ≥ BT-Thermostat target_temp_high
+  #     BT ist in hvac_mode:off → target_temp_high = Heizungsplan-Zieltemp
+  #     Aktion: AC-Zieltemp auf 23°C → AC schläft (AC-Sensor > 23°C).
+  #             AC bleibt im heat-Modus → kein An/Aus-Cycling.
+  # ----------------------------------------------------------
+  - id: klima_wz_ersatz_drosseln
+    alias: "Klima WZ - Heizung Ersatz DROSSELN (Zieltemp erreicht)"
+    mode: single
+    trigger:
+      - platform: template
+        value_template: >
+          {% set ziel = (states('input_number.klima_wz_heizung_ersatz_temp_im_raum') | float(21)) if is_state('input_boolean.anwesenheit_wohnbereich', 'on') else ((states('input_number.klima_wz_heizung_ersatz_temp_nacht') | float(19)) if (is_state('input_boolean.anwesnedheit_irgendjemand', 'on') and now().hour < 8) else ((states('input_number.klima_wz_heizung_ersatz_temp_zuhause') | float(20)) if is_state('input_boolean.anwesnedheit_irgendjemand', 'on') else (states('input_number.klima_wz_heizung_ersatz_temp_niemand') | float(18)))) %}
+          {{ states('sensor.jans_echo_dot_temperatur') | float(0) >= ziel }}
+    condition:
+      - condition: state
+        entity_id: input_boolean.klima_wz_heizung_ersatz_aktiv
+        state: "on"
+      - condition: state
+        entity_id: climate.152832118046533_climate
+        state: heat
+      - condition: template
+        value_template: >
+          {% set ziel = (states('input_number.klima_wz_heizung_ersatz_temp_im_raum') | float(21)) if is_state('input_boolean.anwesenheit_wohnbereich', 'on') else ((states('input_number.klima_wz_heizung_ersatz_temp_nacht') | float(19)) if (is_state('input_boolean.anwesnedheit_irgendjemand', 'on') and now().hour < 8) else ((states('input_number.klima_wz_heizung_ersatz_temp_zuhause') | float(20)) if is_state('input_boolean.anwesnedheit_irgendjemand', 'on') else (states('input_number.klima_wz_heizung_ersatz_temp_niemand') | float(18)))) %}
+          {{ states('sensor.jans_echo_dot_temperatur') | float(0) >= ziel }}
+      - condition: template
+        value_template: >
+          {% set ts = state_attr('input_datetime.klima_wohnzimmer_letzte_einschaltung', 'timestamp') %}
+          {{ ts == none or (now().timestamp() - ts) > 1800 }}
+    action:
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.klima_wz_automation_aktiv
+      - service: climate.set_temperature
+        target:
+          entity_id: climate.152832118046533_climate
+        data:
+          temperature: >
+            {% set ziel = (states('input_number.klima_wz_heizung_ersatz_temp_im_raum') | float(21)) if is_state('input_boolean.anwesenheit_wohnbereich', 'on') else ((states('input_number.klima_wz_heizung_ersatz_temp_nacht') | float(19)) if (is_state('input_boolean.anwesnedheit_irgendjemand', 'on') and now().hour < 8) else ((states('input_number.klima_wz_heizung_ersatz_temp_zuhause') | float(20)) if is_state('input_boolean.anwesnedheit_irgendjemand', 'on') else (states('input_number.klima_wz_heizung_ersatz_temp_niemand') | float(18)))) %}
+            {{ ziel }}
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.klima_wz_heizung_ersatz_letzte_abschaltung
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+  # ----------------------------------------------------------
+  # 5. UM 22:00 UHR AUSSCHALTEN
+  #    Kein Mindestlaufzeit-Check. Nur Auto-Modus.
+  #    Ersatz-Modus hat eigene 22:00-Logik in Automation 16.
+  # ----------------------------------------------------------
+  - id: klima_wz_22uhr_aus
+    alias: "Klima WZ - 22:00 Uhr AUS"
+    mode: single
+    trigger:
+      - platform: time
+        at: "22:00:00"
+    condition:
+      - condition: state
+        entity_id: input_select.klima_wohnzimmer_schalter
+        state: auto
+      - condition: state
+        entity_id: input_boolean.klima_wohnzimmer_battery_modus
+        state: "off"
+      - condition: state
+        entity_id: input_boolean.klima_wz_heizung_ersatz_aktiv
+        state: "off"
+      - condition: not
+        conditions:
+          - condition: state
+            entity_id: climate.152832118046533_climate
+            state: "off"
+    action:
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.klima_wz_automation_aktiv
+      - service: climate.set_hvac_mode
+        target:
+          entity_id: climate.152832118046533_climate
+        data:
+          hvac_mode: "off"
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.klima_wohnzimmer_letzte_abschaltung
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+  # ----------------------------------------------------------
+  # 6. NIEMAND ZUHAUSE → AUSSCHALTEN
+  #    Nur Auto-Modus, Ersatz-Modus läuft auch ohne Anwesenheit.
+  # ----------------------------------------------------------
+  - id: klima_wz_niemand_zuhause
+    alias: "Klima WZ - Niemand zuhause AUS"
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: input_boolean.anwesnedheit_irgendjemand
+        to: "off"
+    condition:
+      - condition: state
+        entity_id: input_select.klima_wohnzimmer_schalter
+        state: auto
+      - condition: state
+        entity_id: input_boolean.klima_wohnzimmer_battery_modus
+        state: "off"
+      - condition: state
+        entity_id: input_boolean.klima_wz_heizung_ersatz_aktiv
+        state: "off"
+      - condition: not
+        conditions:
+          - condition: state
+            entity_id: climate.152832118046533_climate
+            state: "off"
+    action:
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.klima_wz_automation_aktiv
+      - service: climate.set_hvac_mode
+        target:
+          entity_id: climate.152832118046533_climate
+        data:
+          hvac_mode: "off"
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.klima_wohnzimmer_letzte_abschaltung
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+  # ----------------------------------------------------------
+  # 7. MANUELL EIN (Schalter → manuell_an)
+  #    Modus aus input_select.klima_wohnzimmer_manuell_modus
+  # ----------------------------------------------------------
+  - id: klima_wz_manuell_an
+    alias: "Klima WZ - Manuell EIN"
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: input_select.klima_wohnzimmer_schalter
+        to: manuell_an
+    action:
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.klima_wz_automation_aktiv
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: input_select.klima_wohnzimmer_manuell_modus
+                state: kühlen
+            sequence:
+              - service: climate.set_temperature
+                target:
+                  entity_id: climate.152832118046533_climate
+                data:
+                  hvac_mode: cool
+                  temperature: 24
+        default:
+          - service: climate.set_temperature
+            target:
+              entity_id: climate.152832118046533_climate
+            data:
+              hvac_mode: heat
+              temperature: 21
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.klima_wohnzimmer_letzte_einschaltung
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+  # ----------------------------------------------------------
+  # 8. MANUELL AUS (Schalter → manuell_aus)
+  # ----------------------------------------------------------
+  - id: klima_wz_manuell_aus
+    alias: "Klima WZ - Manuell AUS"
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: input_select.klima_wohnzimmer_schalter
+        to: manuell_aus
+    action:
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.klima_wz_automation_aktiv
+      - service: climate.set_hvac_mode
+        target:
+          entity_id: climate.152832118046533_climate
+        data:
+          hvac_mode: "off"
+
+  # ----------------------------------------------------------
+  # 9. MANUELL AUS HALTEN
+  # ----------------------------------------------------------
+  - id: klima_wz_manuell_aus_halten
+    alias: "Klima WZ - Manuell AUS halten"
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: climate.152832118046533_climate
+        not_to:
+          - "off"
+          - unavailable
+          - unknown
+    condition:
+      - condition: state
+        entity_id: input_select.klima_wohnzimmer_schalter
+        state: manuell_aus
+    action:
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.klima_wz_automation_aktiv
+      - service: climate.set_hvac_mode
+        target:
+          entity_id: climate.152832118046533_climate
+        data:
+          hvac_mode: "off"
+
+  # ----------------------------------------------------------
+  # 10. BATTERIE-MODUS EIN (Akku ≥ 95%)
+  #     Nur 10–22 Uhr, ignoriert Anwesenheit und Strompreis.
+  # ----------------------------------------------------------
+  - id: klima_wz_battery_an
+    alias: "Klima WZ - Batterie-Modus EIN (Akku ≥ 95%)"
+    mode: single
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.smartshunt_hq2305uvtaz_battery
+        above: 95
+      - platform: time_pattern
+        minutes: "/5"
+    condition:
+      - condition: state
+        entity_id: input_select.klima_wohnzimmer_schalter
+        state: auto
+      - condition: time
+        after: "10:00:00"
+        before: "22:00:00"
+      - condition: numeric_state
+        entity_id: sensor.smartshunt_hq2305uvtaz_battery
+        above: 95
+      - condition: template
+        value_template: >
+          {% set ts = state_attr('input_datetime.klima_wohnzimmer_battery_letzte_abschaltung', 'timestamp') %}
+          {{ ts == none or (now().timestamp() - ts) > 1800 }}
+      - condition: state
+        entity_id: input_boolean.klima_wohnzimmer_battery_modus
+        state: "off"
+    action:
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.klima_wz_automation_aktiv
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.klima_wohnzimmer_battery_modus
+      - choose:
+          - conditions:
+              - condition: numeric_state
+                entity_id: sensor.openweathermap_temperature
+                above: 18
+            sequence:
+              - service: climate.set_temperature
+                target:
+                  entity_id: climate.152832118046533_climate
+                data:
+                  hvac_mode: cool
+                  temperature: 24
+        default:
+          - service: climate.set_temperature
+            target:
+              entity_id: climate.152832118046533_climate
+            data:
+              hvac_mode: heat
+              temperature: 21
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.klima_wohnzimmer_letzte_einschaltung
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+  # ----------------------------------------------------------
+  # 11. BATTERIE-MODUS AUS (Akku < 85%)
+  # ----------------------------------------------------------
+  - id: klima_wz_battery_aus_akku
+    alias: "Klima WZ - Batterie-Modus AUS (Akku < 85%)"
+    mode: single
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.smartshunt_hq2305uvtaz_battery
+        below: 85
+      - platform: time_pattern
+        minutes: "/5"
+    condition:
+      - condition: state
+        entity_id: input_boolean.klima_wohnzimmer_battery_modus
+        state: "on"
+      - condition: numeric_state
+        entity_id: sensor.smartshunt_hq2305uvtaz_battery
+        below: 85
+    action:
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.klima_wz_automation_aktiv
+      - service: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.klima_wohnzimmer_battery_modus
+      - service: climate.set_hvac_mode
+        target:
+          entity_id: climate.152832118046533_climate
+        data:
+          hvac_mode: "off"
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.klima_wohnzimmer_battery_letzte_abschaltung
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+  # ----------------------------------------------------------
+  # 12. BATTERIE-MODUS AUS (Schalter verlässt Auto)
+  # ----------------------------------------------------------
+  - id: klima_wz_battery_aus_schalter
+    alias: "Klima WZ - Batterie-Modus AUS (Schalter nicht Auto)"
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: input_select.klima_wohnzimmer_schalter
+        not_to: auto
+    condition:
+      - condition: state
+        entity_id: input_boolean.klima_wohnzimmer_battery_modus
+        state: "on"
+    action:
+      - service: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.klima_wohnzimmer_battery_modus
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.klima_wohnzimmer_battery_letzte_abschaltung
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+  # ----------------------------------------------------------
+  # 13. MANUELL-MODUS VORAUSWAHL (Außentemperatur)
+  #     Wählt kühlen/heizen automatisch wenn Außentemp 18°C überschreitet.
+  #     Nutzer kann es jederzeit manuell überschreiben.
+  # ----------------------------------------------------------
+  - id: klima_wz_modus_vorauswahl
+    alias: "Klima WZ - Manuell-Modus Vorauswahl (Außentemp)"
+    mode: single
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.openweathermap_temperature
+        above: 18
+      - platform: numeric_state
+        entity_id: sensor.openweathermap_temperature
+        below: 18
+      - platform: homeassistant
+        event: start
+    action:
+      - choose:
+          - conditions:
+              - condition: numeric_state
+                entity_id: sensor.openweathermap_temperature
+                above: 18
+            sequence:
+              - service: input_select.select_option
+                target:
+                  entity_id: input_select.klima_wohnzimmer_manuell_modus
+                data:
+                  option: kühlen
+        default:
+          - service: input_select.select_option
+            target:
+              entity_id: input_select.klima_wohnzimmer_manuell_modus
+            data:
+              option: heizen
+
+  # ----------------------------------------------------------
+  # 14. AUTOMATION-FLAG ZURÜCKSETZEN
+  #     Setzt das interne Automation-Flag 30 Sekunden nach
+  #     dem Einschalten zurück. Midea AC braucht ~15s bis
+  #     der State in HA aktualisiert ist.
+  # ----------------------------------------------------------
+  - id: klima_wz_flag_reset
+    alias: "Klima WZ - Automation-Flag zurücksetzen"
+    mode: restart
+    trigger:
+      - platform: state
+        entity_id: input_boolean.klima_wz_automation_aktiv
+        to: "on"
+        for:
+          seconds: 30
+    action:
+      - service: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.klima_wz_automation_aktiv
+
+  # ----------------------------------------------------------
+  # 15. EXTERNE STEUERUNG ERKANNT (Fernbedienung / App)
+  #     Wenn die Klimaanlage sich ändert und das Automation-Flag
+  #     NICHT gesetzt ist → externe Steuerung erkannt
+  #     → Schalter auf manuell_an oder manuell_aus setzen
+  # ----------------------------------------------------------
+  - id: klima_wz_remote_erkannt
+    alias: "Klima WZ - Externe Steuerung erkannt"
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: climate.152832118046533_climate
+    condition:
+      - condition: state
+        entity_id: input_boolean.klima_wz_automation_aktiv
+        state: "off"
+      - condition: template
+        value_template: "{{ trigger.from_state.state != trigger.to_state.state }}"
+      - condition: template
+        value_template: >
+          {{ trigger.to_state.state not in ['unavailable', 'unknown'] and
+             trigger.from_state.state not in ['unavailable', 'unknown'] }}
+      - condition: template
+        value_template: >
+          {% if states('input_boolean.klima_wz_heizung_ersatz_aktiv') == 'on' and trigger.to_state.state == 'off' %}
+            {% set sensor = state_attr('climate.152832118046533_climate', 'indoor_temperature') | float(0) %}
+            {% set target = state_attr('climate.152832118046533_climate', 'temperature') | float(30) %}
+            {{ sensor < (target - 2) }}
+          {% else %}
+            true
+          {% endif %}
+    action:
+      - choose:
+          - conditions:
+              - condition: template
+                value_template: "{{ trigger.to_state.state != 'off' }}"
+            sequence:
+              - service: input_select.select_option
+                target:
+                  entity_id: input_select.klima_wohnzimmer_schalter
+                data:
+                  option: manuell_an
+        default:
+          - service: input_select.select_option
+            target:
+              entity_id: input_select.klima_wohnzimmer_schalter
+            data:
+              option: manuell_aus
+
+  # ----------------------------------------------------------
+  # 16. HEIZUNG ERSETZEN - AKTIVIEREN
+  #     Wenn Schalter AN + Preis günstig + Außentemp kalt genug:
+  #       1. Heizungsautomationen deaktivieren
+  #       2. BT-Thermostate auf hvac_mode:off → Ventile zu, Zieltemp bleibt!
+  #       3. AC heizt auf 30°C (eigene Thermostatik regelt intern)
+  #     BT Zieltemp (target_temp_high) wird von DROSSELN/NACHHEIZEN
+  #     als AC-Zieltemp verwendet → folgt automatisch dem Heizungsplan.
+  # ----------------------------------------------------------
+  - id: klima_wz_heizung_ersatz_aktivieren
+    alias: "Klima WZ - Heizung Ersetzen AKTIVIEREN"
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: input_boolean.klima_wz_heizung_ersatz_schalter
+        to: "on"
+      - platform: time_pattern
+        minutes: "/5"
+      - platform: template
+        value_template: >
+          {{ states('sensor.electricity_price_holunderweg_3') | float(99) <=
+             states('input_number.klima_wz_preis_heizen_ersatz_max') | float(0) }}
+    condition:
+      - condition: state
+        entity_id: input_boolean.klima_wz_heizung_ersatz_schalter
+        state: "on"
+      - condition: state
+        entity_id: input_select.klima_wohnzimmer_schalter
+        state: auto
+      - condition: template
+        value_template: >
+          {{ states('sensor.electricity_price_holunderweg_3') | float(99) <=
+             states('input_number.klima_wz_preis_heizen_ersatz_max') | float(0) }}
+      - condition: template
+        value_template: >
+          {{ states('sensor.openweathermap_temperature') | float(99) <
+             states('input_number.klima_wz_heizung_ersatz_aussentemp_max') | float(16) }}
+      - condition: state
+        entity_id: input_boolean.klima_wz_heizung_ersatz_aktiv
+        state: "off"
+      - condition: state
+        entity_id: input_boolean.klima_wohnzimmer_battery_modus
+        state: "off"
+    action:
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.klima_wz_automation_aktiv
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.klima_wz_heizung_ersatz_aktiv
+      - service: automation.turn_off
+        target:
+          entity_id:
+            - automation.heizung_wohnzimmer
+            - automation.heizung_esszimmer
+            - automation.heizung_kuche
+            - automation.heizung_auf_heat_stellen
+      - service: climate.set_hvac_mode
+        target:
+          entity_id:
+            - climate.bt_wohnzimmer_bt_wohnzimmer
+            - climate.bt_esszimmer_bt_esszimmer
+            - climate.bt_kuche_bt_kuche
+            - climate.bt_flur_bt_flur
+        data:
+          hvac_mode: "off"
+      - service: climate.set_temperature
+        target:
+          entity_id: climate.152832118046533_climate
+        data:
+          hvac_mode: heat
+          temperature: 30
+      - service: climate.turn_on
+        target:
+          entity_id: climate.152832118046533_climate
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.klima_wohnzimmer_letzte_einschaltung
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+  # ----------------------------------------------------------
+  # 17. HEIZUNG ERSETZEN - AKTIVIERUNG ERHÖHEN
+  #     Neue Strategie: AC bleibt immer im heat-Modus.
+  #     DROSSELN setzt Ziel auf 23°C → AC schläft (AC-Sensor > 23°C).
+  #     Wenn Raumtemp < 20.5°C:
+  #       → Ziel wieder auf 30°C → AC heizt durch
+  #     Fallback: AC off → Flag + turn_on + set_temperature
+  # ----------------------------------------------------------
+  - id: klima_wz_heizung_ersatz_nachheizen
+    alias: "Klima WZ - Heizung Ersatz AKTIVIEREN (Raumtemp gefallen)"
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: input_boolean.klima_wz_heizung_ersatz_aktiv
+        to: "on"
+      - platform: template
+        value_template: >
+          {% set ziel = (states('input_number.klima_wz_heizung_ersatz_temp_im_raum') | float(21)) if is_state('input_boolean.anwesenheit_wohnbereich', 'on') else ((states('input_number.klima_wz_heizung_ersatz_temp_nacht') | float(19)) if (is_state('input_boolean.anwesnedheit_irgendjemand', 'on') and now().hour < 8) else ((states('input_number.klima_wz_heizung_ersatz_temp_zuhause') | float(20)) if is_state('input_boolean.anwesnedheit_irgendjemand', 'on') else (states('input_number.klima_wz_heizung_ersatz_temp_niemand') | float(18)))) %}
+          {{ states('sensor.jans_echo_dot_temperatur') | float(99) < (ziel - 0.5) }}
+      - platform: time_pattern
+        minutes: "/5"
+    condition:
+      - condition: state
+        entity_id: input_boolean.klima_wz_heizung_ersatz_aktiv
+        state: "on"
+      - condition: state
+        entity_id: input_boolean.klima_wz_heizung_ersatz_schalter
+        state: "on"
+      - condition: state
+        entity_id: input_select.klima_wohnzimmer_schalter
+        state: auto
+      - condition: template
+        value_template: >
+          {{ states('sensor.electricity_price_holunderweg_3') | float(99) <=
+             states('input_number.klima_wz_preis_heizen_ersatz_max') | float(0) }}
+      - condition: template
+        value_template: >
+          {{ states('sensor.openweathermap_temperature') | float(99) <
+             states('input_number.klima_wz_heizung_ersatz_aussentemp_max') | float(16) }}
+      - condition: template
+        value_template: >
+          {% set ziel = (states('input_number.klima_wz_heizung_ersatz_temp_im_raum') | float(21)) if is_state('input_boolean.anwesenheit_wohnbereich', 'on') else ((states('input_number.klima_wz_heizung_ersatz_temp_nacht') | float(19)) if (is_state('input_boolean.anwesnedheit_irgendjemand', 'on') and now().hour < 8) else ((states('input_number.klima_wz_heizung_ersatz_temp_zuhause') | float(20)) if is_state('input_boolean.anwesnedheit_irgendjemand', 'on') else (states('input_number.klima_wz_heizung_ersatz_temp_niemand') | float(18)))) %}
+          {{ states('sensor.jans_echo_dot_temperatur') | float(99) < (ziel - 0.5) }}
+      - condition: or
+        conditions:
+          - condition: not
+            conditions:
+              - condition: state
+                entity_id: climate.152832118046533_climate
+                state: heat
+          - condition: template
+            value_template: >
+              {{ state_attr('climate.152832118046533_climate', 'temperature') | float(30) < 27 }}
+    action:
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: climate.152832118046533_climate
+                state: heat
+            sequence:
+              # AC ist schon an (heat) aber gedrosselt → Zieltemp erhöhen, kein State-Wechsel
+              - service: climate.set_temperature
+                target:
+                  entity_id: climate.152832118046533_climate
+                data:
+                  temperature: 30
+        default:
+          # AC ist aus → Flag setzen, dann einschalten
+          - service: input_boolean.turn_on
+            target:
+              entity_id: input_boolean.klima_wz_automation_aktiv
+          - service: climate.set_temperature
+            target:
+              entity_id: climate.152832118046533_climate
+            data:
+              hvac_mode: heat
+              temperature: 30
+          - service: climate.turn_on
+            target:
+              entity_id: climate.152832118046533_climate
+          - service: input_datetime.set_datetime
+            target:
+              entity_id: input_datetime.klima_wohnzimmer_letzte_einschaltung
+            data:
+              datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+  # ----------------------------------------------------------
+  # 18. HEIZUNG ERSETZEN - DEAKTIVIEREN
+  #     Auslöser: Schalter AUS, Preis zu hoch, oder Außentemp zu warm
+  #     → Heizungsautomationen reaktivieren + antriggern
+  #     → Klimaanlage AUS
+  #     Keine Uhrzeitbeschränkung.
+  # ----------------------------------------------------------
+  - id: klima_wz_heizung_ersatz_aus
+    alias: "Klima WZ - Heizung Ersetzen DEAKTIVIEREN"
+    mode: single
+    trigger:
+      - platform: state
+        entity_id: input_boolean.klima_wz_heizung_ersatz_schalter
+        to: "off"
+      - platform: time_pattern
+        minutes: "/5"
+      - platform: template
+        value_template: >
+          {{ states('sensor.electricity_price_holunderweg_3') | float(0) >
+             states('input_number.klima_wz_preis_heizen_ersatz_max') | float(0) }}
+      - platform: template
+        value_template: >
+          {{ states('sensor.openweathermap_temperature') | float(0) >=
+             states('input_number.klima_wz_heizung_ersatz_aussentemp_max') | float(16) }}
+    condition:
+      - condition: state
+        entity_id: input_boolean.klima_wz_heizung_ersatz_aktiv
+        state: "on"
+      - condition: or
+        conditions:
+          - condition: state
+            entity_id: input_boolean.klima_wz_heizung_ersatz_schalter
+            state: "off"
+          - condition: template
+            value_template: >
+              {{ states('sensor.electricity_price_holunderweg_3') | float(0) >
+                 states('input_number.klima_wz_preis_heizen_ersatz_max') | float(0) }}
+          - condition: template
+            value_template: >
+              {{ states('sensor.openweathermap_temperature') | float(0) >=
+                 states('input_number.klima_wz_heizung_ersatz_aussentemp_max') | float(16) }}
+    action:
+      - service: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.klima_wz_automation_aktiv
+      - service: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.klima_wz_heizung_ersatz_aktiv
+      - service: climate.set_hvac_mode
+        target:
+          entity_id: climate.152832118046533_climate
+        data:
+          hvac_mode: "off"
+      - service: climate.set_hvac_mode
+        target:
+          entity_id:
+            - climate.bt_wohnzimmer_bt_wohnzimmer
+            - climate.bt_esszimmer_bt_esszimmer
+            - climate.bt_kuche_bt_kuche
+            - climate.bt_flur_bt_flur
+        data:
+          hvac_mode: heat
+      - service: automation.turn_on
+        target:
+          entity_id:
+            - automation.heizung_wohnzimmer
+            - automation.heizung_esszimmer
+            - automation.heizung_kuche
+            - automation.heizung_auf_heat_stellen
+      - service: automation.trigger
+        target:
+          entity_id:
+            - automation.heizung_wohnzimmer
+            - automation.heizung_kuche
+        data:
+          skip_condition: false
+      - service: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.klima_wz_heizung_ersatz_letzte_abschaltung
+        data:
+          datetime: "{{ now().strftime('%Y-%m-%d %H:%M:%S') }}"
+
+  # ----------------------------------------------------------
+  # 19. HEIZUNG ERSETZEN - ANWESENHEITSWECHSEL
+  #     Wenn sich die Anwesenheit ändert während Ersatz-Modus aktiv:
+  #     BT-Thermostat-Zieltemp aktualisieren (BT ist hvac_mode:off
+  #     → kein Heizen über Heizkörper, aber DROSSELN/NACHHEIZEN lesen
+  #     target_temp_high → folgt automatisch der Anwesenheit).
+  #     im Raum → 21°C / zuhause → 20°C / niemand → 18°C
+  # ----------------------------------------------------------
+  - id: klima_wz_heizung_ersatz_anwesenheit
+    alias: "Klima WZ - Heizung Ersatz Anwesenheitswechsel"
+    mode: queued
+    max: 2
+    trigger:
+      - platform: state
+        entity_id: input_boolean.anwesnedheit_irgendjemand
+        to: "off"
+      - platform: state
+        entity_id: input_boolean.anwesnedheit_irgendjemand
+        to: "on"
+        for: "00:15:00"
+      - platform: state
+        entity_id: input_boolean.anwesenheit_wohnbereich
+        for: "00:15:00"
+    condition:
+      - condition: state
+        entity_id: input_boolean.klima_wz_heizung_ersatz_aktiv
+        state: "on"
+    action:
+      - choose:
+          - conditions:
+              - condition: state
+                entity_id: input_boolean.anwesenheit_wohnbereich
+                state: "on"
+            sequence:
+              - service: climate.set_temperature
+                target:
+                  entity_id: climate.bt_wohnzimmer_bt_wohnzimmer
+                data:
+                  target_temp_high: "{{ states('input_number.klima_wz_heizung_ersatz_temp_im_raum') | float(21) }}"
+                  target_temp_low: 16
+              - if:
+                  - condition: state
+                    entity_id: climate.152832118046533_climate
+                    state: heat
+                then:
+                  - service: input_boolean.turn_on
+                    target:
+                      entity_id: input_boolean.klima_wz_automation_aktiv
+                  - service: climate.set_temperature
+                    target:
+                      entity_id: climate.152832118046533_climate
+                    data:
+                      temperature: "{{ states('input_number.klima_wz_heizung_ersatz_temp_im_raum') | float(21) }}"
+          - conditions:
+              - condition: state
+                entity_id: input_boolean.anwesnedheit_irgendjemand
+                state: "on"
+            sequence:
+              - service: climate.set_temperature
+                target:
+                  entity_id: climate.bt_wohnzimmer_bt_wohnzimmer
+                data:
+                  target_temp_high: "{{ states('input_number.klima_wz_heizung_ersatz_temp_zuhause') | float(20) }}"
+                  target_temp_low: 16
+              - if:
+                  - condition: state
+                    entity_id: climate.152832118046533_climate
+                    state: heat
+                then:
+                  - service: input_boolean.turn_on
+                    target:
+                      entity_id: input_boolean.klima_wz_automation_aktiv
+                  - service: climate.set_temperature
+                    target:
+                      entity_id: climate.152832118046533_climate
+                    data:
+                      temperature: >
+                        {% set h = now().hour %}
+                        {{ states('input_number.klima_wz_heizung_ersatz_temp_nacht') | float(19) if h < 8 else states('input_number.klima_wz_heizung_ersatz_temp_zuhause') | float(20) }}
+        default:
+          - service: climate.set_temperature
+            target:
+              entity_id: climate.bt_wohnzimmer_bt_wohnzimmer
+            data:
+              target_temp_high: "{{ states('input_number.klima_wz_heizung_ersatz_temp_niemand') | float(18) }}"
+              target_temp_low: 16
+          - if:
+              - condition: state
+                entity_id: climate.152832118046533_climate
+                state: heat
+            then:
+              - service: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.klima_wz_automation_aktiv
+              - service: climate.set_temperature
+                target:
+                  entity_id: climate.152832118046533_climate
+                data:
+                  temperature: "{{ states('input_number.klima_wz_heizung_ersatz_temp_niemand') | float(18) }}"
