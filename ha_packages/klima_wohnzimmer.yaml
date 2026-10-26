@@ -1138,11 +1138,6 @@ automation:
     trigger:
       - platform: state
         entity_id: input_boolean.anwesnedheit_irgendjemand
-        to: "off"
-      - platform: state
-        entity_id: input_boolean.anwesnedheit_irgendjemand
-        to: "on"
-        for: "00:15:00"
       - platform: state
         entity_id: input_boolean.anwesenheit_wohnbereich
         for: "00:15:00"
