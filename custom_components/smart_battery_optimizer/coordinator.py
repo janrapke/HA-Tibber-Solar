@@ -195,6 +195,12 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         self.tomorrow_net_solar_wh: float = 0.0
         self.overfill_absorption_last_wh = 0.0
         self._overfill_emergency_active = False
+        # day-ahead snapshot, running forecast for today, measured totals, yesterday's comparison
+        self.day_snapshot: dict = {}
+        self.day_running: dict = {}
+        self.day_review: dict = {}
+        self._day_actual: dict = {}
+        self._last_actual_time: datetime | None = None
 
     # ------------------------------------------------------------------ setup
     async def _async_setup(self):
@@ -265,6 +271,9 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         self.solar_model.load_dict(data.get("solar", {}))
         self.load_model.load_dict(data.get("load", {}))
         self._bootstrapped = bool(data.get("bootstrapped"))
+        self.day_snapshot = data.get("day_snapshot") or {}
+        self.day_review = data.get("day_review") or {}
+        self._day_actual = data.get("day_actual") or {}
 
     async def async_save_models(self) -> None:
         if self._store is None:
@@ -274,6 +283,9 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             "load": self.load_model.to_dict(),
             "bootstrapped": self._bootstrapped,
             "plan_summary": getattr(self, "plan_summary", {}),
+            "day_snapshot": self.day_snapshot,
+            "day_review": self.day_review,
+            "day_actual": self._day_actual,
         })
 
     async def async_reset_models(self) -> None:
@@ -668,6 +680,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         absorption = self._is_absorption()
         result.update(soc=soc, solar=solar, grid=imp, load=load, absorption=absorption)
         self._account_savings(now, dtu)
+        self._account_day(now, solar, load, dtu)
 
         # staleness watchdog
         if soc is None:
@@ -715,6 +728,107 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         sav = self.learning_engine.data.setdefault("savings", {})
         sav["total_battery_savings"] = sav.get("total_battery_savings", 0.0) + eur
         sav["total_battery_savings_vs_no_battery"] = sav.get("total_battery_savings_vs_no_battery", 0.0) + eur
+
+    def _account_day(self, now: datetime, solar: float | None, load: float | None, inverter_w: float) -> None:
+        """Integrate today's real energies; at the date change compare them with the snapshot."""
+        today = dt_util.as_local(now).date().isoformat()
+        if self._day_actual.get("date") != today:
+            if self._day_actual.get("date"):
+                self._close_day()
+            self._day_actual = {"date": today, "solar_wh": 0.0, "load_wh": 0.0,
+                                "grid_charge_wh": 0.0, "discharge_wh": 0.0, "minutes": 0}
+        last = self._last_actual_time
+        self._last_actual_time = now
+        if last is None:
+            return
+        hours = min((now - last).total_seconds(), 300) / 3600.0
+        act = self._day_actual
+        act["minutes"] += round(hours * 60)
+        if solar is not None:
+            act["solar_wh"] += solar * hours
+        if load is not None:
+            act["load_wh"] += load * hours
+        act["discharge_wh"] += max(0.0, inverter_w) * hours
+        charger_w = self._read_float(self._charger_power_sensor())
+        if charger_w is not None and charger_w > CHARGER_IDLE_W:
+            act["grid_charge_wh"] += charger_w * hours
+
+    def _close_day(self) -> None:
+        """Compare the finished day with its day-ahead snapshot (kept in day_review)."""
+        act = self._day_actual
+        snap = self.day_snapshot if self.day_snapshot.get("date") == act.get("date") else {}
+
+        def kwh(wh):
+            return round(wh / 1000.0, 2)
+
+        def err(fc, real):
+            return round(100.0 * (fc - real) / real, 1) if fc is not None and real > 0.05 else None
+
+        solar_real = kwh(act.get("solar_wh", 0.0))
+        load_real = kwh(act.get("load_wh", 0.0))
+        self.day_review = {
+            "datum": act.get("date"),
+            "erfasst_minuten": act.get("minutes", 0),
+            "prognose_vorhanden": bool(snap),
+            "solar_prognose_kwh": snap.get("solar_kwh"),
+            "solar_echt_kwh": solar_real,
+            "solar_abweichung_pct": err(snap.get("solar_kwh"), solar_real),
+            "verbrauch_prognose_kwh": snap.get("verbrauch_kwh"),
+            "verbrauch_echt_kwh": load_real,
+            "verbrauch_abweichung_pct": err(snap.get("verbrauch_kwh"), load_real),
+            "netzladen_geplant_kwh": snap.get("netzladen_kwh"),
+            "netzladen_echt_kwh": kwh(act.get("grid_charge_wh", 0.0)),
+            "entladen_geplant_kwh": snap.get("entladen_kwh"),
+            "entladen_echt_kwh": kwh(act.get("discharge_wh", 0.0)),
+        }
+        _LOGGER.info("Day review %s", self.day_review)
+
+    def _take_day_snapshot(self, now: datetime, slots: list[Slot]) -> None:
+        """Freeze today's forecast from the first plan after midnight (day-ahead baseline)."""
+        today = dt_util.as_local(now).date()
+        if self.day_snapshot.get("date") == today.isoformat():
+            return
+        if dt_util.as_local(now).hour >= 2:
+            return  # only a plan made around midnight is a fair day-ahead baseline
+        solar = load = grid = dis = 0.0
+        hours = 0.0
+        quarters: list[int] = []
+        for step, slot in zip(self.plan.steps, slots):
+            if dt_util.as_local(step.start).date() != today:
+                continue
+            hours += 0.25
+            quarters.append(round(slot.solar_w * 0.25))
+            solar += slot.solar_w * 0.25
+            load += slot.load_w * 0.25
+            dis += step.discharge_wh
+            if step.action == ACT_GRID_CHARGE:
+                grid += max(0.0, step.grid_import_wh - slot.load_w * 0.25)
+        if hours < 20:
+            return  # prices for today not complete yet
+        self.day_snapshot = {
+            "date": today.isoformat(),
+            "erstellt": dt_util.as_local(now).strftime("%H:%M"),
+            "solar_kwh": round(solar / 1000.0, 2),
+            "verbrauch_kwh": round(load / 1000.0, 2),
+            "netzladen_kwh": round(grid / 1000.0, 2),
+            "entladen_kwh": round(dis / 1000.0, 2),
+            "solar_viertelstunden_wh": quarters,
+        }
+
+    def _update_day_running(self) -> None:
+        """Today's totals as currently expected: measured so far + forecast for the rest."""
+        act = self._day_actual
+        self.day_running = {
+            "solar_gesamt_kwh": round((act.get("solar_wh", 0.0) + self.predicted_remaining_solar) / 1000.0, 2),
+            "solar_bisher_kwh": round(act.get("solar_wh", 0.0) / 1000.0, 2),
+            "solar_rest_prognose_kwh": round(self.predicted_remaining_solar / 1000.0, 2),
+            "verbrauch_gesamt_kwh": round((act.get("load_wh", 0.0) + self.predicted_remaining_consumption) / 1000.0, 2),
+            "verbrauch_bisher_kwh": round(act.get("load_wh", 0.0) / 1000.0, 2),
+            "netzladen_bisher_kwh": round(act.get("grid_charge_wh", 0.0) / 1000.0, 2),
+            "entladen_bisher_kwh": round(act.get("discharge_wh", 0.0) / 1000.0, 2),
+            "prognose_tagesbeginn_solar_kwh": self.day_snapshot.get("solar_kwh")
+            if self.day_snapshot.get("date") == act.get("date") else None,
+        }
 
     def _finish_quarter(self) -> None:
         d, q = self._quarter_key
@@ -782,6 +896,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         self._last_plan_time = now
         self._plan_quarter = self._quarter_key
         self._build_plan_outputs(now, slots, params)
+        self._take_day_snapshot(now, slots)
+        self._update_day_running()
 
     def _build_plan_outputs(self, now: datetime, slots: list[Slot], params: BatteryParams) -> None:
         local_today = dt_util.as_local(now).date()

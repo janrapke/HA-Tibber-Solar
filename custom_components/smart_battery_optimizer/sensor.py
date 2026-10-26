@@ -9,6 +9,8 @@ from homeassistant.const import EntityCategory
 from .const import DOMAIN
 from .coordinator import SmartBatteryOptimizerCoordinator
 
+PLAN_ATTRIBUTE_KEYS = ("hour", "ts", "price", "solar_wh", "consumption_wh", "battery_pct_end", "planned_action")
+
 async def async_setup_entry(
     hass: HomeAssistant, entry: ConfigEntry, async_add_entities: AddEntitiesCallback
 ) -> None:
@@ -34,6 +36,9 @@ async def async_setup_entry(
         # Morning SOC planning (Step 3)
         TargetMorningSocSensor(coordinator, entry.entry_id),
         TomorrowForecastSolarSensor(coordinator, entry.entry_id),
+        DayForecastSensor(coordinator, entry.entry_id),
+        DayRunningForecastSensor(coordinator, entry.entry_id),
+        DayReviewSensor(coordinator, entry.entry_id),
     ]
 
     app_entities = coordinator.appliance_entities.get('sensor', [])
@@ -187,7 +192,9 @@ class ForecastPlanSensor(CoordinatorEntity, SensorEntity):
 
             optimized_plan = []
             for block in truncated_plan:
-                optimized_block = block.copy()
+                # only the keys the cards read: Home Assistant drops attributes larger than
+                # 16 KB from the history, so a full plan would never reach the recorder
+                optimized_block = {k: block[k] for k in PLAN_ATTRIBUTE_KEYS if k in block}
 
                 # Abbreviate actions to save significant space
                 action = optimized_block.get("planned_action", "")
@@ -551,3 +558,91 @@ class TomorrowForecastSolarSensor(CoordinatorEntity, SensorEntity):
         if val is None:
             return None
         return round(val, 0)
+
+
+class DayForecastSensor(CoordinatorEntity, SensorEntity):
+    """Today's forecast, frozen at the first plan after midnight (day-ahead view).
+
+    State: expected solar energy today in kWh. Attributes: the other planned
+    totals. Its history is the record the nightly review compares against.
+    """
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_native_unit_of_measurement = "kWh"
+    _attr_icon = "mdi:crystal-ball"
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry_id}_day_forecast"
+        self._attr_name = "Prognose heute (Tagesbeginn)"
+        self._attr_device_info = {"identifiers": {(DOMAIN, entry_id)}, "name": "Smart Battery Optimizer",
+                                  "manufacturer": "Custom"}
+
+    @property
+    def native_value(self):
+        snap = getattr(self.coordinator, "day_snapshot", None) or {}
+        return snap.get("solar_kwh")
+
+    @property
+    def extra_state_attributes(self):
+        snap = getattr(self.coordinator, "day_snapshot", None) or {}
+        return {k: v for k, v in snap.items() if k != "solar_kwh"}
+
+
+class DayReviewSensor(CoordinatorEntity, SensorEntity):
+    """Yesterday's forecast compared with what really happened.
+
+    State: solar forecast error in percent (positive = forecast too high).
+    """
+
+    _attr_has_entity_name = True
+    _attr_native_unit_of_measurement = "%"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:scale-balance"
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry_id}_day_review"
+        self._attr_name = "Prognose-Bilanz gestern"
+        self._attr_device_info = {"identifiers": {(DOMAIN, entry_id)}, "name": "Smart Battery Optimizer",
+                                  "manufacturer": "Custom"}
+
+    @property
+    def native_value(self):
+        review = getattr(self.coordinator, "day_review", None) or {}
+        return review.get("solar_abweichung_pct")
+
+    @property
+    def extra_state_attributes(self):
+        return dict(getattr(self.coordinator, "day_review", None) or {})
+
+
+class DayRunningForecastSensor(CoordinatorEntity, SensorEntity):
+    """Today's expected solar total as it evolves: measured so far + forecast for the rest.
+
+    Updated after every replan, so its history shows how the forecast adapted
+    to the real values during the day.
+    """
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_native_unit_of_measurement = "kWh"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:chart-timeline-variant"
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry_id}_day_running_forecast"
+        self._attr_name = "Prognose heute (laufend)"
+        self._attr_device_info = {"identifiers": {(DOMAIN, entry_id)}, "name": "Smart Battery Optimizer",
+                                  "manufacturer": "Custom"}
+
+    @property
+    def native_value(self):
+        running = getattr(self.coordinator, "day_running", None) or {}
+        return running.get("solar_gesamt_kwh")
+
+    @property
+    def extra_state_attributes(self):
+        return dict(getattr(self.coordinator, "day_running", None) or {})
