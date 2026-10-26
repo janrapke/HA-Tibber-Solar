@@ -98,6 +98,8 @@ STALE_NOTIFY_AFTER = timedelta(minutes=30)
 HISTORY_DAYS_SOLAR = 60
 HISTORY_DAYS_LOAD = 10
 EARLY_EXCESS_LOOKAHEAD_H = 6.0
+CHARGER_IDLE_W = 30.0                     # above this the grid charger counts as running
+CHARGER_FAULT_NOTIFY_AFTER = timedelta(minutes=3)
 
 ACTION_TEXT = {
     ACT_DISCHARGE: "Dispatch: Akku versorgt das Haus",
@@ -178,6 +180,11 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         self._last_action = ACT_DISCHARGE
         self._stale_since: datetime | None = None
         self._stale_notified = False
+        self._was_enabled = True
+        self._charger_should_run = False
+        self._charger_power_entity: str | None = None
+        self._charger_fault_since: datetime | None = None
+        self._charger_fault_notified = False
 
         # ---- outputs used by sensors ----
         self.calculated_house_consumption = 0.0
@@ -602,6 +609,16 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 await step(now, result)
             except Exception:  # noqa: BLE001 - one failing step must never stop the loop
                 _LOGGER.exception("Step '%s' failed", name)
+                if name == "execute":
+                    # whatever went wrong, the grid charger must not keep running unsupervised
+                    try:
+                        await self._apply_grid_charger(False)
+                    except Exception:  # noqa: BLE001
+                        _LOGGER.exception("Emergency grid charger shutdown failed")
+        try:
+            await self._charger_watchdog(now)
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("Grid charger watchdog failed")
         return self._output(result)
 
     async def _step_appliances(self, now, result) -> None:
@@ -660,7 +677,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 await self._notify(
                     "Smart Battery Optimizer: Akkustand fehlt",
                     f"Der Sensor {c.get(CONF_BATTERY_LEVEL_SENSOR)} liefert seit über 30 Minuten keinen Wert. "
-                    "Der Wechselrichter bleibt im sicheren Modus (OpenDTU-Limiter regelt selbst).")
+                    "Der Wechselrichter behält seinen Zustand, das Netzladen ist gestoppt.")
         else:
             if self._stale_notified:
                 await self.hass.services.async_call(
@@ -838,7 +855,12 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
     async def _step_execute(self, now, result) -> None:
         if not self.is_enabled:
             self.current_operating_mode = "Optimizer deaktiviert (keine Steuerung)"
+            if self._was_enabled:
+                # leaving automatic control: never leave the grid charger running behind
+                await self._apply_grid_charger(False)
+            self._was_enabled = False
             return
+        self._was_enabled = True
         soc = result.get("soc")
         absorption = result.get("absorption", False)
         price = self._current_price(now)
@@ -895,15 +917,80 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             await self._apply_inverter(now, inverter_on)
         await self._apply_excess(now, soc, absorption, price)
 
+    def _charger_domain(self, sw: str) -> str:
+        d = sw.split(".")[0]
+        return d if d in ("switch", "input_boolean") else "homeassistant"
+
     async def _apply_grid_charger(self, on: bool) -> None:
         sw = self.config.get(CONF_GRID_CHARGER_SWITCH)
+        self._charger_should_run = on
         st = self.hass.states.get(sw) if sw else None
         if st is None:
             return
         if on and st.state != "on":
-            await self.hass.services.async_call("switch", "turn_on", {"entity_id": sw})
-        elif not on and st.state == "on":
-            await self.hass.services.async_call("switch", "turn_off", {"entity_id": sw})
+            await self.hass.services.async_call(self._charger_domain(sw), "turn_on", {"entity_id": sw})
+        elif not on and (st.state == "on" or st.attributes.get("assumed_state")):
+            # assumed-state (template) switches may show "off" while the relay is on:
+            # for those the off command is repeated every cycle
+            await self.hass.services.async_call(self._charger_domain(sw), "turn_off", {"entity_id": sw})
+
+    def _charger_power_sensor(self) -> str | None:
+        """Power sensor on the same device as the grid charger switch (auto-detected)."""
+        if self._charger_power_entity is not None:
+            return self._charger_power_entity or None
+        self._charger_power_entity = ""
+        sw = self.config.get(CONF_GRID_CHARGER_SWITCH)
+        if not sw:
+            return None
+        try:
+            from homeassistant.helpers import entity_registry as er
+            reg = er.async_get(self.hass)
+            entry = reg.async_get(sw)
+            if entry is not None and entry.device_id is not None:
+                for ent in er.async_entries_for_device(reg, entry.device_id):
+                    if ent.domain == "sensor" and (ent.device_class or ent.original_device_class) == "power":
+                        self._charger_power_entity = ent.entity_id
+                        break
+        except Exception:  # noqa: BLE001
+            _LOGGER.debug("Could not detect grid charger power sensor", exc_info=True)
+        return self._charger_power_entity or None
+
+    async def _charger_watchdog(self, now: datetime) -> None:
+        """Independent check: charger should be off but is on or draws power -> force it off."""
+        sw = self.config.get(CONF_GRID_CHARGER_SWITCH)
+        if not sw or self._charger_should_run or not self.is_enabled:
+            # optimizer switched off by the user: manual control of the charger is theirs
+            self._charger_fault_since = None
+            return
+        st = self.hass.states.get(sw)
+        power = self._read_float(self._charger_power_sensor())
+        running = (st is not None and st.state == "on") or (power is not None and power > CHARGER_IDLE_W)
+        if not running:
+            if self._charger_fault_notified:
+                await self.hass.services.async_call(
+                    "persistent_notification", "dismiss", {"notification_id": f"{DOMAIN}_charger"})
+            self._charger_fault_since = None
+            self._charger_fault_notified = False
+            return
+        self._charger_fault_since = self._charger_fault_since or now
+        await self.hass.services.async_call(self._charger_domain(sw), "turn_off", {"entity_id": sw})
+        if now - self._charger_fault_since >= CHARGER_FAULT_NOTIFY_AFTER and not self._charger_fault_notified:
+            self._charger_fault_notified = True
+            what = f"{power:.0f} W" if power is not None else ("Zustand " + (st.state if st else "?"))
+            await self.hass.services.async_call("persistent_notification", "create", {
+                "notification_id": f"{DOMAIN}_charger",
+                "title": "Smart Battery Optimizer: Netzladegerät lässt sich nicht abschalten",
+                "message": (f"Das Netzladegerät ({sw}) sollte aus sein, meldet aber {what}. "
+                            "Der Abschaltbefehl wird jede Minute wiederholt. Bitte prüfen!"),
+            })
+            _LOGGER.error("Grid charger %s should be off but reports %s", sw, what)
+
+    async def async_safe_shutdown(self) -> None:
+        """On unload / Home Assistant stop: leave the grid charger off."""
+        try:
+            await self._apply_grid_charger(False)
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("Turning off grid charger on shutdown failed")
 
     async def _apply_inverter(self, now: datetime, turn_on: bool) -> None:
         is_on = self._inverter_read_state()

@@ -3,7 +3,7 @@ import logging
 import pathlib
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EVENT_HOMEASSISTANT_STARTED
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceEntry
 
@@ -114,6 +114,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     entry.async_on_unload(entry.add_update_listener(update_listener))
 
+    async def _on_stop(_event) -> None:
+        await coordinator.async_safe_shutdown()
+
+    entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _on_stop))
+
     return True
 
 async def update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -124,6 +129,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     coordinator = hass.data[DOMAIN].get(entry.entry_id, {}).get("coordinator")
     if coordinator:
+        await coordinator.async_safe_shutdown()
         await coordinator.async_shutdown_save()
 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
