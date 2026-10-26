@@ -654,6 +654,77 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             await self._refresh_weather(now)
         except Exception as err:  # noqa: BLE001
             _LOGGER.warning("Weather refresh failed: %s", err)
+        try:
+            await self._refresh_satellite(now)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.debug("Satellite irradiance refresh failed: %s", err)
+
+    async def _refresh_satellite(self, now: datetime) -> None:
+        """Measured (satellite) irradiance of the last two days, used only for the day review.
+
+        It separates a wrong weather forecast from a wrong site model. ~20 min delay.
+        """
+        last = getattr(self, "_last_sat_fetch", None)
+        if last is not None and now - last < WEATHER_EVERY:
+            return
+        lat, lon = self.hass.config.latitude, self.hass.config.longitude
+        if lat is None or lon is None:
+            return
+        self._last_sat_fetch = now
+        today = dt_util.as_utc(now).date()
+        url = ("https://satellite-api.open-meteo.com/v1/archive"
+               f"?latitude={lat}&longitude={lon}"
+               "&hourly=shortwave_radiation,direct_normal_irradiance,diffuse_radiation"
+               "&models=satellite_radiation_seamless"
+               f"&start_date={(today - timedelta(days=2)).isoformat()}&end_date={today.isoformat()}"
+               "&timezone=UTC")
+        session = async_get_clientsession(self.hass)
+        async with session.get(url, timeout=20) as resp:
+            if resp.status != 200:
+                return
+            data = await resp.json()
+        h = data.get("hourly", {})
+        rows = []
+        for t, g, dn, df in zip(h.get("time", []), h.get("shortwave_radiation", []),
+                                h.get("direct_normal_irradiance", []), h.get("diffuse_radiation", [])):
+            if t is None or g is None:
+                continue  # not measured yet
+            ts = dt_util.parse_datetime(t + "+00:00")
+            if ts is None:
+                continue
+            rows.append({"t": ts - timedelta(minutes=30), "ghi": g or 0.0, "dni": dn or 0.0, "dhi": df or 0.0})
+        if rows:
+            self._sat_weather = rows
+
+    def _ghi_day_kwh_m2(self, rows: list[dict] | None, day_iso: str) -> float | None:
+        """Daily GHI sum (kWh/m²) of hourly rows whose centre falls on the local date."""
+        if not rows:
+            return None
+        vals = [r["ghi"] for r in rows if dt_util.as_local(r["t"]).date().isoformat() == day_iso]
+        if len(vals) < 20:
+            return None  # day not (yet) covered
+        return round(sum(vals) / 1000.0, 2)
+
+    def _model_day_kwh(self, rows: list[dict] | None, day_iso: str) -> float | None:
+        """Solar energy the current site model gives for that day with the given weather."""
+        if not rows:
+            return None
+        from datetime import date as _date, time as _time
+        start = dt_util.as_utc(datetime.combine(_date.fromisoformat(day_iso), _time.min,
+                                                tzinfo=dt_util.DEFAULT_TIME_ZONE))
+        total = 0.0
+        covered = 0
+        t = start
+        while dt_util.as_local(t).date().isoformat() == day_iso:
+            centre = t + timedelta(minutes=7, seconds=30)
+            w = self._weather_at(centre, rows)
+            if w is not None:
+                total += self.solar_model.predict(centre, w["ghi"], w["dni"], w["dhi"]) * 0.25
+                covered += 1
+            t += timedelta(minutes=15)
+        if covered < 80:
+            return None
+        return round(total / 1000.0, 2)
 
     async def _run_bootstrap(self) -> None:
         try:
@@ -766,6 +837,9 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
         solar_real = kwh(act.get("solar_wh", 0.0))
         load_real = kwh(act.get("load_wh", 0.0))
+        sat = getattr(self, "_sat_weather", None)
+        ghi_meas = self._ghi_day_kwh_m2(sat, act.get("date", ""))
+        model_meas = self._model_day_kwh(sat, act.get("date", ""))
         self.day_review = {
             "datum": act.get("date"),
             "erfasst_minuten": act.get("minutes", 0),
@@ -773,6 +847,13 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             "solar_prognose_kwh": snap.get("solar_kwh"),
             "solar_echt_kwh": solar_real,
             "solar_abweichung_pct": err(snap.get("solar_kwh"), solar_real),
+            # split of the solar error: wrong weather forecast vs. wrong site model
+            "einstrahlung_prognose_kwh_m2": snap.get("einstrahlung_prognose_kwh_m2"),
+            "einstrahlung_gemessen_kwh_m2": ghi_meas,
+            "wetter_abweichung_pct": err(snap.get("einstrahlung_prognose_kwh_m2"), ghi_meas or 0.0)
+            if ghi_meas else None,
+            "solar_modell_mit_messwetter_kwh": model_meas,
+            "modell_abweichung_pct": err(model_meas, solar_real),
             "verbrauch_prognose_kwh": snap.get("verbrauch_kwh"),
             "verbrauch_echt_kwh": load_real,
             "verbrauch_abweichung_pct": err(snap.get("verbrauch_kwh"), load_real),
@@ -809,6 +890,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             "date": today.isoformat(),
             "erstellt": dt_util.as_local(now).strftime("%H:%M"),
             "solar_kwh": round(solar / 1000.0, 2),
+            "einstrahlung_prognose_kwh_m2": self._ghi_day_kwh_m2(self._weather, today.isoformat()),
             "verbrauch_kwh": round(load / 1000.0, 2),
             "netzladen_kwh": round(grid / 1000.0, 2),
             "entladen_kwh": round(dis / 1000.0, 2),
