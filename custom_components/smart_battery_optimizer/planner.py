@@ -116,11 +116,19 @@ def optimize(slots: list[Slot], soc_pct: float, p: BatteryParams,
     e_max = p.capacity_wh * p.max_pct / 100.0
     de = (e_max - e_min) / steps if e_max > e_min else 1.0
 
-    def idx(e: float) -> int:
-        return min(steps, max(0, int(round((e - e_min) / de))))
+    def pos(e: float) -> float:
+        return min(float(steps), max(0.0, (e - e_min) / de))
 
     def lvl(i: int) -> float:
         return e_min + i * de
+
+    def interp(v: list[float], e: float) -> float:
+        # linear interpolation: rounding to the grid would create phantom energy
+        # (up to half a step per slot) and make e.g. unprofitable grid charging look good
+        x = pos(e)
+        j = min(int(x), steps - 1)
+        f = x - j
+        return v[j] * (1.0 - f) + v[j + 1] * f
 
     # discharge first: on equal cost the plan uses the battery (the safe default)
     actions = [ACT_DISCHARGE, ACT_HOLD]
@@ -132,57 +140,56 @@ def optimize(slots: list[Slot], soc_pct: float, p: BatteryParams,
         # slightly discounted: energy used inside the horizon is a sure saving
         terminal_price = prices[len(prices) // 2] * 0.95
     # stored energy is worth what it saves later, after discharge losses
-    value = [-(lvl(i) - e_min) * p.efficiency * terminal_price / 1000.0 for i in range(steps + 1)]
+    terminal = [-(lvl(i) - e_min) * p.efficiency * terminal_price / 1000.0 for i in range(steps + 1)]
+
+    def step_cost(e: float, a: int, slot: Slot) -> tuple[float, float]:
+        e2, grid, _dis, _cur = _transition(e, a, slot, p, e_min, e_max)
+        c = slot.price * grid / 1000.0
+        if a == ACT_GRID_CHARGE:
+            c += p.grid_charge_margin * (grid - slot.load_w * SLOT_H) / 1000.0
+        return c, e2
 
     na = len(actions)
-    # value[prev_action_index][soc_index]: cost-to-go given the previous slot's action
-    value = [list(value) for _ in range(na)]
-    policy = [[[ACT_HOLD] * (steps + 1) for _ in range(na)] for _ in range(n)]
+    # values[t][action_index][soc_index]: cost-to-go from slot t, given the action of slot t-1
+    values: list[list[list[float]]] = [None] * (n + 1)  # type: ignore[list-item]
+    values[n] = [list(terminal) for _ in range(na)]
     for t in range(n - 1, -1, -1):
         slot = slots[t]
-        # cost of each action from each level does not depend on the previous action
-        trans = []
+        nxt = values[t + 1]
+        # cost of each action from each level (independent of the previous action)
+        cost = [[0.0] * na for _ in range(steps + 1)]
         for i in range(steps + 1):
-            row = []
             for ai, a in enumerate(actions):
-                e2, grid, _dis, _cur = _transition(lvl(i), a, slot, p, e_min, e_max)
-                c = slot.price * grid / 1000.0
-                if a == ACT_GRID_CHARGE:
-                    c += p.grid_charge_margin * (grid - slot.load_w * SLOT_H) / 1000.0
-                row.append((c, idx(e2)))
-            trans.append(row)
-        new_value = [[0.0] * (steps + 1) for _ in range(na)]
+                c, e2 = step_cost(lvl(i), a, slot)
+                cost[i][ai] = c + interp(nxt[ai], e2)
+        cur = [[0.0] * (steps + 1) for _ in range(na)]
         for pi in range(na):
             for i in range(steps + 1):
-                best = None
-                best_ai = 0
-                for ai in range(na):
-                    c, j = trans[i][ai]
-                    c += value[ai][j]
-                    if ai != pi:
-                        c += p.switch_penalty
-                    if best is None or c < best - 1e-9:
-                        best, best_ai = c, ai
-                new_value[pi][i] = best
-                policy[t][pi][i] = actions[best_ai]
-        value = new_value
+                cur[pi][i] = min(cost[i][ai] + (p.switch_penalty if ai != pi else 0.0) for ai in range(na))
+        values[t] = cur
 
-    # forward pass with continuous energy
+    # forward pass with continuous energy: decide each slot exactly, not from the grid
     plan = Plan()
     e = max(e_min, min(e_max, p.capacity_wh * soc_pct / 100.0))
     if p.capacity_wh * soc_pct / 100.0 < e_min:
         e = p.capacity_wh * soc_pct / 100.0  # below reserve: nothing to discharge
     prev = current_action if current_action in actions else ACT_DISCHARGE
     for t, slot in enumerate(slots):
-        a = policy[t][actions.index(prev)][idx(max(e, e_min))]
+        best = None
+        a = actions[0]
+        for ai, cand in enumerate(actions):
+            c, e2 = step_cost(e, cand, slot)
+            c += interp(values[t + 1][ai], e2) + (p.switch_penalty if cand != prev else 0.0)
+            if best is None or c < best - 1e-9:
+                best, a = c, cand
         e_start = e
-        e2, grid, dis, cur = _transition(e, a, slot, p, e_min, e_max)
+        e2, grid, dis, cur_wh = _transition(e, a, slot, p, e_min, e_max)
         if a == ACT_DISCHARGE and dis <= 0.0:
             a = ACT_HOLD
         plan.steps.append(PlanStep(
             start=slot.start, action=a, price=slot.price, solar_w=slot.solar_w, load_w=slot.load_w,
             soc_start_pct=100.0 * e_start / p.capacity_wh, soc_end_pct=100.0 * e2 / p.capacity_wh,
-            grid_import_wh=grid, discharge_wh=dis, curtailed_wh=cur,
+            grid_import_wh=grid, discharge_wh=dis, curtailed_wh=cur_wh,
         ))
         plan.cost_eur += slot.price * grid / 1000.0
         plan.baseline_cost_eur += slot.price * max(0.0, slot.load_w) * SLOT_H / 1000.0

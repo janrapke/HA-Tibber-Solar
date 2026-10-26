@@ -81,3 +81,16 @@ def test_load_model_trims_outliers():
     for i in range(10):
         lm.record(d0 + timedelta(days=i), 40, 11000.0 if i == 3 else 400.0)  # one EV charge
     assert abs(lm.profile_value(40) - 400.0) < 1
+
+
+def test_no_unprofitable_grid_charge_from_rounding():
+    # real case 2026-10-26: charging at 0.30-0.39 for an evening at <= 0.47 with
+    # 80 % charger x 90 % discharge efficiency never pays off (0.37 / 0.72 = 0.51)
+    pc = planner.BatteryParams(capacity_wh=4850, min_pct=8, efficiency=0.9, inverter_max_w=800,
+                               grid_charge_w=600, grid_charge_eff=0.8, grid_charge_margin=0.02, steps=80)
+    prices = [0.30, 0.33, 0.35, 0.37, 0.35, 0.36, 0.37, 0.39, 0.37] + [0.43, 0.46, 0.47, 0.46, 0.45, 0.43] * 3
+    s = [planner.Slot(T0 + timedelta(minutes=15 * i), p, 100.0 if i < 9 else 0.0, 900.0)
+         for i, p in enumerate(prices)]
+    plan = planner.optimize(s, 80, pc, allow_grid_charge=True)
+    charged = [st.price for st in plan.steps if st.action == planner.ACT_GRID_CHARGE]
+    assert charged == [], f"unprofitable grid charge at {charged}"
