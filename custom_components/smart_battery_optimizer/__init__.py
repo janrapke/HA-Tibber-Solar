@@ -131,10 +131,11 @@ def _link_sub_devices(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """
     try:
         reg = dr.async_get(hass)
-        main = reg.async_get_device(identifiers={(DOMAIN, entry.entry_id)})
+        devices = dr.async_entries_for_config_entry(reg, entry.entry_id)
+        main = next((d for d in devices if (DOMAIN, entry.entry_id) in d.identifiers), None)
         if main is None:
             return
-        for dev in dr.async_entries_for_config_entry(reg, entry.entry_id):
+        for dev in devices:
             if dev.id != main.id and dev.via_device_id != main.id:
                 reg.async_update_device(dev.id, via_device_id=main.id)
     except Exception:  # noqa: BLE001 - cosmetic only
