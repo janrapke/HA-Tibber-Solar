@@ -68,6 +68,7 @@ from .const import (
     INVERTER_PROFILE_OPENDTU,
     INVERTER_PROFILE_POWERSTATION,
 )
+from .climate_control import ClimateController
 from .learning import LearningEngine
 from .load_model import LoadModel, quarter_of
 from .planner import (
@@ -125,6 +126,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         self.proposal_calculator = ProposalCalculator(self)
         self.appliance_entities = {'button': [], 'select': [], 'sensor': [], 'text': [], 'number': [], 'switch': []}
         self.climate_device_states: dict = {}
+        self.climate: ClimateController | None = None
 
         # ---- user controls (set by switch / number entities, restored on restart) ----
         self.is_enabled = True
@@ -213,7 +215,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             return
         self._setup_done = True
         entry_id = self.config_entry.entry_id
-        steps = [self.learning_engine.async_load, self._load_models]
+        steps = [self.learning_engine.async_load, self._load_models, self._start_climate]
         try:
             if not self.appliance_manager:
                 self.appliance_manager = SmartApplianceManager(self.hass, entry_id)
@@ -268,6 +270,11 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             self.appliance_entities['number'].append(ClimateManualWNumber(self, entry_id, device_config))
             self.appliance_entities['number'].append(ClimateSolltemperaturNumber(self, entry_id, device_config))
             self.appliance_entities['text'].append(ClimatePowerSensorText(self, entry_id, device_config))
+
+    async def _start_climate(self) -> None:
+        climate = ClimateController(self.hass, self.config_entry.entry_id, self.config)
+        await climate.async_start()
+        self.climate = climate
 
     async def _load_models(self) -> None:
         self._store = Store(self.hass, STORE_VERSION, f"{DOMAIN}.models.{self.config_entry.entry_id}")
@@ -619,6 +626,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             ("measure", self._step_measure),
             ("plan", self._step_plan),
             ("execute", self._step_execute),
+            ("climate", self._step_climate),
             ("persist", self._step_persist),
         ):
             try:
@@ -631,6 +639,12 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                         await self._apply_grid_charger(False)
                     except Exception:  # noqa: BLE001
                         _LOGGER.exception("Emergency grid charger shutdown failed")
+                if name == "climate" and self.climate is not None:
+                    # the radiators never stay off while the climate control is broken
+                    try:
+                        await self.climate.async_safety_fallback()
+                    except Exception:  # noqa: BLE001
+                        _LOGGER.exception("Climate safety fallback failed")
         try:
             await self._charger_watchdog(now)
         except Exception:  # noqa: BLE001
@@ -747,6 +761,9 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         exp = self._read_float(c.get(CONF_TIBBER_EXPORT_SENSOR), SOLAR_MAX_AGE) or 0.0
         dtu = self._read_float(self._inverter_output_sensor(), SOLAR_MAX_AGE) or 0.0
         excluded = self._sum(self._list(CONF_EXCLUDED_POWER_SENSORS)) or 0.0
+        if self.climate is not None:
+            # the heat pump follows its own control and must not distort the learned house load
+            excluded += self.climate.power_w()
         balcony = self._read_float(c.get(CONF_BALCONY_POWER_SENSOR)) or 0.0
         load = None
         if imp is not None:
@@ -984,7 +1001,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 start=t,
                 price=price if price is not None else fallback_price,
                 solar_w=self._solar_forecast(centre) * nowcast,
-                load_w=self.load_model.predict(dt_util.as_local(t), dt_util.as_local(now), current_load),
+                load_w=self.load_model.predict(dt_util.as_local(t), dt_util.as_local(now), current_load)
+                + (self.climate.expected_load_w(t, now) if self.climate is not None else 0.0),
             ))
             t += timedelta(minutes=15)
 
@@ -1151,6 +1169,26 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             await self._apply_inverter(now, inverter_on)
         await self._apply_excess(now, soc, absorption, price)
 
+    async def _step_climate(self, now, result) -> None:
+        if self.climate is None:
+            return
+        await self.climate.async_update(dt_util.as_local(now), {
+            "price": self._current_price(now),
+            "soc": result.get("soc"),
+            "curtailed_wh_2h": self.plan.curtailed_wh(2.0) if self.plan.steps else 0.0,
+            "grid_charging": self._charger_should_run,
+            "outdoor_forecast": self._outdoor_forecast(now),
+            "app_enabled": self.is_enabled,
+        })
+
+    def _outdoor_forecast(self, now: datetime) -> float | None:
+        """Outdoor temperature from the weather forecast (nearest hour)."""
+        rows = [r for r in self._weather if r.get("temp") is not None]
+        if not rows:
+            return None
+        row = min(rows, key=lambda r: abs((r["t"] - now).total_seconds()))
+        return float(row["temp"]) if abs(row["t"] - now) <= timedelta(hours=2) else None
+
     def _charger_domain(self, sw: str) -> str:
         d = sw.split(".")[0]
         return d if d in ("switch", "input_boolean") else "homeassistant"
@@ -1220,11 +1258,16 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             _LOGGER.error("Grid charger %s should be off but reports %s", sw, what)
 
     async def async_safe_shutdown(self) -> None:
-        """On unload / Home Assistant stop: leave the grid charger off."""
+        """On unload / Home Assistant stop: leave the grid charger off, radiators back on."""
         try:
             await self._apply_grid_charger(False)
         except Exception:  # noqa: BLE001
             _LOGGER.exception("Turning off grid charger on shutdown failed")
+        if self.climate is not None:
+            try:
+                await self.climate.async_stop()
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("Stopping the climate control failed")
 
     async def _apply_inverter(self, now: datetime, turn_on: bool) -> None:
         is_on = self._inverter_read_state()

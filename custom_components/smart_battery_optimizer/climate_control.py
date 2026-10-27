@@ -54,6 +54,7 @@ OWN_CMD_WINDOW = timedelta(minutes=2)
 HVAC_RETRY = timedelta(minutes=2)
 MAX_ACCOUNT_GAP_H = 0.1
 SAVE_DELAY_S = 60
+EXPECTED_LOAD_AHEAD = timedelta(hours=2)
 
 
 # ---------------------------------------------------------------- pure helpers
@@ -264,6 +265,19 @@ class ClimateController:
             elif st.state == "heat":
                 return True
         return False
+
+    def power_w(self) -> float:
+        """Electrical power of the AC right now (compressor_power, W)."""
+        ac = self.hass.states.get(self.cfg[CONF_AC_ENTITY])
+        if ac is None or ac.state in UNAVAILABLE or ac.state == "off":
+            return 0.0
+        return max(0.0, _num(ac.attributes.get("compressor_power")))
+
+    def expected_load_w(self, t: datetime, now: datetime) -> float:
+        """AC load the battery planner should add for slot t (stage 1: current power for 2 h)."""
+        if t - now >= EXPECTED_LOAD_AHEAD:
+            return 0.0
+        return self.power_w()
 
     # ------------------------------------------------------------ main step
     async def async_update(self, now: datetime, ext: dict | None = None) -> Decision:

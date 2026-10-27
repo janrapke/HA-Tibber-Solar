@@ -301,3 +301,25 @@ def test_persistence_roundtrip():
     # a restart in observe mode hands the radiators back
     run(ctl2, NOON + 20 * M)
     assert not ctl2.radiators_taken
+
+
+def test_power_and_expected_load_for_planner():
+    hass, ctl = make(ac="heat", ac_attrs={"compressor_power": 810, "compressor_frequency": 30})
+    assert ctl.power_w() == 810
+    assert ctl.expected_load_w(NOON + 90 * M, NOON) == 810
+    assert ctl.expected_load_w(NOON + 120 * M, NOON) == 0.0
+    hass.states[AC] = St("off", {"compressor_power": 300})
+    assert ctl.power_w() == 0.0
+    hass.states[AC] = St("unavailable")
+    assert ctl.power_w() == 0.0
+
+
+def test_stop_hands_radiators_back_and_saves():
+    hass, ctl = make(room=19.0)
+    ctl.control_active = True
+    ctl.replace_switch = True
+    run(ctl, NOON, price=0.20)
+    assert ctl.radiators_taken
+    asyncio.run(ctl.async_stop())
+    assert not ctl.radiators_taken
+    assert ctl._store.data["radiators_taken"] is False
