@@ -498,8 +498,7 @@ class ClimateController:
                        if (st := self.hass.states.get(e)) is not None and st.state == "heat"]
             autos_on = [e for e in self.cfg[CONF_AC_HEATING_AUTOMATIONS]
                         if (st := self.hass.states.get(e)) is not None and st.state == "on"]
-            valves_on = [v for v in self._valves()
-                         if (st := self.hass.states.get(v)) is not None and st.state not in UNAVAILABLE + ("off",)]
+            valves_on = [v for v in self._valves() if self._valve_open(v)]
             if back_on or autos_on or valves_on:
                 self.radiator_fixes += 1
                 _LOGGER.info("Heating switched back on by someone else, off again: %s", back_on + autos_on + valves_on)
@@ -602,17 +601,20 @@ class ClimateController:
     def _valves(self) -> list[str]:
         return [AC_RADIATOR_VALVES[bt] for bt in self.cfg[CONF_AC_RADIATORS] if bt in AC_RADIATOR_VALVES]
 
+    def _valve_open(self, valve: str) -> bool:
+        """Valve head above its lowest setpoint (the Tuya heads ignore 'off', the minimum is 'off')."""
+        st = self.hass.states.get(valve)
+        if st is None or st.state in UNAVAILABLE:
+            return False
+        low, cur = st.attributes.get("min_temp"), st.attributes.get("temperature")
+        return low is not None and cur is not None and cur > low
+
     async def _valves_off(self, valves: list[str]) -> None:
-        """Real valve heads to their lowest setpoint and off (BT alone does not close them)."""
+        """Real valve heads to their lowest setpoint (BT 'off' does not close them)."""
         for v in valves:
-            st = self.hass.states.get(v)
-            if st is None or st.state in UNAVAILABLE:
-                continue
-            low = st.attributes.get("min_temp")
-            if low is not None and st.attributes.get("temperature") != low:
+            if self._valve_open(v):
+                low = self.hass.states.get(v).attributes.get("min_temp")
                 await self._call("climate", "set_temperature", {"entity_id": v, "temperature": low})
-            if "off" in (st.attributes.get("hvac_modes") or ["off"]):
-                await self._call("climate", "set_hvac_mode", {"entity_id": v, "hvac_mode": "off"})
 
     async def _radiators_off(self, now: datetime) -> None:
         self.radiators_taken = True
@@ -631,7 +633,7 @@ class ClimateController:
     async def _radiators_back(self) -> None:
         for v in self._valves():
             st = self.hass.states.get(v)
-            if st is not None and st.state == "off":
+            if st is not None and st.state == "off":  # in case someone switched a head off
                 mode = next((m for m in st.attributes.get("hvac_modes") or [] if m != "off"), "heat")
                 await self._call("climate", "set_hvac_mode", {"entity_id": v, "hvac_mode": mode})
         ok = await self._call("climate", "set_hvac_mode", {"entity_id": self.cfg[CONF_AC_RADIATORS], "hvac_mode": "heat"})
