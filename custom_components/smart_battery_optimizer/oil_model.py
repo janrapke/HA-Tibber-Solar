@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 import math
 import statistics
+import xml.etree.ElementTree as ET
 
 # ---- burner detection ------------------------------------------------------
 RISE_K_PER_MIN = 2.0       # exhaust rising at least this fast = flame on
@@ -298,3 +299,35 @@ def reach(usable_l: float, today: date, model: dict, indoor: float, ac_heat_per_
                 break
         out[name] = end
     return out
+
+
+# ---- price -------------------------------------------------------------------
+HEIZOEL24_URL = "https://www.heizoel24.de/DailyPriceXml.ashx?zipCode={zip}&litre={litre}&unloadingpoints=1"
+
+
+def order_litres(tank_l: float | None, capacity: float) -> int:
+    """Order amount for the price query: fill up to 95 % in 500 L steps, at least 1000 L."""
+    free = capacity * 0.95 - (tank_l or 0.0)
+    return int(max(1000, round(free / 500.0) * 500))
+
+
+def parse_heizoel24(text: str) -> dict | None:
+    """Cheapest grade of the heizoel24 daily price XML (EUR per 100 L incl. VAT)."""
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        return None
+    delivery = root.find("deliveries/delivery")
+    prices = delivery.findall("price") if delivery is not None else []
+    rows = []
+    for p in prices:
+        try:
+            rows.append((float((p.text or "").replace(",", ".")), p))
+        except ValueError:
+            continue
+    if not rows:
+        return None
+    eur100, p = min(rows, key=lambda r: r[0])
+    return {"eur_100l": eur100, "eur_l": round(eur100 / 100.0, 4), "sorte": p.get("oilGrade"),
+            "menge_l": int(delivery.get("litre") or 0), "plz": root.findtext("plz"),
+            "bestellen": (p.get("orderLink") or "").replace("de//", "de/")}

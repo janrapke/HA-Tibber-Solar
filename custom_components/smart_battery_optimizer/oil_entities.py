@@ -237,5 +237,11 @@ class OilSettingNumber(_OilEntity, NumberEntity):
     def native_value(self) -> float:
         return getattr(self.oil.settings, self._key)
 
+    @property
+    def extra_state_attributes(self) -> dict | None:
+        if self._key != "offer_eur_l" or not self.oil.price:
+            return None
+        return {"quelle": "heizoel24.de", **self.oil.price}
+
     async def async_set_native_value(self, value: float) -> None:
         self.oil.set_setting(self._key, value)

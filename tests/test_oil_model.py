@@ -100,3 +100,23 @@ def test_reach_scenarios_ordered():
     with_ac = om.reach(1300.0, date(2026, 10, 28), m, indoor=20.5, ac_heat_per_kh=0.05)
     assert (with_ac["neutral"] is None) or with_ac["neutral"] > r["neutral"]
     assert om.reach(0.0, date(2026, 10, 28), m, 20.5, 0.0)["neutral"] == date(2026, 10, 29)
+
+
+SAMPLE_XML = ('<?xml version="1.0" encoding="utf-8"?><result><plz>31582</plz><taxRate>19</taxRate><deliveries>'
+              '<delivery unloadingPoints="1" litre="2000"><price oilGrade="Heizöl Standard Schwefelarm" '
+              'orderLink="https://www.heizoel24.de//heizoel/angebotsliste?zipCode=31582">173,38</price>'
+              '<price oilGrade="Heizöl Super Schwefelarm" orderLink="x">176,12</price></delivery></deliveries></result>')
+
+
+def test_parse_heizoel24_price():
+    p = om.parse_heizoel24(SAMPLE_XML)
+    assert p["eur_100l"] == 173.38 and p["eur_l"] == 1.7338 and p["menge_l"] == 2000
+    assert p["sorte"] == "Heizöl Standard Schwefelarm" and p["plz"] == "31582"
+    assert p["bestellen"].startswith("https://www.heizoel24.de/heizoel/")
+    assert om.parse_heizoel24("<html>kaputt") is None
+    assert om.parse_heizoel24("<result><deliveries/></result>") is None
+
+
+def test_order_litres():
+    assert om.order_litres(1578, 6000) == 4000
+    assert om.order_litres(5500, 6000) == 1000 and om.order_litres(None, 6000) == 5500

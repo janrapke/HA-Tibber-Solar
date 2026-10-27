@@ -141,6 +141,7 @@ AC_RETRIGGER_AUTOMATIONS = ["automation.heizung_wohnzimmer", "automation.heizung
 CONF_OIL_EXHAUST_SENSOR = "oil_exhaust_sensor"
 CONF_OIL_ROOMS = "oil_room_sensors"  # sensor -> m², area-weighted house indoor temperature
 CONF_OIL_WINDOW = "oil_window_sensor"
+CONF_OIL_ZIP = "oil_price_zip"  # postcode for the heizoel24 price query
 OIL_DEFAULTS = {
     CONF_OIL_EXHAUST_SENSOR: "sensor.heizung_abgasrohr_temperatur",
     CONF_OIL_ROOMS: {
@@ -154,4 +155,5 @@ OIL_DEFAULTS = {
         "sensor.temperatursensor_keller_temperatur": 40.0,  # finished basement, area estimated
     },
     CONF_OIL_WINDOW: "binary_sensor.contact_sensor_5_tur",
+    CONF_OIL_ZIP: "31582",  # Nienburg (Weser)
 }

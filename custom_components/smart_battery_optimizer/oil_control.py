@@ -15,16 +15,16 @@ from homeassistant.helpers.storage import Store
 
 try:
     from .const import (
-        CONF_OIL_EXHAUST_SENSOR, CONF_OIL_ROOMS, CONF_OIL_WINDOW, CONF_TIBBER_CONSUMPTION_SENSOR,
+        CONF_OIL_EXHAUST_SENSOR, CONF_OIL_ROOMS, CONF_OIL_WINDOW, CONF_OIL_ZIP, CONF_TIBBER_CONSUMPTION_SENSOR,
         CONF_TIBBER_EXPORT_SENSOR, DOMAIN, OIL_DEFAULTS,
     )
-    from .oil_model import BurnerDetector, HeatDay, Run, Tank, fit, reach
+    from .oil_model import HEIZOEL24_URL, BurnerDetector, HeatDay, Run, Tank, fit, order_litres, parse_heizoel24, reach
 except ImportError:  # loaded standalone by the tests
     from const import (
-        CONF_OIL_EXHAUST_SENSOR, CONF_OIL_ROOMS, CONF_OIL_WINDOW, CONF_TIBBER_CONSUMPTION_SENSOR,
+        CONF_OIL_EXHAUST_SENSOR, CONF_OIL_ROOMS, CONF_OIL_WINDOW, CONF_OIL_ZIP, CONF_TIBBER_CONSUMPTION_SENSOR,
         CONF_TIBBER_EXPORT_SENSOR, DOMAIN, OIL_DEFAULTS,
     )
-    from oil_model import BurnerDetector, HeatDay, Run, Tank, fit, reach
+    from oil_model import HEIZOEL24_URL, BurnerDetector, HeatDay, Run, Tank, fit, order_litres, parse_heizoel24, reach
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -33,6 +33,8 @@ SAVE_DELAY_S = 60
 KEEP_RUNS_DAYS = 60
 KEEP_DAYS = 800
 REACH_EVERY = timedelta(hours=1)
+PRICE_EVERY = timedelta(hours=6)
+PRICE_RETRY = timedelta(minutes=30)
 CALIBRATE_MIN_L = 60.0       # counted litres needed between two tank readings to calibrate
 UNAVAILABLE = ("unknown", "unavailable", "", None)
 
@@ -41,7 +43,7 @@ class Settings:
     def __init__(self):
         self.flow_l_h = 2.0          # nozzle 0.50 gal/h at pump pressure, calibrated by tank readings
         self.reserve_cm = 30.0       # red zone of the gauge (0-30 cm): sludge / safety reserve that stays in the tanks
-        self.offer_eur_l = 0.0       # current local offer price, only for the order hint
+        self.offer_eur_l = 0.0       # current local offer price (fetched from heizoel24), only for the order hint
         self.boiler_eff_pct = 85.0
 
 
@@ -69,6 +71,8 @@ class OilMonitor:
         self._vals: dict[str, float] = {}
         self._last_forecast: datetime | None = None
         self._last_minute: datetime | None = None
+        self.price: dict = {}                 # last heizoel24 answer
+        self._next_price: datetime | None = None
 
     # ------------------------------------------------------------ lifecycle
     async def async_start(self) -> None:
@@ -95,6 +99,7 @@ class OilMonitor:
             "reading": self.reading,
             "burned_since_reading": self.burned_since_reading,
             "calibrations": self.calibrations,
+            "price": self.price,
         }
 
     def load_dict(self, d: dict) -> None:
@@ -106,6 +111,7 @@ class OilMonitor:
         self.reading = d.get("reading")
         self.burned_since_reading = float(d.get("burned_since_reading") or 0.0)
         self.calibrations = list(d.get("calibrations") or [])
+        self.price = dict(d.get("price") or {})
         self.model = fit(list(self.days.values()), self.settings.boiler_eff_pct / 100.0)
 
     def _save(self) -> None:
@@ -265,6 +271,30 @@ class OilMonitor:
             self.forecast.update({k: (v.isoformat() if v else None) for k, v in r.items()})
         self._last_forecast = now
 
+    async def async_update_price(self, now: datetime) -> None:
+        """Local heating oil price for the amount that fits into the tanks (heizoel24, no account needed)."""
+        from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+        self._next_price = now + PRICE_RETRY
+        litre = order_litres(self.tank_liters(), self.tank.capacity)
+        url = HEIZOEL24_URL.format(zip=self.cfg[CONF_OIL_ZIP], litre=litre)
+        session = async_get_clientsession(self.hass)
+        async with session.get(url, timeout=20) as resp:
+            if resp.status != 200:
+                _LOGGER.debug("heizoel24 price query failed: HTTP %s", resp.status)
+                return
+            text = await resp.text()
+        p = parse_heizoel24(text)
+        if p is None:
+            _LOGGER.debug("heizoel24 price answer not understood")
+            return
+        p["abgerufen"] = now.isoformat()
+        self.price = p
+        self.settings.offer_eur_l = p["eur_l"]
+        self._next_price = now + PRICE_EVERY
+        self._save()
+        self._changed()
+
     # ------------------------------------------------------------ minute step
     async def async_update(self, now: datetime, ext: dict) -> None:
         dt_min = 1.0
@@ -288,6 +318,11 @@ class OilMonitor:
             day.window_min += dt_min
         if self._last_forecast is None or now - self._last_forecast >= REACH_EVERY:
             self._update_forecast(now)
+        if self._next_price is None or now >= self._next_price:
+            try:
+                await self.async_update_price(now)
+            except Exception as err:  # noqa: BLE001 - the price is only a hint
+                _LOGGER.debug("Oil price update failed: %s", err)
         if now.minute % 15 == 0:
             self._save()
         self._changed()
