@@ -99,7 +99,9 @@ in denen die App die Klima laufen lässt (Stufe 1: aktuelle Leistung für die n�
 - Live-Deploy (User hat Live-Deployment erlaubt): `git push`, dann in HA das Update-Entity der Integration mit `update.install` und `version=<7-stelliger Commit-Hash>`,
   danach `homeassistant.restart`, dann prüfen: keine Fehler im Log zu `smart_battery_optimizer`, Entitäten vorhanden, „Steuerung aktiv“ = aus.
   Bei Fehlern: Ursache beheben oder auf den vorherigen Hash zurück-installieren. Nach dem Deploy eine `persistent_notification` mit Kurzbericht anlegen.
-- HA-Zugriff: MCP `homeassistant`. Für Registry/Options-Flows: siehe Memory „ha-access“ (Node-Skripte mit Token aus `~/.claude.json`, `MSYS_NO_PATHCONV=1`).
+- HA-Zugriff: MCP `homeassistant`. **Ist das MCP nicht erreichbar**, gehen alle HA-Aufrufe auch über `scripts/ha_rest.mjs`
+  (z. B. `MSYS_NO_PATHCONV=1 node scripts/ha_rest.mjs POST /api/services/update/install '{"entity_id":"update.…","version":"abc1234"}'`,
+  Zustände mit `GET /api/states/<entity_id>`, Log mit `GET /api/error_log`) und `scripts/ha_ws.mjs` (Websocket-Befehle als JSON-Array). Für Registry/Options-Flows: siehe Memory „ha-access“ (Node-Skripte mit Token aus `~/.claude.json`, `MSYS_NO_PATHCONV=1`).
 - Nicht anfassen: `rate_select`, `out_silent`, die YAML-Automationen, „Steuerung aktiv“ (bleibt aus), die Klima selbst (kein Ein-/Ausschalten in den Durchläufen).
 - Schritt 8 ist erst 24 h nach dem Deploy fällig (Zeit steht im Protokoll). Bis dahin Schritt 9 erledigen; ist nichts fällig, den Durchlauf ohne Änderung beenden.
 - Ein Durchlauf darf mehrere Schritte erledigen, wenn Zeit bleibt. Vor dem Ende immer Checkliste und Protokoll aktualisieren und committen,
@@ -124,7 +126,7 @@ in denen die App die Klima laufen lässt (Stufe 1: aktuelle Leistung für die n�
       (`update_scheduled_task` enabled=false, Task-ID `klima-umsetzung`).
 
 ## Protokoll
-- 2026-10-27 18:30 – Plan angelegt (interaktive Sitzung). Raumsensor umgestellt, Paket/Dashboard/BT live auf `sensor.wohnzimmer_temperatur`.
+- 2026-10-27 17:20 – Plan angelegt (interaktive Sitzung). Raumsensor umgestellt, Paket/Dashboard/BT live auf `sensor.wohnzimmer_temperatur`.
 - 2026-10-27 17:24 START Durchlauf
 - 2026-10-27 17:26 – Schritt 1 fertig (38c4787): thermal_model.py + tests/test_thermal.py (9 Tests). Entscheidung: Wärmekapazität C fest 1,0 kWh/K (aus 0,42 kW Verlust bei 10 K und 0,4 K/h), weil Effizienz und C mit nur einem Raumsensor nicht trennbar sind; Startversatz Kühlen 0 K; Leistung je Hz in 5-Hz-Klassen; Laufzeit seit Kompressorstart (`run_min`) liefert climate_control.
 - 2026-10-27 17:30 – Schritt 2 fertig (9b8a528): climate_logic.py (`decide(Inputs, State) -> Decision`) + tests/test_climate_logic.py (20 Tests, alle 37 grün). Entscheidungen: State wird so fortgeschrieben, als wäre die Entscheidung ausgeführt (Beobachten zeigt echtes Verhalten); App aus → Klima unberührt (`climate_on=None`), Heizkörper zurück; Sensor ungültig → Klima aus außer manuell; Raum < 17 °C beendet nur den Ersatz (Klima darf weiter helfen); Überschuss wie YAML nur 10–22 Uhr, Kühl-Ziel 24 °C (−1 K = 23 °C); Ersatz umgeht die 1-h-Sperre; Nachlauf nach Ersatz-Ende = Modus `nachlauf`; I-Anteil 0,5 K/(K·h), ±2 K. Rate-Limits (5 min Sollwert, 15 min Lüfter) stecken in der Logik, die Verzögerung 2–3 min für indirect_wind macht climate_control.
