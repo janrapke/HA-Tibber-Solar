@@ -202,13 +202,17 @@ def test_replace_hands_over_and_back():
     run(ctl, NOON, price=0.20)
     calls = services(hass)
     assert ("automation", "turn_off") in calls
-    assert ("climate", "set_hvac_mode") in calls  # radiators off
+    hold = [c for c in hass.services.calls if c[1] == "set_temperature" and BT in c[2].get("entity_id", [])]
+    assert hold and hold[0][2]["hvac_mode"] == "heat" and hold[0][2]["temperature"] == cc.BT_HOLD_C
+    assert not any(c[1] == "set_hvac_mode" and c[2].get("hvac_mode") == "off" and BT in c[2]["entity_id"]
+                   for c in hass.services.calls)  # BT is never switched off (it would switch itself back on)
     assert ("midea_ac_lan", "set_attribute") in calls  # prompt tone first
     assert ("climate", "set_temperature") in calls  # AC on in heat
     tone = calls.index(("midea_ac_lan", "set_attribute"))
-    assert tone < calls.index(("climate", "set_temperature"))
+    ac_on = next(i for i, c in enumerate(hass.services.calls) if c[1] == "set_temperature" and c[2].get("entity_id") == AC)
+    assert tone < ac_on
     assert ctl.radiators_taken
-    on = [c for c in hass.services.calls if c[1] == "set_temperature"][0]
+    on = [c for c in hass.services.calls if c[1] == "set_temperature" and c[2].get("entity_id") == AC][0]
     assert on[2]["hvac_mode"] == "heat" and on[2]["temperature"] >= 24
 
     # switching the control off hands the radiators back immediately
@@ -400,13 +404,22 @@ def test_radiators_switched_back_on_are_turned_off_again():
     ctl.replace_switch = True
     run(ctl, NOON, price=0.20)
     assert ctl.radiators_taken
-    hass.states[BT] = St("heat", {"hvac_action": "idle"})
+    hass.states[BT] = St("heat", {"hvac_action": "idle", "temperature": cc.BT_HOLD_C})  # held: nothing to do
     hass.services.calls.clear()
-    run(ctl, NOON + 2 * M, price=0.20)
-    assert not any(c[1] == "set_hvac_mode" and c[2]["entity_id"] == [BT] for c in hass.services.calls)
     run(ctl, NOON + 5 * M, price=0.20)
-    fix = [c for c in hass.services.calls if c[1] == "set_hvac_mode" and c[2].get("entity_id") == [BT]]
-    assert fix and fix[0][2]["hvac_mode"] == "off" and ctl.radiator_fixes == 1
+    assert not [c for c in hass.services.calls if c[2].get("entity_id") == [BT]] and ctl.radiator_fixes == 0
+    hass.states[BT] = St("heat", {"hvac_action": "heating", "temperature": 21.0})  # someone raised it
+    hass.services.calls.clear()
+    run(ctl, NOON + 7 * M, price=0.20)
+    assert not [c for c in hass.services.calls if c[2].get("entity_id") == [BT]]  # check only every 5 min
+    run(ctl, NOON + 10 * M, price=0.20)
+    fix = [c for c in hass.services.calls if c[2].get("entity_id") == [BT]]
+    assert fix and fix[0][2]["temperature"] == cc.BT_HOLD_C and fix[0][2]["hvac_mode"] == "heat"
+    assert ctl.radiator_fixes == 1
+    hass.states[BT] = St("off", {"temperature": 6.0})  # 'off' is not safe either: the head keeps its setpoint
+    hass.services.calls.clear()
+    run(ctl, NOON + 15 * M, price=0.20)
+    assert [c for c in hass.services.calls if c[2].get("entity_id") == [BT]]
 
 
 def test_no_commands_in_the_first_minutes_after_restart():

@@ -62,6 +62,10 @@ VALVE_WARM_K = 1.5  # valve head this much above the room = radiator is warm (se
 VALVE_WARN_AFTER = timedelta(minutes=30)  # warm this long while it should be off -> notification
 VALVE_COOLDOWN = timedelta(minutes=60)  # radiators need time to cool down after the handover
 VALVE_CLOSED_C = 6.0  # Tuya heads: 'off' is ignored, 1 °C partly too and 5 °C flips to preset temp_auto
+# Better Thermostat switches itself back to heat on every report of a Tuya head (they never say 'off'),
+# so while the AC replaces the heating the BTs stay in heat with a low target instead of 'off'
+BT_HOLD_C = 8.0
+VALVE_OPEN_ABOVE_C = 11.0  # a head set above this really asks for heat (BT itself sets ~8 °C ± calibration)
 RADIATOR_CHECK = timedelta(minutes=5)  # BT follows its real valve and may switch back to heat
 KPI_KEEP = 800  # building key figures are kept for years (one entry per night / day)
 
@@ -515,8 +519,7 @@ class ClimateController:
         elif self.radiators_taken and (self._last_radiator_check is None
                                        or now - self._last_radiator_check >= RADIATOR_CHECK):
             self._last_radiator_check = now
-            back_on = [e for e in self.cfg[CONF_AC_RADIATORS]
-                       if (st := self.hass.states.get(e)) is not None and st.state == "heat"]
+            back_on = [e for e in self.cfg[CONF_AC_RADIATORS] if self._bt_needs_hold(e)]
             autos_on = [e for e in self.cfg[CONF_AC_HEATING_AUTOMATIONS]
                         if (st := self.hass.states.get(e)) is not None and st.state == "on"]
             valves_on = [v for v in self._valves() if self._valve_open(v)]
@@ -528,7 +531,7 @@ class ClimateController:
             if autos_on:
                 await self._call("automation", "turn_off", {"entity_id": autos_on})
             if back_on:
-                await self._call("climate", "set_hvac_mode", {"entity_id": back_on, "hvac_mode": "off"})
+                await self._hold_bts(back_on)
 
         if ac_hvac is None or d.climate_on is None:
             return
@@ -623,12 +626,12 @@ class ClimateController:
         return [AC_RADIATOR_VALVES[bt] for bt in self.cfg[CONF_AC_RADIATORS] if bt in AC_RADIATOR_VALVES]
 
     def _valve_open(self, valve: str) -> bool:
-        """Valve head set above VALVE_CLOSED_C (a setpoint that low keeps it shut in a heated room)."""
+        """Valve head set above VALVE_OPEN_ABOVE_C (BT holds it near BT_HOLD_C while replaced)."""
         st = self.hass.states.get(valve)
         if st is None or st.state in UNAVAILABLE:
             return False
         cur = st.attributes.get("temperature")
-        return isinstance(cur, (int, float)) and cur > VALVE_CLOSED_C
+        return isinstance(cur, (int, float)) and cur > VALVE_OPEN_ABOVE_C
 
     async def _valves_off(self, valves: list[str]) -> None:
         """Real valve heads to VALVE_CLOSED_C (BT 'off' does not close them)."""
@@ -643,13 +646,26 @@ class ClimateController:
             for bt in self.cfg[CONF_AC_RADIATORS]:
                 st = self.hass.states.get(bt)
                 t = st.attributes.get("temperature") if st is not None else None
-                if isinstance(t, (int, float)):
+                if isinstance(t, (int, float)) and t > BT_HOLD_C + 0.5:  # never "restore" the hold value
                     self.saved_bt_targets[bt] = t
         self._save()
         await self._call("automation", "turn_off", {"entity_id": self.cfg[CONF_AC_HEATING_AUTOMATIONS]})
-        await self._call("climate", "set_hvac_mode", {"entity_id": self.cfg[CONF_AC_RADIATORS], "hvac_mode": "off"})
+        await self._hold_bts(self.cfg[CONF_AC_RADIATORS])
         await self._valves_off(self._valves())
         _LOGGER.info("Radiators handed over to the heat pump")
+
+    def _bt_needs_hold(self, bt: str) -> bool:
+        st = self.hass.states.get(bt)
+        if st is None or st.state in UNAVAILABLE:
+            return False
+        t = st.attributes.get("temperature")
+        return st.state != "heat" or not isinstance(t, (int, float)) or t > BT_HOLD_C + 0.5
+
+    async def _hold_bts(self, bts: list[str]) -> None:
+        """BT in heat with a low target: it keeps its valve shut and has nothing to switch back."""
+        if bts:
+            await self._call("climate", "set_temperature", {"entity_id": bts, "hvac_mode": "heat",
+                                                            "temperature": BT_HOLD_C})
 
     async def _radiators_back(self) -> None:
         for v in self._valves():
