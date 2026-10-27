@@ -225,7 +225,8 @@ class HeatDay:
 PRIOR_BASE_L = 1.2          # hot water + boiler standby per day
 PRIOR_L_PER_KH = 0.025      # ~0.6 L per degree-day (27.10.2026: ~3 L at ~9 K)
 OIL_KWH_PER_L = 10.0
-FIT_MIN_DAYS = 10
+PRIOR_DAYS = 5             # the start values count like this many measured days
+PRIOR_SCALE = (1.0, 60.0, 10.0)  # typical day-to-day spread: base 1, degree hours per day, AC heat kWh per day
 
 # monthly mean outdoor temperature around Nienburg (Weser), °C
 MONTH_TEMP = {1: 1.8, 2: 2.5, 3: 5.5, 4: 9.5, 5: 13.5, 6: 16.5, 7: 18.5, 8: 18.0, 9: 14.5, 10: 10.0, 11: 5.8, 12: 2.8}
@@ -234,30 +235,34 @@ HEATING_LIMIT_C = 15.0     # above this daily mean the heating is (mostly) off
 
 
 def fit(days: list[HeatDay], boiler_eff: float = 0.85) -> dict:
-    """Oil per day = base + per_kh * degree hours - ac_factor * AC heat.
+    """Oil per day = base + per_kh * degree hours - ac_factor * AC heat, learned from day one.
 
-    The AC factor starts from physics (1 kWh heat from the AC saves 1/(10 kWh/L * boiler eff) L)
-    and is only fitted once there are days with and without the AC.
+    Least squares with the start values as a prior worth PRIOR_DAYS days: with few days the
+    start values dominate, every complete day shifts the result further towards the data.
+    The AC factor starts from physics (1 kWh heat from the AC saves 1/(10 kWh/L * boiler eff) L);
+    it only moves away from that once there are days with and without the AC.
     """
-    prior_ac = 1.0 / (OIL_KWH_PER_L * boiler_eff)
+    prior = [PRIOR_BASE_L, PRIOR_L_PER_KH, 1.0 / (OIL_KWH_PER_L * boiler_eff)]
     full = [d for d in days if d.complete]
-    out = {"basis_l_tag": PRIOR_BASE_L, "l_je_gradstunde": PRIOR_L_PER_KH, "l_je_kwh_klimawaerme": prior_ac,
-           "tage": len(full), "quelle": "Startwerte"}
-    if len(full) < FIT_MIN_DAYS:
+    n = len(full)
+    out = {"basis_l_tag": prior[0], "l_je_gradstunde": prior[1], "l_je_kwh_klimawaerme": round(prior[2], 4),
+           "tage": n, "gewicht_messung": round(n / (n + PRIOR_DAYS), 2),
+           "quelle": "Startwerte" if n == 0 else ("gelernt" if n >= 3 * PRIOR_DAYS else f"Startwerte + {n} Tage")}
+    if n == 0:
         return out
-    with_ac = [d for d in full if d.ac_heat_kwh > 1.0]
-    use_ac = len(with_ac) >= 3 and len(full) - len(with_ac) >= 3
-    rows = [(1.0, d.kh, -d.ac_heat_kwh if use_ac else 0.0, d.oil_l + (0.0 if use_ac else prior_ac * d.ac_heat_kwh))
-            for d in full]
-    k = 3 if use_ac else 2
-    ata = [[sum(r[i] * r[j] for r in rows) for j in range(k)] for i in range(k)]
-    atb = [sum(r[i] * r[3] for r in rows) for i in range(k)]
+    rows = [(1.0, d.kh, -d.ac_heat_kwh, d.oil_l) for d in full]
+    ata = [[sum(r[i] * r[j] for r in rows) for j in range(3)] for i in range(3)]
+    atb = [sum(r[i] * r[3] for r in rows) for i in range(3)]
+    for i, scale in enumerate(PRIOR_SCALE):  # prior = PRIOR_DAYS pseudo-days per parameter
+        w = PRIOR_DAYS * scale * scale
+        ata[i][i] += w
+        atb[i] += w * prior[i]
     sol = _solve(ata, atb)
-    if sol is None or sol[1] <= 0:
+    if sol is None:
         return out
-    out.update(basis_l_tag=round(max(0.0, sol[0]), 3), l_je_gradstunde=round(sol[1], 5), quelle="gelernt")
-    if use_ac and sol[2] > 0:
-        out["l_je_kwh_klimawaerme"] = round(sol[2], 4)
+    out.update(basis_l_tag=round(max(0.0, sol[0]), 3),
+               l_je_gradstunde=round(max(prior[1] * 0.2, sol[1]), 5),
+               l_je_kwh_klimawaerme=round(max(0.0, sol[2]), 4))
     return out
 
 

@@ -79,18 +79,29 @@ def test_tank_curve():
     assert abs(tank.cm(tank.liters(48)) - 48) < 0.05
 
 
-def test_fit_learns_from_days():
+def _days(n):
     days = []
-    for i in range(14):
-        kh = 100 + 20 * i
+    for i in range(n):
+        kh = 100 + 20 * (i % 15)
         ac = 15.0 if i % 2 else 0.0
         oil = 1.0 + 0.03 * kh - 0.1 * ac
-        days.append(om.HeatDay(f"2026-11-{i + 1:02d}", oil_l=oil, kh=kh, ac_heat_kwh=ac, minutes=1440))
-    m = om.fit(days)
-    assert m["quelle"] == "gelernt"
-    assert abs(m["basis_l_tag"] - 1.0) < 1e-6 and abs(m["l_je_gradstunde"] - 0.03) < 1e-6
-    assert abs(m["l_je_kwh_klimawaerme"] - 0.1) < 1e-6
-    assert om.fit(days[:5])["quelle"] == "Startwerte"
+        days.append(om.HeatDay(f"2026-11-{i % 28 + 1:02d}-{i}", oil_l=oil, kh=kh, ac_heat_kwh=ac, minutes=1440))
+    return days
+
+
+def test_fit_moves_from_start_values_towards_the_data():
+    start = om.fit([])
+    assert start["quelle"] == "Startwerte" and start["l_je_gradstunde"] == om.PRIOR_L_PER_KH
+    one = om.fit(_days(1))
+    few = om.fit(_days(5))
+    many = om.fit(_days(200))
+    # every day shifts the slope further from the start value (0.025) towards the truth (0.03)
+    assert om.PRIOR_L_PER_KH < one["l_je_gradstunde"] < few["l_je_gradstunde"] < many["l_je_gradstunde"] <= 0.0301
+    assert few["quelle"] == "Startwerte + 5 Tage" and many["quelle"] == "gelernt"
+    assert abs(many["basis_l_tag"] - 1.0) < 0.08 and abs(many["l_je_kwh_klimawaerme"] - 0.1) < 0.01
+    assert 0 < one["gewicht_messung"] < few["gewicht_messung"] < many["gewicht_messung"] < 1
+    incomplete = [om.HeatDay("x", oil_l=50, kh=10, minutes=600)]
+    assert om.fit(incomplete)["quelle"] == "Startwerte"  # half days do not count
 
 
 def test_reach_scenarios_ordered():
