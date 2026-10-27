@@ -110,3 +110,40 @@ def test_roundtrip_and_raw_window():
     m2.reset()
     assert m2.offset_n["heat"] == 0 and len(m2.samples) == len(m.samples)
     assert "versatz_heizen_k" in m.summary()
+
+
+# ---- building key figures ----
+LOC = timezone(timedelta(hours=1))
+
+
+def kpi_sample(ts, room, outdoor=5.0, hvac="off", power=0.0, rad=False):
+    return tm.Sample(ts, room, outdoor, None, hvac, power, 30.0 if power else 0.0, rad, "silent", 0.0)
+
+
+def test_night_cooling_from_idle_night():
+    start = datetime(2026, 11, 2, 21, 0, tzinfo=LOC)
+    # room 21 -> cools 0.5 K/h at 16 K difference: k ~ 0.031, tau ~ 32 h
+    rows = [kpi_sample(start + i * Q, 21.0 - 0.125 * i) for i in range(40)]
+    r = tm.night_cooling(rows, datetime(2026, 11, 3).date())
+    assert r is not None
+    assert abs(r["auskuehlrate_k_pro_h_pro_k"] - 0.5 / r["differenz_innen_aussen_k"]) < 1e-3
+    assert 25 < r["zeitkonstante_h"] < 40 and r["dauer_h"] >= 9.0
+
+
+def test_night_cooling_needs_idle_and_difference():
+    start = datetime(2026, 11, 2, 21, 0, tzinfo=LOC)
+    rows = [kpi_sample(start + i * Q, 21.0 - 0.1 * i, rad=i % 8 == 0) for i in range(40)]
+    assert tm.night_cooling(rows, datetime(2026, 11, 3).date()) is None  # never 3 h idle
+    warm = [kpi_sample(start + i * Q, 21.0 - 0.1 * i, outdoor=18.0) for i in range(40)]
+    assert tm.night_cooling(warm, datetime(2026, 11, 3).date()) is None  # < 5 K difference
+
+
+def test_day_heat_demand_only_on_ac_only_days():
+    day = datetime(2026, 11, 3, 0, 0, tzinfo=LOC)
+    rows = [kpi_sample(day + i * Q, 21.0, outdoor=5.0, hvac="heat", power=800.0) for i in range(96)]
+    r = tm.day_heat_demand(rows, day.date(), lambda o: 3.5)
+    # 0.8 kW * 24 h * 3.5 = 67.2 kWh heat at 16 K -> 4.2 kWh/K/day = 175 W/K
+    assert r["waerme_kwh"] == 67.2 and r["waerme_kwh_pro_k_tag"] == 4.2 and r["verlust_w_pro_k"] == 175.0
+    rows[10] = kpi_sample(day + 10 * Q, 21.0, rad=True)
+    assert tm.day_heat_demand(rows, day.date(), lambda o: 3.5) is None
+    assert tm.day_heat_demand(rows[:50], day.date(), lambda o: 3.5) is None

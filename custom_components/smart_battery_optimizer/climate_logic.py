@@ -47,8 +47,10 @@ SURPLUS_CURTAIL_WH = 300.0
 SURPLUS_SOC_HYST = 5.0
 SURPLUS_DELTA_K = 1.0
 BOOST_BELOW_TARGET_K = 1.5
-KI = 0.5  # K setpoint per K room error and hour
+KP = 1.0  # K setpoint per K room error (immediate)
+KI = 1.5  # K setpoint per K room error and hour
 I_MAX = 2.0
+CORR_MAX = 3.0  # P + I together
 SP_MIN, SP_MAX = 16.0, 30.0
 
 
@@ -345,7 +347,9 @@ def _apply(i: Inputs, st: State, d: Decision, dt_h: float, force: bool = False,
         offset = i.offset_heat if d.hvac == "heat" else i.offset_cool
         if i.room is not None:
             st.integral = max(-I_MAX, min(I_MAX, st.integral + KI * (d.target_room - i.room) * dt_h))
-        sp = max(SP_MIN, min(SP_MAX, _round_half(d.target_room + offset + st.integral)))
+        p_part = KP * (d.target_room - i.room) if i.room is not None else 0.0
+        corr = max(-CORR_MAX, min(CORR_MAX, p_part + st.integral))
+        sp = max(SP_MIN, min(SP_MAX, _round_half(d.target_room + offset + corr)))
         d.setpoint = sp
         due = st.setpoint_sent is None or now - st.setpoint_sent >= CMD_INTERVAL
         if d.send_hvac or (sp != st.setpoint and due):

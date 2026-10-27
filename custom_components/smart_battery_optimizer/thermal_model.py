@@ -274,3 +274,94 @@ class ThermalModel:
             return  # implausible (radiators on unnoticed, door open, sensor glitch)
         val = max(EFF_MIN, min(EFF_MAX, _ema(base, obs, EFF_ALPHA)))
         self.eff[cls] = [val, (cur[1] if cur else 0) + 1]
+
+
+# --- building key figures (to check insulation measures over months) -------
+NIGHT_START_H, NIGHT_END_H = 21, 8
+NIGHT_MIN_H = 3.0
+KPI_MIN_DIFF_K = 5.0
+DAY_MIN_SAMPLES = 86  # of 96 quarter hours
+DAY_MIN_HEAT_KWH = 0.5
+
+
+def _runs(samples: list[Sample], ok) -> list[list[Sample]]:
+    """Contiguous runs (gaps <= MAX_GAP) of samples matching ok()."""
+    runs, cur = [], []
+    for s in samples:
+        if ok(s) and (not cur or s.ts - cur[-1].ts <= MAX_GAP):
+            cur.append(s)
+            continue
+        if cur:
+            runs.append(cur)
+        cur = [s] if ok(s) else []
+    if cur:
+        runs.append(cur)
+    return runs
+
+
+def night_cooling(samples: list[Sample], morning) -> dict | None:
+    """Cooling rate of the night ending on `morning` (date) from the longest idle phase.
+
+    k = -(least-squares slope of the room temperature) / mean(indoor - outdoor);
+    the time constant 1/k in hours does not depend on any efficiency estimate.
+    """
+    start_day = morning - timedelta(days=1)
+    night = [s for s in samples
+             if (s.ts.date() == start_day and s.ts.hour >= NIGHT_START_H)
+             or (s.ts.date() == morning and s.ts.hour < NIGHT_END_H)]
+    runs = _runs(night, lambda s: s.idle and s.room is not None and s.outdoor is not None)
+    if not runs:
+        return None
+    run = max(runs, key=lambda r: r[-1].ts - r[0].ts)
+    hours = (run[-1].ts - run[0].ts).total_seconds() / 3600.0
+    if hours < NIGHT_MIN_H:
+        return None
+    t = [(s.ts - run[0].ts).total_seconds() / 3600.0 for s in run]
+    y = [s.room for s in run]
+    tm_, ym = sum(t) / len(t), sum(y) / len(y)
+    var = sum((a - tm_) ** 2 for a in t)
+    slope = sum((a - tm_) * (b - ym) for a, b in zip(t, y)) / var if var > 0 else 0.0
+    diff = sum(s.room - s.outdoor for s in run) / len(run)
+    if diff < KPI_MIN_DIFF_K or slope >= 0:
+        return None
+    k = -slope / diff
+    return {
+        "datum": morning.isoformat(),
+        "auskuehlrate_k_pro_h_pro_k": round(k, 5),
+        "zeitkonstante_h": round(1.0 / k, 1),
+        "dauer_h": round(hours, 2),
+        "differenz_innen_aussen_k": round(diff, 2),
+        "raum_start": round(run[0].room, 2), "raum_ende": round(run[-1].room, 2),
+    }
+
+
+def day_heat_demand(samples: list[Sample], day, efficiency) -> dict | None:
+    """Heat per Kelvin indoor-outdoor difference on a day the AC heated alone.
+
+    Only days with (almost) complete data and the radiators never heating.
+    `efficiency(outdoor)` converts AC electricity into heat.
+    """
+    rows = [s for s in samples if s.ts.date() == day]
+    if len(rows) < DAY_MIN_SAMPLES or any(s.radiators_on for s in rows):
+        return None
+    valid = [s for s in rows if s.room is not None and s.outdoor is not None]
+    if len(valid) < DAY_MIN_SAMPLES:
+        return None
+    step_h = 24.0 / len(rows)
+    el = sum(max(0.0, s.power_w) for s in rows if s.hvac == "heat") * step_h / 1000.0
+    heat = sum(max(0.0, s.power_w) * efficiency(s.outdoor if s.outdoor is not None else 10.0)
+               for s in rows if s.hvac == "heat") * step_h / 1000.0
+    diff = sum(s.room - s.outdoor for s in valid) / len(valid)
+    if diff < KPI_MIN_DIFF_K or heat < DAY_MIN_HEAT_KWH:
+        return None
+    per_k = heat / diff
+    return {
+        "datum": day.isoformat(),
+        "waerme_kwh_pro_k_tag": round(per_k, 3),
+        "verlust_w_pro_k": round(per_k * 1000.0 / 24.0, 1),
+        "waerme_kwh": round(heat, 2),
+        "klimastrom_kwh": round(el, 2),
+        "differenz_innen_aussen_k": round(diff, 2),
+        "raum_mittel": round(sum(s.room for s in valid) / len(valid), 2),
+        "aussen_mittel": round(sum(s.outdoor for s in valid) / len(valid), 2),
+    }

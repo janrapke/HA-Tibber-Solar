@@ -48,7 +48,11 @@ def build(platform: str, coordinator, entry_id: str) -> list:
                 AcCounterSensor(ctl, entry_id, "kwh_day", "Klimastrom heute", "kwh"),
                 AcCounterSensor(ctl, entry_id, "kwh_month", "Klimastrom Monat", "kwh"),
                 AcCounterSensor(ctl, entry_id, "oil_l_month", "Ersetztes Öl Monat", "oil"),
-                AcCounterSensor(ctl, entry_id, "savings_month", "Ersparnis Monat", "eur")]
+                AcCounterSensor(ctl, entry_id, "savings_month", "Ersparnis Monat", "eur"),
+                AcBuildingSensor(ctl, entry_id, "nights", "Auskühlzeit Nacht", "zeitkonstante_h", "h",
+                                 "mdi:home-thermometer-outline", "zeitkonstante_h"),
+                AcBuildingSensor(ctl, entry_id, "days", "Wärmeverlust Tag", "verlust_w_pro_k", "W/K",
+                                 "mdi:home-export-outline", "verlust_w_pro_k")]
     if platform == "button":
         return [AcResetLearningButton(ctl, entry_id)]
     return []
@@ -215,6 +219,38 @@ class AcCounterSensor(_AcEntity, SensorEntity):
     @property
     def native_value(self) -> float:
         return round(self.ctl.counter(self._key, dt_util.now()), 3)
+
+
+class AcBuildingSensor(_AcEntity, SensorEntity):
+    """Building key figure: one value per night / AC-only day, unknown on other days.
+
+    Unknown instead of repeating the last value, so the long-term statistics only
+    contain measured days. The full list is kept in the controller's store.
+    """
+
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 1
+
+    def __init__(self, ctl, entry_id, kind, name, field, unit, icon, key):
+        super().__init__(ctl, entry_id, key, name)
+        self._kind = kind
+        self._field = field
+        self._attr_native_unit_of_measurement = unit
+        self._attr_icon = icon
+
+    @property
+    def native_value(self) -> float | None:
+        row = self.ctl.latest_kpi(self._kind, dt_util.now())
+        return row.get(self._field) if row else None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        rows = self.ctl.building.get(self._kind) or []
+        return {
+            "letzte_messung": rows[-1] if rows else None,
+            "messungen": len(rows),
+            "verlauf": {r["datum"]: r[self._field] for r in rows[-30:]},
+        }
 
 
 class AcResetLearningButton(_AcEntity, ButtonEntity):

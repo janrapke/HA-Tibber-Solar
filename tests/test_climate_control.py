@@ -357,3 +357,23 @@ def test_short_room_dropout_is_bridged():
     assert d.mode == "ersatz" and ctl.info["raumsensor_quelle"] == "raumsensor (gehalten)"
     d = run(ctl, NOON + 11 * M, price=0.20)
     assert d.mode == "sicherheit" and d.radiators
+
+
+def test_building_kpis_evaluated_once_and_persisted():
+    hass, ctl = make()
+    start = datetime(2026, 11, 2, 21, 0, tzinfo=UTC)
+    tmod = sys.modules["thermal_model"]
+    for i in range(40):
+        ctl.model.samples.append(tmod.Sample(start + i * cc.timedelta(minutes=15), 21.0 - 0.125 * i, 5.0,
+                                             None, "off", 0.0, 0.0, False, "silent", 0.0))
+    morning = datetime(2026, 11, 3, 8, 5, tzinfo=UTC)
+    ctl.update_building_kpis(morning - timedelta(hours=1))  # before 8:00: night not evaluated yet
+    assert ctl.building["nights"] == []
+    ctl.update_building_kpis(morning)
+    ctl.update_building_kpis(morning + M)
+    assert len(ctl.building["nights"]) == 1
+    assert ctl.latest_kpi("nights", morning)["zeitkonstante_h"] > 20
+    assert ctl.latest_kpi("nights", morning + timedelta(days=1)) is None
+    ctl2 = cc.ClimateController(hass, "entry1", {})
+    ctl2.load_dict(ctl.to_dict())
+    assert ctl2.building["nights"] == ctl.building["nights"]

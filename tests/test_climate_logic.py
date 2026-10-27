@@ -173,14 +173,16 @@ def test_setpoint_uses_offset_integral_and_rate_limit():
     st = cl.State()
     i = inp(replace_switch=True, price=0.20, room=20.0, in_living=True, offset_heat=6.0)
     d = cl.decide(i, st)
-    assert d.setpoint == 27.0 and d.send_setpoint and d.fan == cl.FAN_NORMAL
+    assert d.setpoint == 28.0 and d.send_setpoint and d.fan == cl.FAN_NORMAL  # 21 + 6 + P 1.0
     t = NOON
-    for _ in range(12):  # 3 h at 1 K below target -> integral saturates at +1.5
+    for _ in range(12):  # 3 h at 1 K below target -> integral saturates at +2
         t += 15 * M
         d = cl.decide(inp(now=t, replace_switch=True, price=0.20, room=20.0, in_living=True, offset_heat=6.0), st)
-    assert d.setpoint == 28.5
+    assert d.setpoint == 30.0  # 21 + 6 + min(3, 1 + 2)
     d2 = cl.decide(inp(now=t + 2 * M, replace_switch=True, price=0.20, room=23.0, in_living=True, offset_heat=6.0), st)
-    assert not d2.send_setpoint and d2.setpoint == 28.5  # max. one command per 5 min
+    assert d2.send_setpoint and d2.setpoint == 27.0  # P reacts at once: 21 + 6 - 2 + I 2
+    d3 = cl.decide(inp(now=t + 4 * M, replace_switch=True, price=0.20, room=20.0, in_living=True, offset_heat=6.0), st)
+    assert not d3.send_setpoint and d3.setpoint == 27.0  # max. one command per 5 min
     for _ in range(20):
         t += 15 * M
         d = cl.decide(inp(now=t, replace_switch=True, price=0.20, room=10.0, in_living=False, offset_heat=6.0), st)

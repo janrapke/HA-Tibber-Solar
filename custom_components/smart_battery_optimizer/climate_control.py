@@ -30,7 +30,7 @@ try:
         CONF_AC_OUTDOOR_SENSOR, CONF_AC_PRESENCE_HOME, CONF_AC_PRESENCE_LIVING, CONF_AC_RADIATORS,
         CONF_AC_ROOM_FALLBACK, CONF_AC_ROOM_SENSOR, DOMAIN,
     )
-    from .thermal_model import OIL_KWH_PER_L, Sample, ThermalModel
+    from .thermal_model import NIGHT_END_H, OIL_KWH_PER_L, Sample, ThermalModel, day_heat_demand, night_cooling
 except ImportError:  # loaded standalone by the tests
     from climate_logic import CMD_INTERVAL, FAN_INTERVAL, MODE_AUTO, MODE_MANUAL_OFF, MODE_MANUAL_ON, MODES, Decision, Inputs, Settings, State, decide
     from const import (
@@ -38,7 +38,7 @@ except ImportError:  # loaded standalone by the tests
         CONF_AC_OUTDOOR_SENSOR, CONF_AC_PRESENCE_HOME, CONF_AC_PRESENCE_LIVING, CONF_AC_RADIATORS,
         CONF_AC_ROOM_FALLBACK, CONF_AC_ROOM_SENSOR, DOMAIN,
     )
-    from thermal_model import OIL_KWH_PER_L, Sample, ThermalModel
+    from thermal_model import NIGHT_END_H, OIL_KWH_PER_L, Sample, ThermalModel, day_heat_demand, night_cooling
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -57,6 +57,7 @@ HVAC_RETRY = timedelta(minutes=2)
 MAX_ACCOUNT_GAP_H = 0.1
 SAVE_DELAY_S = 60
 EXPECTED_LOAD_AHEAD = timedelta(hours=2)
+KPI_KEEP = 800  # building key figures are kept for years (one entry per night / day)
 
 
 # ---------------------------------------------------------------- pure helpers
@@ -132,6 +133,7 @@ class ClimateController:
         self.manual_external = False  # manuell_an came from the remote: leave the AC alone
         self.radiators_taken = False  # we switched the radiators off and owe them back
         self.counters: dict = {}
+        self.building: dict = {"nights": [], "days": [], "done": {}}
         self.decision: Decision | None = None
         self.info: dict = {}
         self.listeners: list = []
@@ -185,6 +187,7 @@ class ClimateController:
             "manual_external": self.manual_external,
             "radiators_taken": self.radiators_taken,
             "counters": self.counters,
+            "building": self.building,
         }
 
     def load_dict(self, d: dict) -> None:
@@ -200,6 +203,9 @@ class ClimateController:
         self.manual_external = bool(d.get("manual_external", False))
         self.radiators_taken = bool(d.get("radiators_taken", False))
         self.counters = dict(d.get("counters") or {})
+        b = d.get("building") or {}
+        self.building = {"nights": list(b.get("nights") or []), "days": list(b.get("days") or []),
+                         "done": dict(b.get("done") or {})}
 
     def _save(self) -> None:
         if self._store is not None:
@@ -279,6 +285,35 @@ class ClimateController:
             return 0.0
         return float(c.get(key, 0.0))
 
+    def update_building_kpis(self, now: datetime) -> None:
+        """Once per morning: cooling of the last night; once per day: heat demand of yesterday."""
+        b = self.building
+        today = now.date()
+        changed = False
+        if now.hour >= NIGHT_END_H and b["done"].get("night") != today.isoformat():
+            b["done"]["night"] = today.isoformat()
+            r = night_cooling(self.model.samples, today)
+            if r:
+                b["nights"] = (b["nights"] + [r])[-KPI_KEEP:]
+            changed = True
+        yday = today - timedelta(days=1)
+        if b["done"].get("day") != yday.isoformat():
+            b["done"]["day"] = yday.isoformat()
+            r = day_heat_demand(self.model.samples, yday, self.model.efficiency)
+            if r:
+                b["days"] = (b["days"] + [r])[-KPI_KEEP:]
+            changed = True
+        if changed:
+            self._save()
+
+    def latest_kpi(self, kind: str, now: datetime) -> dict | None:
+        """Newest entry if it belongs to last night / yesterday, else None (no stale values)."""
+        rows = self.building.get(kind) or []
+        if not rows:
+            return None
+        due = now.date() if kind == "nights" else now.date() - timedelta(days=1)
+        return rows[-1] if rows[-1].get("datum") == due.isoformat() else None
+
     def power_w(self) -> float:
         """Electrical power of the AC right now (compressor_power, W)."""
         ac = self.hass.states.get(self.cfg[CONF_AC_ENTITY])
@@ -334,6 +369,8 @@ class ClimateController:
                 account(self.counters, now, power, dt_h, replacing, efficiency, price,
                         s.oil_eur_l, s.boiler_eff_pct / 100.0)
         self._last_account = now
+
+        self.update_building_kpis(now)
 
         quarter = (now.date(), now.hour, now.minute // SAMPLE_MIN)
         if quarter != self._last_quarter:
