@@ -246,11 +246,14 @@ class AcBuildingSensor(_AcEntity, SensorEntity):
     @property
     def extra_state_attributes(self) -> dict:
         rows = self.ctl.building.get(self._kind) or []
-        return {
+        attrs = {
             "letzte_messung": rows[-1] if rows else None,
             "messungen": len(rows),
             "verlauf": {r["datum"]: r[self._field] for r in rows[-30:]},
         }
+        if self._kind == "nights":
+            attrs["vergleich_offen_zu"] = self.ctl.opening_comparison()
+        return attrs
 
 
 class AcResetLearningButton(_AcEntity, ButtonEntity):

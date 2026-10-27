@@ -100,6 +100,7 @@ CONF_AC_PRESENCE_HOME = "ac_presence_home"
 CONF_AC_PRESENCE_LIVING = "ac_presence_living"
 CONF_AC_RADIATORS = "ac_radiator_thermostats"
 CONF_AC_HEATING_AUTOMATIONS = "ac_heating_automations"
+CONF_AC_OPENINGS = "ac_openings"  # windows/doors recorded in the learning data
 
 AC_DEFAULTS = {
     CONF_AC_ENTITY: "climate.152832118046533_climate",
@@ -120,6 +121,10 @@ AC_DEFAULTS = {
         "automation.heizung_esszimmer",
         "automation.heizung_kuche",
         "automation.heizung_auf_heat_stellen",
+    ],
+    CONF_AC_OPENINGS: [
+        "binary_sensor.contact_sensor_5_tur",  # bedroom window, its door is always ajar
+        "binary_sensor.haustur_tur",
     ],
 }
 # real valve heads behind the Better Thermostats: their built-in sensor shows whether a radiator is warm

@@ -16,7 +16,7 @@ measurements of 2026-10-25 (~0.42 kW loss at ~10 K, cooling ~0.4 K/h).
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 
 # outdoor °C -> efficiency, realistic incl. defrosting (prior before learning)
@@ -81,6 +81,7 @@ class Sample:
     radiators_on: bool
     fan: str | None = None
     run_min: float = 0.0  # minutes the compressor has been running without pause
+    openings: dict = field(default_factory=dict)  # window/door entity -> share of the quarter it was open
 
     def to_dict(self) -> dict:
         d = asdict(self)
@@ -325,6 +326,7 @@ def night_cooling(samples: list[Sample], morning) -> dict | None:
     if diff < KPI_MIN_DIFF_K or slope >= 0:
         return None
     k = -slope / diff
+    keys = {key for s in run for key in s.openings}
     return {
         "datum": morning.isoformat(),
         "auskuehlrate_k_pro_h_pro_k": round(k, 5),
@@ -332,7 +334,40 @@ def night_cooling(samples: list[Sample], morning) -> dict | None:
         "dauer_h": round(hours, 2),
         "differenz_innen_aussen_k": round(diff, 2),
         "raum_start": round(run[0].room, 2), "raum_ende": round(run[-1].room, 2),
+        "offen_anteil": {key: round(sum(s.openings.get(key, 0.0) for s in run) / len(run), 2)
+                         for key in sorted(keys)},
     }
+
+
+OPEN_SHARE, CLOSED_SHARE = 0.8, 0.2
+COMPARE_MIN_NIGHTS = 3
+COMPARE_DIFF_K = 15.0  # reference indoor-outdoor difference for the kWh figure (~5 °C outside)
+
+
+def compare_openings(nights: list[dict], key: str, capacity_kwh_k: float = THERMAL_CAPACITY_KWH_K) -> dict:
+    """Cooling of nights with `key` (e.g. the bedroom window) open against closed.
+
+    Nights in between (opened or closed during the night) are not used.
+    """
+    def share(n):
+        return (n.get("offen_anteil") or {}).get(key)
+
+    opened = [n["auskuehlrate_k_pro_h_pro_k"] for n in nights if (share(n) or 0.0) >= OPEN_SHARE]
+    closed = [n["auskuehlrate_k_pro_h_pro_k"] for n in nights
+              if share(n) is not None and share(n) <= CLOSED_SHARE]
+    out = {"naechte_offen": len(opened), "naechte_zu": len(closed)}
+    if opened:
+        out["zeitkonstante_offen_h"] = round(len(opened) / sum(opened), 1)
+    if closed:
+        out["zeitkonstante_zu_h"] = round(len(closed) / sum(closed), 1)
+    if len(opened) < COMPARE_MIN_NIGHTS or len(closed) < COMPARE_MIN_NIGHTS:
+        out["ergebnis"] = f"noch zu wenig Nächte (je {COMPARE_MIN_NIGHTS} nötig)"
+        return out
+    extra_w_k = (sum(opened) / len(opened) - sum(closed) / len(closed)) * capacity_kwh_k * 1000.0
+    out["mehrverlust_w_pro_k"] = round(extra_w_k, 1)
+    out["mehr_waerme_kwh_pro_tag_bei_15k"] = round(extra_w_k * COMPARE_DIFF_K * 24.0 / 1000.0, 2)
+    out["ergebnis"] = "gemessen"
+    return out
 
 
 def day_heat_demand(samples: list[Sample], day, efficiency) -> dict | None:

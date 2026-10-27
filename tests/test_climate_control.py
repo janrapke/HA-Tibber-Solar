@@ -181,6 +181,19 @@ def test_samples_every_quarter_hour():
     assert len(ctl.model.samples) == 4
 
 
+def test_window_share_recorded_per_quarter():
+    hass, ctl = make()
+    win = "binary_sensor.contact_sensor_5_tur"
+    for m in range(0, 31):
+        hass.states[win] = St("on" if 15 <= m < 20 else "off")
+        run(ctl, NOON + m * M)
+    # sample at 12:15 covers 12:00-12:14 (closed), sample at 12:30 covers 12:15-12:29 (5 of 15 min open)
+    assert ctl.model.samples[1].openings[win] == 0.0
+    assert ctl.model.samples[2].openings[win] == round(5 / 15, 2)
+    assert "binary_sensor.haustur_tur" not in ctl.model.samples[2].openings  # sensor missing: not recorded
+    assert ctl.opening_comparison()[win]["ergebnis"].startswith("noch zu wenig")
+
+
 # ---- active control ----
 def test_replace_hands_over_and_back():
     hass, ctl = make(room=19.0)

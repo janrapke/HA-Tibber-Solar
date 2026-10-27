@@ -343,7 +343,8 @@
           "ac_presence_home": "Presence (someone at home)",
           "ac_presence_living": "Presence living area",
           "ac_radiator_thermostats": "Radiator thermostats",
-          "ac_heating_automations": "Heating automations"
+          "ac_heating_automations": "Heating automations",
+          "ac_openings": "Windows and doors (learning data)"
         }
       }
     }

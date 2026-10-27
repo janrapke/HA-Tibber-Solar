@@ -67,6 +67,7 @@ from .const import (
     CONF_AC_PRESENCE_LIVING,
     CONF_AC_RADIATORS,
     CONF_AC_HEATING_AUTOMATIONS,
+    CONF_AC_OPENINGS,
 )
 
 
@@ -237,6 +238,7 @@ def _schema_climate_ac(d: dict) -> vol.Schema:
         ent(CONF_AC_PRESENCE_LIVING, ["input_boolean", "binary_sensor"]),
         ent(CONF_AC_RADIATORS, "climate", True),
         ent(CONF_AC_HEATING_AUTOMATIONS, "automation", True),
+        ent(CONF_AC_OPENINGS, "binary_sensor", True),
     ])
     fields[vol.Optional(CONF_AC_DEVICE_ID, default=d.get(CONF_AC_DEVICE_ID) or AC_DEFAULTS[CONF_AC_DEVICE_ID])] = str
     return vol.Schema(fields)

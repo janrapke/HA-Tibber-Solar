@@ -27,18 +27,18 @@ try:
     from .climate_logic import CMD_INTERVAL, FAN_INTERVAL, MODE_AUTO, MODE_MANUAL_OFF, MODE_MANUAL_ON, MODES, Decision, Inputs, Settings, State, decide
     from .const import (
         AC_DEFAULTS, AC_RADIATOR_VALVES, AC_RETRIGGER_AUTOMATIONS, CONF_AC_DEVICE_ID, CONF_AC_ENTITY, CONF_AC_HEATING_AUTOMATIONS,
-        CONF_AC_OUTDOOR_SENSOR, CONF_AC_PRESENCE_HOME, CONF_AC_PRESENCE_LIVING, CONF_AC_RADIATORS,
+        CONF_AC_OPENINGS, CONF_AC_OUTDOOR_SENSOR, CONF_AC_PRESENCE_HOME, CONF_AC_PRESENCE_LIVING, CONF_AC_RADIATORS,
         CONF_AC_ROOM_FALLBACK, CONF_AC_ROOM_SENSOR, DOMAIN,
     )
-    from .thermal_model import NIGHT_END_H, OIL_KWH_PER_L, Sample, ThermalModel, day_heat_demand, night_cooling
+    from .thermal_model import NIGHT_END_H, OIL_KWH_PER_L, Sample, ThermalModel, compare_openings, day_heat_demand, night_cooling
 except ImportError:  # loaded standalone by the tests
     from climate_logic import CMD_INTERVAL, FAN_INTERVAL, MODE_AUTO, MODE_MANUAL_OFF, MODE_MANUAL_ON, MODES, Decision, Inputs, Settings, State, decide
     from const import (
         AC_DEFAULTS, AC_RADIATOR_VALVES, AC_RETRIGGER_AUTOMATIONS, CONF_AC_DEVICE_ID, CONF_AC_ENTITY, CONF_AC_HEATING_AUTOMATIONS,
-        CONF_AC_OUTDOOR_SENSOR, CONF_AC_PRESENCE_HOME, CONF_AC_PRESENCE_LIVING, CONF_AC_RADIATORS,
+        CONF_AC_OPENINGS, CONF_AC_OUTDOOR_SENSOR, CONF_AC_PRESENCE_HOME, CONF_AC_PRESENCE_LIVING, CONF_AC_RADIATORS,
         CONF_AC_ROOM_FALLBACK, CONF_AC_ROOM_SENSOR, DOMAIN,
     )
-    from thermal_model import NIGHT_END_H, OIL_KWH_PER_L, Sample, ThermalModel, day_heat_demand, night_cooling
+    from thermal_model import NIGHT_END_H, OIL_KWH_PER_L, Sample, ThermalModel, compare_openings, day_heat_demand, night_cooling
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -173,6 +173,7 @@ class ClimateController:
         self._valve_warm_since: dict = {}
         self._valve_warned: set = set()
         self._taken_since: datetime | None = None
+        self._open_acc: dict = {}  # opening entity -> [minutes open, minutes seen] in this quarter
 
     # ------------------------------------------------------------ lifecycle
     async def async_start(self) -> None:
@@ -351,6 +352,15 @@ class ClimateController:
         due = now.date() if kind == "nights" else now.date() - timedelta(days=1)
         return rows[-1] if rows[-1].get("datum") == due.isoformat() else None
 
+    def opening_comparison(self) -> dict:
+        """Night cooling with each window/door open against closed (facts for the bedroom window)."""
+        out = {}
+        for eid in self.cfg[CONF_AC_OPENINGS]:
+            st = self.hass.states.get(eid)
+            name = (st.attributes.get("friendly_name") if st else None) or eid
+            out[name] = compare_openings(self.building.get("nights") or [], eid, self.model.capacity)
+        return out
+
     def power_w(self) -> float:
         """Electrical power of the AC right now (compressor_power, W)."""
         ac = self.hass.states.get(self.cfg[CONF_AC_ENTITY])
@@ -413,10 +423,20 @@ class ClimateController:
         quarter = (now.date(), now.hour, now.minute // SAMPLE_MIN)
         if quarter != self._last_quarter:
             self._last_quarter = quarter
+            openings = {eid: round(a[0] / a[1], 2) for eid, a in self._open_acc.items() if a[1]}
+            self._open_acc = {}
             self.model.add_sample(Sample(ts=now, room=room, outdoor=outdoor, device=device,
                                          hvac=ac_hvac or "unavailable", power_w=power, freq_hz=freq,
-                                         radiators_on=radiators_on, fan=attrs.get("fan_mode"), run_min=round(run_min, 1)))
+                                         radiators_on=radiators_on, fan=attrs.get("fan_mode"), run_min=round(run_min, 1),
+                                         openings=openings))
             self._save()
+        # the next sample gets the share of minutes each window/door was open until then
+        for eid in self.cfg[CONF_AC_OPENINGS]:
+            v = state_value(self.hass.states.get(eid), None)
+            if v is not None:
+                acc = self._open_acc.setdefault(eid, [0, 0])
+                acc[0] += v == "on"
+                acc[1] += 1
 
         if room is None and self._last_room is None and now - self._started_at < STARTUP_GRACE:
             # no room value yet after a restart: do not mistake that for a sensor failure

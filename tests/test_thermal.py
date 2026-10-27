@@ -147,3 +147,31 @@ def test_day_heat_demand_only_on_ac_only_days():
     rows[10] = kpi_sample(day + 10 * Q, 21.0, rad=True)
     assert tm.day_heat_demand(rows, day.date(), lambda o: 3.5) is None
     assert tm.day_heat_demand(rows[:50], day.date(), lambda o: 3.5) is None
+
+
+def test_openings_are_stored_and_averaged_per_night():
+    start = datetime(2026, 11, 2, 21, 0, tzinfo=LOC)
+    rows = [kpi_sample(start + i * Q, 21.0 - 0.125 * i) for i in range(40)]
+    for i, s in enumerate(rows):
+        s.openings = {"binary_sensor.window": 1.0 if i < 30 else 0.0}
+    r = tm.night_cooling(rows, datetime(2026, 11, 3).date())
+    assert r["offen_anteil"]["binary_sensor.window"] == 0.75
+    # old samples without the field still load
+    d = rows[0].to_dict()
+    d.pop("openings")
+    assert tm.Sample.from_dict(d).openings == {}
+
+
+def test_compare_openings_needs_nights_and_measures_extra_loss():
+    def night(k, share):
+        return {"auskuehlrate_k_pro_h_pro_k": k, "offen_anteil": {"w": share}}
+    few = [night(0.05, 1.0), night(0.03, 0.0)]
+    r = tm.compare_openings(few, "w")
+    assert r["ergebnis"].startswith("noch zu wenig") and r["naechte_offen"] == 1
+    nights = [night(0.05, 1.0)] * 3 + [night(0.03, 0.0)] * 3 + [night(0.9, 0.5)]  # half-open night ignored
+    r = tm.compare_openings(nights, "w", capacity_kwh_k=1.0)
+    assert r["ergebnis"] == "gemessen"
+    assert r["zeitkonstante_offen_h"] == 20.0 and r["zeitkonstante_zu_h"] == 33.3
+    assert abs(r["mehrverlust_w_pro_k"] - 20.0) < 1e-6
+    assert abs(r["mehr_waerme_kwh_pro_tag_bei_15k"] - 7.2) < 1e-6
+    assert tm.compare_openings([night(0.05, 1.0)], "other")["naechte_zu"] == 0  # unknown key
