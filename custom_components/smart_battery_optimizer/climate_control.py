@@ -46,6 +46,8 @@ STORE_VERSION = 1
 UNAVAILABLE = ("unknown", "unavailable", "", None)
 ROOM_MIN, ROOM_MAX = 5.0, 40.0
 ROOM_MAX_AGE = timedelta(minutes=15)
+ROOM_HOLD = timedelta(minutes=10)  # WLAN probe drops out briefly: keep the last valid value
+STARTUP_GRACE = timedelta(minutes=5)  # sensors are still unknown right after a restart
 OUTDOOR_MAX_AGE = timedelta(hours=3)
 FALLBACK_CORRECTION_K = 0.5  # Echo reads ~0.5 K low
 SAMPLE_MIN = 15
@@ -146,6 +148,8 @@ class ClimateController:
         self._compressor_since: datetime | None = None
         self._last_quarter: tuple | None = None
         self._last_account: datetime | None = None
+        self._last_room: tuple[float, str, datetime] | None = None
+        self._started_at: datetime | None = None
 
     # ------------------------------------------------------------ lifecycle
     async def async_start(self) -> None:
@@ -303,6 +307,11 @@ class ClimateController:
         primary = plausible_temp(self._float(self.cfg[CONF_AC_ROOM_SENSOR], now, ROOM_MAX_AGE))
         fallback = plausible_temp(self._float(self.cfg[CONF_AC_ROOM_FALLBACK], now, ROOM_MAX_AGE))
         room, source = pick_room(primary, fallback)
+        self._started_at = self._started_at or now
+        if room is not None:
+            self._last_room = (room, source, now)
+        elif self._last_room is not None and now - self._last_room[2] <= ROOM_HOLD:
+            room, source = self._last_room[0], self._last_room[1] + " (gehalten)"
         outdoor = self._float(self.cfg[CONF_AC_OUTDOOR_SENSOR], now, OUTDOOR_MAX_AGE)
         if outdoor is None or not -40.0 <= outdoor <= 50.0:
             outdoor = ext.get("outdoor_forecast")
@@ -333,6 +342,17 @@ class ClimateController:
                                          hvac=ac_hvac or "unavailable", power_w=power, freq_hz=freq,
                                          radiators_on=radiators_on, fan=attrs.get("fan_mode"), run_min=round(run_min, 1)))
             self._save()
+
+        if room is None and self._last_room is None and now - self._started_at < STARTUP_GRACE:
+            # no room value yet after a restart: do not mistake that for a sensor failure
+            d = Decision("start", "Start: warte auf den Raumsensor", None)
+            if not self.control_active and self.radiators_taken:
+                await self._radiators_back()
+            self.decision = d
+            self.info = {"modus": d.mode, "begruendung": d.reason, "steuerung_aktiv": self.control_active,
+                         "betriebsmodus": self.mode, "raumsensor_quelle": source, "klima_ist": ac_hvac}
+            self._changed()
+            return d
 
         inputs = Inputs(
             now=now, mode=self.mode, app_enabled=ext.get("app_enabled", True),

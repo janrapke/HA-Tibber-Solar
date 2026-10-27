@@ -280,7 +280,7 @@ def test_sensor_failure_gives_radiators_back():
     assert ctl.radiators_taken
     hass.states[ROOM] = St("unavailable", ts=NOON + M)
     hass.services.calls.clear()
-    d = run(ctl, NOON + M, price=0.20)
+    d = run(ctl, NOON + 11 * M, price=0.20)
     assert d.radiators and not ctl.radiators_taken
     assert ("automation", "turn_on") in services(hass)
 
@@ -332,3 +332,28 @@ def test_counter_is_zero_after_period():
     assert ctl.counter("kwh_day", NOON + timedelta(days=1)) == 0.0
     assert ctl.counter("kwh_month", NOON + timedelta(days=1)) == 5.0
     assert ctl.counter("kwh_month", NOON + timedelta(days=30)) == 0.0
+
+
+def test_startup_without_room_value_does_nothing():
+    hass, ctl = make(room=19.0)
+    ctl.control_active = True
+    ctl.replace_switch = True
+    hass.states[ROOM] = St("unavailable")
+    d = run(ctl, NOON, price=0.20)
+    assert d.mode == "start" and d.climate_on is None
+    assert hass.services.calls == []
+    # still nothing after the grace period -> safety as usual
+    d = run(ctl, NOON + 6 * M, price=0.20)
+    assert d.mode == "sicherheit"
+
+
+def test_short_room_dropout_is_bridged():
+    hass, ctl = make(room=19.0)
+    ctl.control_active = True
+    ctl.replace_switch = True
+    run(ctl, NOON, price=0.20)
+    hass.states[ROOM] = St("unavailable", ts=NOON + M)
+    d = run(ctl, NOON + 5 * M, price=0.20)
+    assert d.mode == "ersatz" and ctl.info["raumsensor_quelle"] == "raumsensor (gehalten)"
+    d = run(ctl, NOON + 11 * M, price=0.20)
+    assert d.mode == "sicherheit" and d.radiators
