@@ -8,6 +8,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .climate_ac_entities import build as build_climate
+from .oil_entities import build as build_oil
 from .const import DOMAIN, CONF_MIN_SWITCH_INTERVAL_MINUTES, CONF_PRESUNNY_SOLAR_MARGIN_PCT
 
 _LOGGER = logging.getLogger(__name__)
@@ -36,6 +37,7 @@ async def async_setup_entry(
         PresunnySolarMarginNumber(coordinator, entry.entry_id),
         *coordinator.appliance_entities.get('number', []),
         *build_climate("number", coordinator, entry.entry_id),
+        *build_oil("number", coordinator, entry.entry_id),
     ])
 
 class _RestoringNumber(RestoreNumber):

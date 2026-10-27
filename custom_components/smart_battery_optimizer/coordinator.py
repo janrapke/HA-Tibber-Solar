@@ -22,6 +22,7 @@ import homeassistant.util.dt as dt_util
 
 from .appliance_manager import ApplianceStateMachine, ProposalCalculator, SmartApplianceManager
 from .const import (
+    CONF_AC_OUTDOOR_SENSOR,
     CONF_BALCONY_POWER_SENSOR,
     CONF_BASE_LOAD_W,
     CONF_BATTERY_CAPACITY_WH,
@@ -69,6 +70,7 @@ from .const import (
     INVERTER_PROFILE_POWERSTATION,
 )
 from .climate_control import ClimateController
+from .oil_control import OilMonitor
 from .learning import LearningEngine
 from .load_model import LoadModel, quarter_of
 from .planner import (
@@ -127,6 +129,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         self.appliance_entities = {'button': [], 'select': [], 'sensor': [], 'text': [], 'number': [], 'switch': []}
         self.climate_device_states: dict = {}
         self.climate: ClimateController | None = None
+        self.oil: OilMonitor | None = None
 
         # ---- user controls (set by switch / number entities, restored on restart) ----
         self.is_enabled = True
@@ -215,7 +218,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             return
         self._setup_done = True
         entry_id = self.config_entry.entry_id
-        steps = [self.learning_engine.async_load, self._load_models, self._start_climate]
+        steps = [self.learning_engine.async_load, self._load_models, self._start_climate, self._start_oil]
         try:
             if not self.appliance_manager:
                 self.appliance_manager = SmartApplianceManager(self.hass, entry_id)
@@ -275,6 +278,11 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         climate = ClimateController(self.hass, self.config_entry.entry_id, self.config)
         await climate.async_start()
         self.climate = climate
+
+    async def _start_oil(self) -> None:
+        oil = OilMonitor(self.hass, self.config_entry.entry_id, self.config, self)
+        await oil.async_start()
+        self.oil = oil
 
     async def _load_models(self) -> None:
         self._store = Store(self.hass, STORE_VERSION, f"{DOMAIN}.models.{self.config_entry.entry_id}")
@@ -627,6 +635,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             ("plan", self._step_plan),
             ("execute", self._step_execute),
             ("climate", self._step_climate),
+            ("oil", self._step_oil),
             ("persist", self._step_persist),
         ):
             try:
@@ -1181,6 +1190,21 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             "app_enabled": self.is_enabled,
         })
 
+    async def _step_oil(self, now, result) -> None:
+        if self.oil is None:
+            return
+        outdoor = None
+        if self.climate is not None:
+            outdoor = self.climate._float(self.climate.cfg[CONF_AC_OUTDOOR_SENSOR], dt_util.utcnow())
+        if outdoor is None:
+            outdoor = self._outdoor_forecast(now)
+        eff = self.climate.model.efficiency(outdoor if outdoor is not None else 10.0) if self.climate else 0.0
+        await self.oil.async_update(dt_util.as_local(now), {
+            "outdoor": outdoor,
+            "ac_efficiency": eff,
+            "house_w": result.get("load"),
+        })
+
     def _outdoor_forecast(self, now: datetime) -> float | None:
         """Outdoor temperature from the weather forecast (nearest hour)."""
         rows = [r for r in self._weather if r.get("temp") is not None]
@@ -1268,6 +1292,11 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 await self.climate.async_stop()
             except Exception:  # noqa: BLE001
                 _LOGGER.exception("Stopping the climate control failed")
+        if self.oil is not None:
+            try:
+                await self.oil.async_stop()
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception("Stopping the oil monitor failed")
 
     async def _apply_inverter(self, now: datetime, turn_on: bool) -> None:
         is_on = self._inverter_read_state()

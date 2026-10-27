@@ -136,3 +136,22 @@ AC_RADIATOR_VALVES = {
 }
 # automations that are triggered once when the radiators get the heating back (like YAML no. 18)
 AC_RETRIGGER_AUTOMATIONS = ["automation.heizung_wohnzimmer", "automation.heizung_kuche"]
+
+# Oil heating monitor (oil_control.py)
+CONF_OIL_EXHAUST_SENSOR = "oil_exhaust_sensor"
+CONF_OIL_ROOMS = "oil_room_sensors"  # sensor -> m², area-weighted house indoor temperature
+CONF_OIL_WINDOW = "oil_window_sensor"
+OIL_DEFAULTS = {
+    CONF_OIL_EXHAUST_SENSOR: "sensor.heizung_abgasrohr_temperatur",
+    CONF_OIL_ROOMS: {
+        "sensor.wohnzimmer_temperatur": 37.4,  # living + dining room (open)
+        "sensor.temperatursensor_kuche_temperatur": 9.2,
+        "sensor.temperatursensor_flur_temperatur": 16.4,
+        "sensor.temperature_schalfzimmer_temperatur": 15.9,
+        "sensor.temperature_kinderzimmer_temperatur": 9.6,
+        "sensor.temperature_gastezimmer_temperatur": 11.9,
+        "sensor.h5179_f06f_temperature": 9.6,  # bathroom
+        "sensor.temperatursensor_keller_temperatur": 40.0,  # finished basement, area estimated
+    },
+    CONF_OIL_WINDOW: "binary_sensor.contact_sensor_5_tur",
+}
