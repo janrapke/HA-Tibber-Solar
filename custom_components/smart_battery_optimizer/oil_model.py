@@ -223,7 +223,7 @@ class HeatDay:
 
 
 PRIOR_BASE_L = 1.2          # hot water + boiler standby per day
-PRIOR_L_PER_KH = 0.025      # ~0.6 L per degree-day (27.10.2026: ~3 L at ~9 K)
+PRIOR_L_PER_KH = 0.021      # ~0.5 L per degree-day (27.10.2026: ~3 L, 20.5 °C in, ~12 °C out)
 OIL_KWH_PER_L = 10.0
 PRIOR_DAYS = 5             # the start values count like this many measured days
 PRIOR_SCALE = (1.0, 60.0, 10.0)  # typical day-to-day spread: base 1, degree hours per day, AC heat kWh per day
@@ -231,7 +231,12 @@ PRIOR_SCALE = (1.0, 60.0, 10.0)  # typical day-to-day spread: base 1, degree hou
 # monthly mean outdoor temperature around Nienburg (Weser), °C
 MONTH_TEMP = {1: 1.8, 2: 2.5, 3: 5.5, 4: 9.5, 5: 13.5, 6: 16.5, 7: 18.5, 8: 18.0, 9: 14.5, 10: 10.0, 11: 5.8, 12: 2.8}
 SCENARIOS = {"optimistisch": 2.0, "neutral": 0.0, "pessimistisch": -3.0}  # K added to the monthly means
-HEATING_LIMIT_C = 15.0     # above this daily mean the heating is (mostly) off
+GAIN_K = 5.0               # sun, people and appliances cover the last ~5 K: heating limit = indoor - 5 K
+
+
+def degree_hours(indoor: float, outdoor: float, hours: float) -> float:
+    """Heating degree hours above the heating limit (indoor - GAIN_K): 18 °C inside needs less than 21 °C."""
+    return max(0.0, indoor - GAIN_K - outdoor) * hours
 
 
 def fit(days: list[HeatDay], boiler_eff: float = 0.85) -> dict:
@@ -282,7 +287,7 @@ def _solve(a: list[list[float]], b: list[float]) -> list[float] | None:
 
 
 def daily_oil(model: dict, outdoor: float, indoor: float, ac_heat_kwh: float) -> float:
-    kh = max(0.0, indoor - outdoor) * 24.0 if outdoor < HEATING_LIMIT_C else 0.0
+    kh = degree_hours(indoor, outdoor, 24.0)
     oil = model["basis_l_tag"] + model["l_je_gradstunde"] * kh - model["l_je_kwh_klimawaerme"] * ac_heat_kwh
     return max(model["basis_l_tag"], oil)
 
@@ -297,7 +302,7 @@ def reach(usable_l: float, today: date, model: dict, indoor: float, ac_heat_per_
         for _ in range(max_days):
             d += timedelta(days=1)
             t_out = MONTH_TEMP[d.month] + dk
-            kh = max(0.0, indoor - t_out) * 24.0 if t_out < HEATING_LIMIT_C else 0.0
+            kh = degree_hours(indoor, t_out, 24.0)
             left -= daily_oil(model, t_out, indoor, ac_heat_per_kh * kh)
             if left <= 0:
                 end = d

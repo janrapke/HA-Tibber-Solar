@@ -77,7 +77,7 @@ def test_minute_step_builds_heating_day_and_forecast():
         asyncio.run(mon.async_update(t0 + timedelta(minutes=i), {"outdoor": 5.0, "ac_efficiency": 3.0, "house_w": 600}))
     day = mon.days["2026-10-28"]
     indoor = (21.0 * 37.4 + 17.0 * 15.9) / (37.4 + 15.9)
-    assert abs(day.kh - (indoor - 5.0)) < 0.01 and day.minutes == 60  # 60 one-minute steps
+    assert abs(day.kh - (indoor - 5.0 - 5.0)) < 0.01 and day.minutes == 60  # 60 one-minute steps, limit = indoor - 5 K
     assert set(mon.forecast) >= {"optimistisch", "neutral", "pessimistisch"}
     d = mon.to_dict()
     hass2, mon2 = make()

@@ -18,13 +18,13 @@ try:
         CONF_OIL_EXHAUST_SENSOR, CONF_OIL_ROOMS, CONF_OIL_WINDOW, CONF_OIL_ZIP, CONF_TIBBER_CONSUMPTION_SENSOR,
         CONF_TIBBER_EXPORT_SENSOR, DOMAIN, OIL_DEFAULTS,
     )
-    from .oil_model import HEIZOEL24_URL, BurnerDetector, HeatDay, Run, Tank, fit, order_litres, parse_heizoel24, reach
+    from .oil_model import HEIZOEL24_URL, BurnerDetector, HeatDay, Run, Tank, degree_hours, fit, order_litres, parse_heizoel24, reach
 except ImportError:  # loaded standalone by the tests
     from const import (
         CONF_OIL_EXHAUST_SENSOR, CONF_OIL_ROOMS, CONF_OIL_WINDOW, CONF_OIL_ZIP, CONF_TIBBER_CONSUMPTION_SENSOR,
         CONF_TIBBER_EXPORT_SENSOR, DOMAIN, OIL_DEFAULTS,
     )
-    from oil_model import HEIZOEL24_URL, BurnerDetector, HeatDay, Run, Tank, fit, order_litres, parse_heizoel24, reach
+    from oil_model import HEIZOEL24_URL, BurnerDetector, HeatDay, Run, Tank, degree_hours, fit, order_litres, parse_heizoel24, reach
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -308,7 +308,7 @@ class OilMonitor:
             day.minutes += int(round(dt_min))
             day.indoor_sum += indoor * dt_min
             day.outdoor_sum += outdoor * dt_min
-            day.kh += max(0.0, indoor - outdoor) * dt_min / 60.0
+            day.kh += degree_hours(indoor, outdoor, dt_min / 60.0)
         ac_w = self._ac_w()
         day.ac_kwh_el += ac_w * dt_min / 60000.0
         day.ac_heat_kwh += ac_w * (ext.get("ac_efficiency") or 0.0) * dt_min / 60000.0
