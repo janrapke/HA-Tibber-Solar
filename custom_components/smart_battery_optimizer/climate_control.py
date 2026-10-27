@@ -145,6 +145,7 @@ class ClimateController:
         self.surplus_switch = False
         self.manual_external = False  # manuell_an came from the remote: leave the AC alone
         self.radiators_taken = False  # we switched the radiators off and owe them back
+        self.saved_bt_targets: dict = {}  # BT target temperatures before the handover
         self.counters: dict = {}
         self.building: dict = {"nights": [], "days": [], "done": {}}
         self.decision: Decision | None = None
@@ -205,6 +206,7 @@ class ClimateController:
             "surplus_switch": self.surplus_switch,
             "manual_external": self.manual_external,
             "radiators_taken": self.radiators_taken,
+            "saved_bt_targets": self.saved_bt_targets,
             "counters": self.counters,
             "building": self.building,
         }
@@ -221,6 +223,7 @@ class ClimateController:
         self.surplus_switch = bool(d.get("surplus_switch", False))
         self.manual_external = bool(d.get("manual_external", False))
         self.radiators_taken = bool(d.get("radiators_taken", False))
+        self.saved_bt_targets = dict(d.get("saved_bt_targets") or {})
         self.counters = dict(d.get("counters") or {})
         b = d.get("building") or {}
         self.building = {"nights": list(b.get("nights") or []), "days": list(b.get("days") or []),
@@ -495,9 +498,13 @@ class ClimateController:
                        if (st := self.hass.states.get(e)) is not None and st.state == "heat"]
             autos_on = [e for e in self.cfg[CONF_AC_HEATING_AUTOMATIONS]
                         if (st := self.hass.states.get(e)) is not None and st.state == "on"]
-            if back_on or autos_on:
+            valves_on = [v for v in self._valves()
+                         if (st := self.hass.states.get(v)) is not None and st.state not in UNAVAILABLE + ("off",)]
+            if back_on or autos_on or valves_on:
                 self.radiator_fixes += 1
-                _LOGGER.info("Heating switched back on by someone else, off again: %s", back_on + autos_on)
+                _LOGGER.info("Heating switched back on by someone else, off again: %s", back_on + autos_on + valves_on)
+            if valves_on:
+                await self._valves_off(valves_on)
             if autos_on:
                 await self._call("automation", "turn_off", {"entity_id": autos_on})
             if back_on:
@@ -592,21 +599,52 @@ class ClimateController:
                                 "oder Wärme von außen (Kochen, Sonne)."),
                 })
 
+    def _valves(self) -> list[str]:
+        return [AC_RADIATOR_VALVES[bt] for bt in self.cfg[CONF_AC_RADIATORS] if bt in AC_RADIATOR_VALVES]
+
+    async def _valves_off(self, valves: list[str]) -> None:
+        """Real valve heads to their lowest setpoint and off (BT alone does not close them)."""
+        for v in valves:
+            st = self.hass.states.get(v)
+            if st is None or st.state in UNAVAILABLE:
+                continue
+            low = st.attributes.get("min_temp")
+            if low is not None and st.attributes.get("temperature") != low:
+                await self._call("climate", "set_temperature", {"entity_id": v, "temperature": low})
+            if "off" in (st.attributes.get("hvac_modes") or ["off"]):
+                await self._call("climate", "set_hvac_mode", {"entity_id": v, "hvac_mode": "off"})
+
     async def _radiators_off(self, now: datetime) -> None:
         self.radiators_taken = True
+        if not self.saved_bt_targets:
+            for bt in self.cfg[CONF_AC_RADIATORS]:
+                st = self.hass.states.get(bt)
+                t = st.attributes.get("temperature") if st is not None else None
+                if isinstance(t, (int, float)):
+                    self.saved_bt_targets[bt] = t
         self._save()
         await self._call("automation", "turn_off", {"entity_id": self.cfg[CONF_AC_HEATING_AUTOMATIONS]})
         await self._call("climate", "set_hvac_mode", {"entity_id": self.cfg[CONF_AC_RADIATORS], "hvac_mode": "off"})
+        await self._valves_off(self._valves())
         _LOGGER.info("Radiators handed over to the heat pump")
 
     async def _radiators_back(self) -> None:
+        for v in self._valves():
+            st = self.hass.states.get(v)
+            if st is not None and st.state == "off":
+                mode = next((m for m in st.attributes.get("hvac_modes") or [] if m != "off"), "heat")
+                await self._call("climate", "set_hvac_mode", {"entity_id": v, "hvac_mode": mode})
         ok = await self._call("climate", "set_hvac_mode", {"entity_id": self.cfg[CONF_AC_RADIATORS], "hvac_mode": "heat"})
+        for bt, t in self.saved_bt_targets.items():
+            # BT copies setpoints from its valve; give it back the target it had before
+            await self._call("climate", "set_temperature", {"entity_id": bt, "temperature": t})
         ok = await self._call("automation", "turn_on", {"entity_id": self.cfg[CONF_AC_HEATING_AUTOMATIONS]}) and ok
         retrigger = [a for a in AC_RETRIGGER_AUTOMATIONS if a in self.cfg[CONF_AC_HEATING_AUTOMATIONS]]
         if retrigger:
             await self._call("automation", "trigger", {"entity_id": retrigger, "skip_condition": False})
         if ok:
             self.radiators_taken = False
+            self.saved_bt_targets = {}
             self._save()
             _LOGGER.info("Radiators got the heating back")
 

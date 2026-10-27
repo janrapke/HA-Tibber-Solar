@@ -443,3 +443,35 @@ def test_warm_valve_while_replaced_warns_once_and_counts_as_heating():
             assert not notes()  # radiators need time to cool down after the handover
     assert len(notes()) == 1 and "Wohnzimmer" in notes()[0][2]["title"]
     assert ctl.info["heizkoerper_heizen"] is True  # learning does not count this as an idle phase
+
+
+def test_real_valves_off_at_minimum_and_bt_targets_restored():
+    hass, ctl = make(room=19.0)
+    ctl.control_active = True
+    ctl.replace_switch = True
+    valve = "climate.wohnzimmer"
+    hass.states[BT] = St("heat", {"hvac_action": "idle", "temperature": 21.0, "current_temperature": 19.0})
+    hass.states[valve] = St("heat_cool", {"temperature": 19.0, "min_temp": 1, "hvac_modes": ["off", "heat_cool"],
+                                          "current_temperature": 19.0})
+    run(ctl, NOON, price=0.20)
+    v_calls = [c for c in hass.services.calls if c[2].get("entity_id") == valve]
+    assert ("set_temperature", 1) in [(c[1], c[2].get("temperature")) for c in v_calls]
+    assert ("set_hvac_mode", "off") in [(c[1], c[2].get("hvac_mode")) for c in v_calls]
+    assert ctl.saved_bt_targets == {BT: 21.0}
+
+    # valve switched on again by someone -> off again at the next check
+    hass.states[valve] = St("heat_cool", {"temperature": 1, "min_temp": 1, "hvac_modes": ["off", "heat_cool"]})
+    hass.states[BT] = St("off", {"temperature": 1.0})  # BT copied the valve setpoint
+    hass.services.calls.clear()
+    hass.states[ROOM] = St("19.0", ts=NOON + 5 * M)
+    run(ctl, NOON + 5 * M, price=0.20)
+    assert [c for c in hass.services.calls if c[2].get("entity_id") == valve and c[2].get("hvac_mode") == "off"]
+
+    # hand back: valve on, BT heat with its old target (not the copied 1 °C)
+    hass.states[valve] = St("off", {"temperature": 1, "min_temp": 1, "hvac_modes": ["off", "heat_cool"]})
+    hass.services.calls.clear()
+    asyncio.run(ctl.async_set_control_active(False))
+    calls = [(c[1], c[2]) for c in hass.services.calls]
+    assert ("set_hvac_mode", {"entity_id": valve, "hvac_mode": "heat_cool"}) in calls
+    assert ("set_temperature", {"entity_id": BT, "temperature": 21.0}) in calls
+    assert not ctl.radiators_taken and ctl.saved_bt_targets == {}
