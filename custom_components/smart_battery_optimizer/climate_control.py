@@ -127,7 +127,7 @@ class ClimateController:
         self.settings = Settings()
         self.mode = MODE_AUTO
         self.control_active = False  # off = observe only
-        self.replace_switch = False
+        self.replace_switch = True  # heat with the AC whenever it is cheaper than oil
         self.surplus_switch = False
         self.manual_external = False  # manuell_an came from the remote: leave the AC alone
         self.radiators_taken = False  # we switched the radiators off and owe them back
@@ -195,7 +195,7 @@ class ClimateController:
                 setattr(self.settings, k, float(v))
         self.mode = d.get("mode") if d.get("mode") in MODES else MODE_AUTO
         self.control_active = bool(d.get("control_active", False))
-        self.replace_switch = bool(d.get("replace_switch", False))
+        self.replace_switch = bool(d.get("replace_switch", True))
         self.surplus_switch = bool(d.get("surplus_switch", False))
         self.manual_external = bool(d.get("manual_external", False))
         self.radiators_taken = bool(d.get("radiators_taken", False))

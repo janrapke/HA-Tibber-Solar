@@ -83,7 +83,7 @@ in denen die App die Klima laufen lässt (Stufe 1: aktuelle Leistung für die n�
 
 ## Entitäten (Gerät „Klima Wohnzimmer“, `via_device` Hauptgerät, deutsche Namen, Werte über Neustart erhalten)
 - Select **Betriebsmodus** (auto / manuell_an / manuell_aus)
-- Switch **Steuerung aktiv** (aus = nur beobachten, **Standard aus**), **Heizung ersetzen**, **Überschuss nutzen**
+- Switch **Steuerung aktiv** (aus = nur beobachten, **Standard aus**), **Heizung ersetzen** (Standard an, User-Entscheidung 2026-10-27), **Überschuss nutzen**
 - Number **Zieltemperatur im Raum / zuhause / Nacht / niemand**, **Ölpreis €/L**, **Kesselwirkungsgrad %**, **Max. Außentemperatur Ersatz**,
   **Max. Preis Kühlen**, **Überschuss SoC-Schwelle**, **Boost-Preis**
 - Sensor **Entscheidung** (Text: was die App tun würde/tut und warum, Attribute: Sollwert, Lüfter, Grenzpreis, Kosten Klima/Öl je kWh Wärme, Quelle Raumsensor),
