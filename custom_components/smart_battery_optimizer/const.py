@@ -122,5 +122,12 @@ AC_DEFAULTS = {
         "automation.heizung_auf_heat_stellen",
     ],
 }
+# real valve heads behind the Better Thermostats: their built-in sensor shows whether a radiator is warm
+AC_RADIATOR_VALVES = {
+    "climate.bt_wohnzimmer_bt_wohnzimmer": "climate.wohnzimmer",
+    "climate.bt_esszimmer_bt_esszimmer": "climate.esszimmer",
+    "climate.bt_kuche_bt_kuche": "climate.kuche",
+    "climate.bt_flur_bt_flur": "climate.heizung_flur",
+}
 # automations that are triggered once when the radiators get the heating back (like YAML no. 18)
 AC_RETRIGGER_AUTOMATIONS = ["automation.heizung_wohnzimmer", "automation.heizung_kuche"]

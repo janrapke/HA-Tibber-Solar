@@ -26,7 +26,7 @@ from homeassistant.helpers.storage import Store
 try:
     from .climate_logic import CMD_INTERVAL, FAN_INTERVAL, MODE_AUTO, MODE_MANUAL_OFF, MODE_MANUAL_ON, MODES, Decision, Inputs, Settings, State, decide
     from .const import (
-        AC_DEFAULTS, AC_RETRIGGER_AUTOMATIONS, CONF_AC_DEVICE_ID, CONF_AC_ENTITY, CONF_AC_HEATING_AUTOMATIONS,
+        AC_DEFAULTS, AC_RADIATOR_VALVES, AC_RETRIGGER_AUTOMATIONS, CONF_AC_DEVICE_ID, CONF_AC_ENTITY, CONF_AC_HEATING_AUTOMATIONS,
         CONF_AC_OUTDOOR_SENSOR, CONF_AC_PRESENCE_HOME, CONF_AC_PRESENCE_LIVING, CONF_AC_RADIATORS,
         CONF_AC_ROOM_FALLBACK, CONF_AC_ROOM_SENSOR, DOMAIN,
     )
@@ -34,7 +34,7 @@ try:
 except ImportError:  # loaded standalone by the tests
     from climate_logic import CMD_INTERVAL, FAN_INTERVAL, MODE_AUTO, MODE_MANUAL_OFF, MODE_MANUAL_ON, MODES, Decision, Inputs, Settings, State, decide
     from const import (
-        AC_DEFAULTS, AC_RETRIGGER_AUTOMATIONS, CONF_AC_DEVICE_ID, CONF_AC_ENTITY, CONF_AC_HEATING_AUTOMATIONS,
+        AC_DEFAULTS, AC_RADIATOR_VALVES, AC_RETRIGGER_AUTOMATIONS, CONF_AC_DEVICE_ID, CONF_AC_ENTITY, CONF_AC_HEATING_AUTOMATIONS,
         CONF_AC_OUTDOOR_SENSOR, CONF_AC_PRESENCE_HOME, CONF_AC_PRESENCE_LIVING, CONF_AC_RADIATORS,
         CONF_AC_ROOM_FALLBACK, CONF_AC_ROOM_SENSOR, DOMAIN,
     )
@@ -58,6 +58,9 @@ HVAC_RETRY = timedelta(minutes=2)
 MAX_ACCOUNT_GAP_H = 0.1
 SAVE_DELAY_S = 60
 EXPECTED_LOAD_AHEAD = timedelta(hours=2)
+VALVE_WARM_K = 1.5  # valve head this much above the room = radiator is warm (sensor steps 0.5 K)
+VALVE_WARN_AFTER = timedelta(minutes=30)  # warm this long while it should be off -> notification
+VALVE_COOLDOWN = timedelta(minutes=60)  # radiators need time to cool down after the handover
 RADIATOR_CHECK = timedelta(minutes=5)  # BT follows its real valve and may switch back to heat
 KPI_KEEP = 800  # building key figures are kept for years (one entry per night / day)
 
@@ -89,6 +92,14 @@ def pick_room(primary: float | None, fallback: float | None) -> tuple[float | No
     if fallback is not None:
         return round(fallback + FALLBACK_CORRECTION_K, 2), "ersatzsensor"
     return None, "keiner"
+
+
+def valve_warm(valve_temp, room_temp) -> bool | None:
+    """Radiator warm according to the valve head sensor (None = unknown)."""
+    try:
+        return float(valve_temp) - float(room_temp) >= VALVE_WARM_K
+    except (TypeError, ValueError):
+        return None
 
 
 def manual_mode_for(old_hvac: str | None, new_hvac: str | None, own: bool) -> str | None:
@@ -156,6 +167,10 @@ class ClimateController:
         self._started_at: datetime | None = None
         self._last_radiator_check: datetime | None = None
         self.radiator_fixes = 0
+        self.valves: dict = {}  # BT entity -> {"name", "ventil", "raum", "warm"}
+        self._valve_warm_since: dict = {}
+        self._valve_warned: set = set()
+        self._taken_since: datetime | None = None
 
     # ------------------------------------------------------------ lifecycle
     async def async_start(self) -> None:
@@ -267,7 +282,21 @@ class ClimateController:
         v = state_value(self.hass.states.get(entity_id) if entity_id else None, None)
         return default if v is None else v == "on"
 
+    def _read_valves(self) -> None:
+        """Valve head temperature against the room temperature Better Thermostat uses."""
+        self.valves = {}
+        for bt in self.cfg[CONF_AC_RADIATORS]:
+            valve = AC_RADIATOR_VALVES.get(bt)
+            vst, bst = self.hass.states.get(valve) if valve else None, self.hass.states.get(bt)
+            if vst is None or bst is None or vst.state in UNAVAILABLE:
+                continue
+            v, r = vst.attributes.get("current_temperature"), bst.attributes.get("current_temperature")
+            name = (bst.attributes.get("friendly_name") or bt).removeprefix("BT ").split(" BT")[0].strip()
+            self.valves[bt] = {"name": name, "ventil": v, "raum": r, "warm": valve_warm(v, r)}
+
     def _radiators_heating(self) -> bool:
+        if any(v["warm"] for v in self.valves.values()):
+            return True
         for eid in self.cfg[CONF_AC_RADIATORS]:
             st = self.hass.states.get(eid)
             if st is None or st.state in UNAVAILABLE:
@@ -354,6 +383,7 @@ class ClimateController:
         outdoor = self._float(self.cfg[CONF_AC_OUTDOOR_SENSOR], now, OUTDOOR_MAX_AGE)
         if outdoor is None or not -40.0 <= outdoor <= 50.0:
             outdoor = ext.get("outdoor_forecast")
+        self._read_valves()
         radiators_on = self._radiators_heating()
 
         if freq > 0:
@@ -409,6 +439,8 @@ class ClimateController:
         d = decide(inputs, self.state)
         self.decision = d
 
+        await self._check_valves(now)
+
         if self.control_active and now - self._started_at < STARTUP_SETTLE:
             pass  # right after a restart other integrations (automation, BT) may not be loaded yet
         elif self.control_active:
@@ -441,6 +473,9 @@ class ClimateController:
             "heizkoerper_heizen": radiators_on,
             "heizkoerper_uebernommen": self.radiators_taken,
             "heizkoerper_nachgestellt": self.radiator_fixes,
+            "heizkoerper_ventilfuehler": {v["name"]: ("unbekannt" if v["warm"] is None else
+                                                      f"{'warm' if v['warm'] else 'kalt'} ({v['ventil']} / Raum {v['raum']} °C)")
+                                         for v in self.valves.values()},
         }
         self._changed()
         return d
@@ -529,6 +564,33 @@ class ClimateController:
         except Exception:  # noqa: BLE001 - one failing command must not stop the others
             _LOGGER.exception("Climate command %s.%s failed", domain, service)
             return False
+
+    async def _check_valves(self, now: datetime) -> None:
+        """Warn once per episode when a radiator stays warm although the AC replaces it."""
+        if not self.radiators_taken:
+            self._taken_since = None
+            self._valve_warm_since.clear()
+            self._valve_warned.clear()
+            return
+        self._taken_since = self._taken_since or now
+        for bt, v in self.valves.items():
+            if not v["warm"]:
+                self._valve_warm_since.pop(bt, None)
+                self._valve_warned.discard(bt)
+                continue
+            since = self._valve_warm_since.setdefault(bt, now)
+            if (bt not in self._valve_warned and now - self._taken_since >= VALVE_COOLDOWN
+                    and now - since >= VALVE_WARN_AFTER):
+                self._valve_warned.add(bt)
+                _LOGGER.warning("Radiator %s stays warm although it should be off", bt)
+                await self._call("persistent_notification", "create", {
+                    "notification_id": f"klima_heizkoerper_warm_{bt.split('.')[-1]}",
+                    "title": f"Heizkörper {v['name']} ist warm",
+                    "message": (f"Die Klima ersetzt gerade die Heizung, aber der Ventilkopf {v['name']} zeigt "
+                                f"{v['ventil']} °C bei {v['raum']} °C im Raum (seit {since.strftime('%H:%M')}). "
+                                "Möglich: Ventil schließt nicht ganz, Thermostat wurde wieder eingeschaltet "
+                                "oder Wärme von außen (Kochen, Sonne)."),
+                })
 
     async def _radiators_off(self, now: datetime) -> None:
         self.radiators_taken = True

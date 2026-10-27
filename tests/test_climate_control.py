@@ -417,3 +417,29 @@ def test_heating_automation_switched_on_again_is_turned_off():
     run(ctl, NOON + 5 * M, price=0.20)
     off = [c for c in hass.services.calls if c[:2] == ("automation", "turn_off")]
     assert off and off[0][2]["entity_id"] == ["automation.heizung_kuche"]
+
+
+def test_valve_warm():
+    assert cc.valve_warm(23.0, 21.5) is True
+    assert cc.valve_warm(22.5, 21.5) is False
+    assert cc.valve_warm(None, 21.5) is None
+
+
+def test_warm_valve_while_replaced_warns_once_and_counts_as_heating():
+    hass, ctl = make(room=19.0)
+    ctl.control_active = True
+    ctl.replace_switch = True
+    hass.states[BT] = St("heat", {"hvac_action": "idle", "current_temperature": 19.0,
+                                  "friendly_name": "BT Wohnzimmer BT Wohnzimmer"})
+    hass.states["climate.wohnzimmer"] = St("heat_cool", {"current_temperature": 19.0})
+    run(ctl, NOON, price=0.20)
+    assert ctl.info["heizkoerper_ventilfuehler"]["Wohnzimmer"].startswith("kalt")
+    hass.states["climate.wohnzimmer"] = St("heat_cool", {"current_temperature": 21.0})
+    notes = lambda: [c for c in hass.services.calls if c[0] == "persistent_notification"]
+    for m in range(1, 100):
+        hass.states[ROOM] = St("19.0", ts=NOON + m * M)
+        run(ctl, NOON + m * M, price=0.20)
+        if m < 60:
+            assert not notes()  # radiators need time to cool down after the handover
+    assert len(notes()) == 1 and "Wohnzimmer" in notes()[0][2]["title"]
+    assert ctl.info["heizkoerper_heizen"] is True  # learning does not count this as an idle phase
