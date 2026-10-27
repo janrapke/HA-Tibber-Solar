@@ -951,8 +951,12 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         return max(0.5, min(2.0, num / den))
 
     async def _step_plan(self, now, result) -> None:
+        # replan at once when a user setting changed (also right after they are restored at startup)
+        settings = (self.grid_charge_enabled, self.grid_charge_margin, self.grid_charge_efficiency,
+                    self.grid_charge_buffer, self.is_enabled)
+        settings_changed = settings != getattr(self, "_plan_settings", None)
         if self._last_plan_time and now - self._last_plan_time < REPLAN_EVERY \
-                and self._quarter_key == getattr(self, "_plan_quarter", None):
+                and self._quarter_key == getattr(self, "_plan_quarter", None) and not settings_changed:
             return
         soc = result.get("soc")
         if soc is None:
@@ -1007,6 +1011,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                              current_action=self._last_action))
         self._last_plan_time = now
         self._plan_quarter = self._quarter_key
+        self._plan_settings = settings
         self._build_plan_outputs(now, slots, params)
         self._take_day_snapshot(now, slots)
         self._update_day_running()
