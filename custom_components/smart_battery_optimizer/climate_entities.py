@@ -30,7 +30,6 @@ def _device_info(entry_id: str, device_id: str, device_name: str) -> dict:
         "name": device_name,
         "manufacturer": "Smart Battery Optimizer",
         "model": "Klimagerät",
-        "via_device": (DOMAIN, entry_id),
     }
 
 

@@ -67,7 +67,6 @@ class _AcEntity:
             "name": "Klima Wohnzimmer",
             "manufacturer": "Smart Battery Optimizer",
             "model": "Wärmepumpen-Steuerung",
-            "via_device": (DOMAIN, entry_id),
         }
 
     async def async_added_to_hass(self) -> None:

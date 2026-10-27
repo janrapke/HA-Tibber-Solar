@@ -25,7 +25,6 @@ class SmartApplianceBase(CoordinatorEntity):
             "identifiers": {(DOMAIN, f"{entry_id}_{sensor_id}")},
             "name": f"Smart Device: {friendly_name}",
             "manufacturer": "Smart Battery Optimizer",
-            "via_device": (DOMAIN, entry_id),
         }
 
     @property

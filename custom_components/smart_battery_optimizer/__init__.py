@@ -5,6 +5,7 @@ import pathlib
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, EVENT_HOMEASSISTANT_STOP
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceEntry
 
 from .const import DOMAIN
@@ -111,6 +112,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id]["coordinator"] = coordinator
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    _link_sub_devices(hass, entry)
 
     entry.async_on_unload(entry.add_update_listener(update_listener))
 
@@ -120,6 +122,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _on_stop))
 
     return True
+
+def _link_sub_devices(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Hang sub-devices (Klima Wohnzimmer, appliances) below the main device.
+
+    `via_device` in device_info is deprecated and makes adding entities fail,
+    so the link is set in the device registry with via_device_id.
+    """
+    try:
+        reg = dr.async_get(hass)
+        main = reg.async_get_device(identifiers={(DOMAIN, entry.entry_id)})
+        if main is None:
+            return
+        for dev in dr.async_entries_for_config_entry(reg, entry.entry_id):
+            if dev.id != main.id and dev.via_device_id != main.id:
+                reg.async_update_device(dev.id, via_device_id=main.id)
+    except Exception:  # noqa: BLE001 - cosmetic only
+        _LOGGER.exception("Linking sub-devices failed")
+
 
 async def update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Handle options update."""
