@@ -1,0 +1,483 @@
+# ============================================================
+# Dashboard: Klima Wohnzimmer
+# Als neue View in dein Dashboard einfügen:
+# HA → Dashboard → ⋮ → Raw Config Editor → unter views: einfügen
+# ============================================================
+
+- title: Klima WZ
+  path: klima-wohnzimmer
+  icon: mdi:air-conditioner
+  type: masonry
+  badges: []
+  cards:
+
+    # ════════════════════════════════════════════════════════
+    # STATUS
+    # ════════════════════════════════════════════════════════
+
+    - type: custom:mushroom-template-card
+      primary: >
+        {% set s = states('climate.152832118046533_climate') %}
+        {% if s == 'cool' %}Kühlt aktiv
+        {% elif s == 'heat' %}Heizt aktiv
+        {% else %}Klimaanlage aus{% endif %}
+      secondary: >
+        {{ states('sensor.wohnzimmer_temperatur') | float(0) | round(1) }}°C innen ·
+        {{ states('sensor.openweathermap_temperature') | float(0) | round(1) }}°C außen ·
+        {{ states('sensor.temp_wohnzimmer_luftfeuchtigkeit') | int(0) }}% rF
+      icon: mdi:air-conditioner
+      icon_color: >
+        {% set s = states('climate.152832118046533_climate') %}
+        {% if s == 'cool' %}blue{% elif s == 'heat' %}deep-orange{% else %}grey{% endif %}
+      badge_icon: >
+        {% if is_state('input_boolean.klima_wz_heizung_ersatz_aktiv', 'on') %}mdi:heat-wave
+        {% elif is_state('input_boolean.klima_wohnzimmer_battery_modus', 'on') %}mdi:battery-high
+        {% else %}{% endif %}
+      badge_color: >
+        {% if is_state('input_boolean.klima_wz_heizung_ersatz_aktiv', 'on') %}orange
+        {% elif is_state('input_boolean.klima_wohnzimmer_battery_modus', 'on') %}green
+        {% else %}{% endif %}
+      tap_action:
+        action: more-info
+        entity: climate.152832118046533_climate
+
+    - type: horizontal-stack
+      cards:
+        - type: custom:mushroom-template-card
+          primary: "{{ states('sensor.wohnzimmer_temperatur') | float(0) | round(1) }}°C"
+          secondary: Innen
+          icon: mdi:thermometer
+          icon_color: >
+            {% set t = states('sensor.wohnzimmer_temperatur') | float(0) %}
+            {% if t > 25 %}red{% elif t > 22 %}orange{% elif t < 18 %}blue{% else %}green{% endif %}
+          fill_container: true
+        - type: custom:mushroom-template-card
+          primary: "{{ states('sensor.temp_wohnzimmer_luftfeuchtigkeit') | int(0) }}%"
+          secondary: Luftfeuchte
+          icon: mdi:water-percent
+          icon_color: teal
+          fill_container: true
+        - type: custom:mushroom-template-card
+          primary: "{{ states('sensor.openweathermap_temperature') | float(0) | round(1) }}°C"
+          secondary: Außen
+          icon: mdi:thermometer-lines
+          icon_color: >
+            {% set t = states('sensor.openweathermap_temperature') | float(0) %}
+            {% if t > 25 %}red{% elif t > 18 %}orange{% elif t < 5 %}blue{% else %}green{% endif %}
+          fill_container: true
+
+    - type: horizontal-stack
+      cards:
+        - type: custom:mushroom-template-card
+          primary: "{{ (states('sensor.electricity_price_holunderweg_3') | float(0) * 100) | round(1) }} ct"
+          secondary: Strompreis/kWh
+          icon: mdi:lightning-bolt
+          icon_color: >
+            {% set p = states('sensor.electricity_price_holunderweg_3') | float(0) %}
+            {% if p < 0.20 %}green{% elif p < 0.30 %}amber{% else %}red{% endif %}
+          fill_container: true
+        - type: custom:mushroom-template-card
+          primary: "{{ states('sensor.smartshunt_hq2305uvtaz_battery') | int(0) }}%"
+          secondary: Akku
+          icon: >
+            {% set b = states('sensor.smartshunt_hq2305uvtaz_battery') | int(0) %}
+            {% if b >= 80 %}mdi:battery-high{% elif b >= 40 %}mdi:battery-medium{% else %}mdi:battery-low{% endif %}
+          icon_color: >
+            {% set b = states('sensor.smartshunt_hq2305uvtaz_battery') | int(0) %}
+            {% if b >= 80 %}green{% elif b >= 40 %}amber{% else %}red{% endif %}
+          fill_container: true
+
+    # ════════════════════════════════════════════════════════
+    # BETRIEBSMODUS
+    # ════════════════════════════════════════════════════════
+
+    - type: custom:mushroom-title-card
+      title: Betriebsmodus
+
+    - type: horizontal-stack
+      cards:
+        - type: custom:button-card
+          entity: input_select.klima_wohnzimmer_schalter
+          name: AUTO
+          icon: mdi:autorenew
+          tap_action:
+            action: call-service
+            service: input_select.select_option
+            service_data:
+              entity_id: input_select.klima_wohnzimmer_schalter
+              option: auto
+          state:
+            - value: auto
+              styles:
+                card:
+                  - background-color: rgba(16, 185, 129, 0.15)
+                  - border: 2px solid "#10b981"
+                icon:
+                  - color: "#10b981"
+                name:
+                  - color: "#10b981"
+          styles:
+            card:
+              - border-radius: 12px
+              - padding: 14px 8px
+              - background-color: var(--card-background-color)
+              - border: 2px solid var(--divider-color)
+              - transition: all 0.2s
+            name:
+              - font-size: 12px
+              - font-weight: 700
+              - letter-spacing: 0.08em
+            icon:
+              - width: 26px
+
+        - type: custom:button-card
+          entity: input_select.klima_wohnzimmer_schalter
+          name: EIN
+          icon: mdi:power
+          tap_action:
+            action: call-service
+            service: input_select.select_option
+            service_data:
+              entity_id: input_select.klima_wohnzimmer_schalter
+              option: manuell_an
+          state:
+            - value: manuell_an
+              styles:
+                card:
+                  - background-color: rgba(59, 130, 246, 0.15)
+                  - border: 2px solid "#3b82f6"
+                icon:
+                  - color: "#3b82f6"
+                name:
+                  - color: "#3b82f6"
+          styles:
+            card:
+              - border-radius: 12px
+              - padding: 14px 8px
+              - background-color: var(--card-background-color)
+              - border: 2px solid var(--divider-color)
+              - transition: all 0.2s
+            name:
+              - font-size: 12px
+              - font-weight: 700
+              - letter-spacing: 0.08em
+            icon:
+              - width: 26px
+
+        - type: custom:button-card
+          entity: input_select.klima_wohnzimmer_schalter
+          name: AUS
+          icon: mdi:power-off
+          tap_action:
+            action: call-service
+            service: input_select.select_option
+            service_data:
+              entity_id: input_select.klima_wohnzimmer_schalter
+              option: manuell_aus
+          state:
+            - value: manuell_aus
+              styles:
+                card:
+                  - background-color: rgba(239, 68, 68, 0.15)
+                  - border: 2px solid "#ef4444"
+                icon:
+                  - color: "#ef4444"
+                name:
+                  - color: "#ef4444"
+          styles:
+            card:
+              - border-radius: 12px
+              - padding: 14px 8px
+              - background-color: var(--card-background-color)
+              - border: 2px solid var(--divider-color)
+              - transition: all 0.2s
+            name:
+              - font-size: 12px
+              - font-weight: 700
+              - letter-spacing: 0.08em
+            icon:
+              - width: 26px
+
+    - type: horizontal-stack
+      cards:
+        - type: custom:button-card
+          entity: input_select.klima_wohnzimmer_manuell_modus
+          name: KÜHLEN
+          icon: mdi:snowflake
+          tap_action:
+            action: call-service
+            service: input_select.select_option
+            service_data:
+              entity_id: input_select.klima_wohnzimmer_manuell_modus
+              option: kühlen
+          state:
+            - value: kühlen
+              styles:
+                card:
+                  - background-color: rgba(14, 165, 233, 0.15)
+                  - border: 2px solid "#0ea5e9"
+                icon:
+                  - color: "#0ea5e9"
+                name:
+                  - color: "#0ea5e9"
+          styles:
+            card:
+              - border-radius: 12px
+              - padding: 12px 8px
+              - background-color: var(--card-background-color)
+              - border: 2px solid var(--divider-color)
+              - transition: all 0.2s
+            name:
+              - font-size: 11px
+              - font-weight: 700
+              - letter-spacing: 0.08em
+            icon:
+              - width: 22px
+
+        - type: custom:button-card
+          entity: input_select.klima_wohnzimmer_manuell_modus
+          name: HEIZEN
+          icon: mdi:fire
+          tap_action:
+            action: call-service
+            service: input_select.select_option
+            service_data:
+              entity_id: input_select.klima_wohnzimmer_manuell_modus
+              option: heizen
+          state:
+            - value: heizen
+              styles:
+                card:
+                  - background-color: rgba(249, 115, 22, 0.15)
+                  - border: 2px solid "#f97316"
+                icon:
+                  - color: "#f97316"
+                name:
+                  - color: "#f97316"
+          styles:
+            card:
+              - border-radius: 12px
+              - padding: 12px 8px
+              - background-color: var(--card-background-color)
+              - border: 2px solid var(--divider-color)
+              - transition: all 0.2s
+            name:
+              - font-size: 11px
+              - font-weight: 700
+              - letter-spacing: 0.08em
+            icon:
+              - width: 22px
+
+    - type: custom:mushroom-chips-card
+      chips:
+        - type: entity
+          entity: input_boolean.anwesnedheit_irgendjemand
+          name: Zuhause
+          icon: mdi:account-check
+          tap_action:
+            action: none
+        - type: entity
+          entity: input_boolean.anwesenheit_wohnbereich
+          name: Im Wohnbereich
+          icon: mdi:sofa-outline
+          tap_action:
+            action: none
+        - type: entity
+          entity: input_boolean.klima_wohnzimmer_battery_modus
+          name: Batterie-Modus
+          icon: mdi:battery-high
+          tap_action:
+            action: none
+
+    # ════════════════════════════════════════════════════════
+    # AUTO-MODUS
+    # ════════════════════════════════════════════════════════
+
+    - type: custom:mushroom-title-card
+      title: Auto-Modus
+      subtitle: Strompreisschwellen
+
+    - type: entities
+      show_header_toggle: false
+      entities:
+        - entity: sensor.electricity_price_holunderweg_3
+          name: Aktueller Strompreis
+          icon: mdi:lightning-bolt
+        - type: custom:slider-entity-row
+          entity: input_number.klima_wz_preis_kuehlen_max
+          name: Max. Preis Kühlen
+          icon: mdi:snowflake
+          min: 0.05
+          max: 0.60
+          step: 0.01
+        - type: custom:slider-entity-row
+          entity: input_number.klima_wz_preis_heizen_auto_max
+          name: Max. Preis Heizen (Auto)
+          icon: mdi:fire
+          min: 0.05
+          max: 0.60
+          step: 0.01
+
+    # ════════════════════════════════════════════════════════
+    # HEIZUNG ERSETZEN
+    # ════════════════════════════════════════════════════════
+
+    - type: custom:mushroom-title-card
+      title: Heizung Ersetzen
+      subtitle: Klimaanlage ersetzt Heizkörper bei günstigem Strom
+
+    - type: horizontal-stack
+      cards:
+        - type: custom:mushroom-entity-card
+          entity: input_boolean.klima_wz_heizung_ersatz_schalter
+          name: Aktivieren
+          icon: mdi:heat-wave
+          tap_action:
+            action: toggle
+          fill_container: true
+        - type: custom:mushroom-template-card
+          primary: >
+            {% if is_state('input_boolean.klima_wz_heizung_ersatz_aktiv', 'on') %}
+              Aktiv
+            {% else %}
+              Inaktiv
+            {% endif %}
+          secondary: Status
+          icon: >
+            {% if is_state('input_boolean.klima_wz_heizung_ersatz_aktiv', 'on') %}
+              mdi:check-circle
+            {% else %}
+              mdi:circle-off-outline
+            {% endif %}
+          icon_color: >
+            {% if is_state('input_boolean.klima_wz_heizung_ersatz_aktiv', 'on') %}
+              green
+            {% else %}
+              grey
+            {% endif %}
+          fill_container: true
+
+    - type: entities
+      title: Schwellenwerte
+      show_header_toggle: false
+      entities:
+        - entity: sensor.electricity_price_holunderweg_3
+          name: Aktueller Preis
+          icon: mdi:lightning-bolt
+        - type: custom:slider-entity-row
+          entity: input_number.klima_wz_preis_heizen_ersatz_max
+          name: Max. Preis (Ersetzen)
+          icon: mdi:currency-eur
+          min: 0.05
+          max: 0.60
+          step: 0.01
+        - entity: sensor.openweathermap_temperature
+          name: Aktuelle Außentemp
+          icon: mdi:thermometer-lines
+        - type: custom:slider-entity-row
+          entity: input_number.klima_wz_heizung_ersatz_aussentemp_max
+          name: Max. Außentemp (Heizen)
+          icon: mdi:thermometer-chevron-up
+          min: 0
+          max: 25
+          step: 1
+
+    - type: entities
+      title: Zieltemperaturen
+      show_header_toggle: false
+      entities:
+        - type: custom:slider-entity-row
+          entity: input_number.klima_wz_heizung_ersatz_temp_im_raum
+          name: Im Wohnbereich
+          icon: mdi:sofa-thermometer
+          min: 16
+          max: 25
+          step: 0.5
+        - type: custom:slider-entity-row
+          entity: input_number.klima_wz_heizung_ersatz_temp_zuhause
+          name: Zuhause, nicht im WZ
+          icon: mdi:home-thermometer
+          min: 14
+          max: 24
+          step: 0.5
+        - type: custom:slider-entity-row
+          entity: input_number.klima_wz_heizung_ersatz_temp_niemand
+          name: Niemand zuhause
+          icon: mdi:home-thermometer-outline
+          min: 10
+          max: 20
+          step: 0.5
+
+    - type: entities
+      title: Thermostat-Status
+      show_header_toggle: false
+      entities:
+        - entity: climate.bt_wohnzimmer_bt_wohnzimmer
+          name: BT Wohnzimmer
+        - entity: climate.bt_esszimmer_bt_esszimmer
+          name: BT Esszimmer
+        - entity: climate.bt_kuche_bt_kuche
+          name: BT Küche
+
+    # ════════════════════════════════════════════════════════
+    # VERLAUF
+    # ════════════════════════════════════════════════════════
+
+    - type: custom:mushroom-title-card
+      title: Verlauf
+      subtitle: Letzte 24 Stunden
+
+    - type: custom:apexcharts-card
+      header:
+        show: true
+        title: Temperatur
+        show_states: true
+        colorize_states: true
+      graph_span: 24h
+      apex_config:
+        chart:
+          height: 180
+          toolbar:
+            show: false
+        grid:
+          strokeDashArray: 4
+        yaxis:
+          decimalsInFloat: 1
+      series:
+        - entity: sensor.wohnzimmer_temperatur
+          name: Innen
+          color: "#f59e0b"
+          stroke_width: 2
+          type: area
+          opacity: 0.12
+          fill_raw: last
+        - entity: sensor.openweathermap_temperature
+          name: Außen
+          color: "#818cf8"
+          stroke_width: 2
+          fill_raw: last
+
+    - type: custom:apexcharts-card
+      header:
+        show: true
+        title: Strompreis
+        show_states: true
+        colorize_states: true
+      graph_span: 24h
+      apex_config:
+        chart:
+          height: 150
+          toolbar:
+            show: false
+        grid:
+          strokeDashArray: 4
+        yaxis:
+          decimalsInFloat: 3
+      series:
+        - entity: sensor.electricity_price_holunderweg_3
+          name: €/kWh
+          color: "#34d399"
+          stroke_width: 2
+          type: area
+          opacity: 0.15
+          fill_raw: last

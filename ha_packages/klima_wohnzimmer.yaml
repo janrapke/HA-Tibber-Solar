@@ -9,7 +9,7 @@
 #
 # Bestehende Entities (nicht hier erstellt):
 #   climate.152832118046533_climate          (Klimaanlage WZ)
-#   sensor.jans_echo_dot_temperatur        (Innentemperatur)
+#   sensor.wohnzimmer_temperatur           (Innentemperatur, Sonde WLAN)
 #   sensor.openweathermap_temperature        (Außentemperatur)
 #   sensor.electricity_price_holunderweg_3   (Tibber Strompreis EUR/kWh)
 #   input_boolean.anwesnedheit_irgendjemand  (Anwesenheit)
@@ -200,7 +200,7 @@ automation:
     mode: single
     trigger:
       - platform: numeric_state
-        entity_id: sensor.jans_echo_dot_temperatur
+        entity_id: sensor.wohnzimmer_temperatur
         above: 24.5
         for:
           minutes: 3
@@ -226,7 +226,7 @@ automation:
         after: "10:00:00"
         before: "22:00:00"
       - condition: numeric_state
-        entity_id: sensor.jans_echo_dot_temperatur
+        entity_id: sensor.wohnzimmer_temperatur
         above: 24.5
       - condition: template
         value_template: >
@@ -273,7 +273,7 @@ automation:
     mode: single
     trigger:
       - platform: numeric_state
-        entity_id: sensor.jans_echo_dot_temperatur
+        entity_id: sensor.wohnzimmer_temperatur
         below: 23.2
     condition:
       - condition: state
@@ -320,7 +320,7 @@ automation:
     mode: single
     trigger:
       - platform: numeric_state
-        entity_id: sensor.jans_echo_dot_temperatur
+        entity_id: sensor.wohnzimmer_temperatur
         below: 19
         for:
           minutes: 3
@@ -349,7 +349,7 @@ automation:
         after: "10:00:00"
         before: "22:00:00"
       - condition: numeric_state
-        entity_id: sensor.jans_echo_dot_temperatur
+        entity_id: sensor.wohnzimmer_temperatur
         below: 19
       - condition: template
         value_template: >
@@ -396,7 +396,7 @@ automation:
     mode: single
     trigger:
       - platform: numeric_state
-        entity_id: sensor.jans_echo_dot_temperatur
+        entity_id: sensor.wohnzimmer_temperatur
         above: 21.5
     condition:
       - condition: state
@@ -444,7 +444,7 @@ automation:
       - platform: template
         value_template: >
           {% set ziel = (states('input_number.klima_wz_heizung_ersatz_temp_im_raum') | float(21)) if is_state('input_boolean.anwesenheit_wohnbereich', 'on') else ((states('input_number.klima_wz_heizung_ersatz_temp_nacht') | float(19)) if (is_state('input_boolean.anwesnedheit_irgendjemand', 'on') and now().hour < 8) else ((states('input_number.klima_wz_heizung_ersatz_temp_zuhause') | float(20)) if is_state('input_boolean.anwesnedheit_irgendjemand', 'on') else (states('input_number.klima_wz_heizung_ersatz_temp_niemand') | float(18)))) %}
-          {{ states('sensor.jans_echo_dot_temperatur') | float(0) >= ziel }}
+          {{ states('sensor.wohnzimmer_temperatur') | float(0) >= ziel }}
     condition:
       - condition: state
         entity_id: input_boolean.klima_wz_heizung_ersatz_aktiv
@@ -455,7 +455,7 @@ automation:
       - condition: template
         value_template: >
           {% set ziel = (states('input_number.klima_wz_heizung_ersatz_temp_im_raum') | float(21)) if is_state('input_boolean.anwesenheit_wohnbereich', 'on') else ((states('input_number.klima_wz_heizung_ersatz_temp_nacht') | float(19)) if (is_state('input_boolean.anwesnedheit_irgendjemand', 'on') and now().hour < 8) else ((states('input_number.klima_wz_heizung_ersatz_temp_zuhause') | float(20)) if is_state('input_boolean.anwesnedheit_irgendjemand', 'on') else (states('input_number.klima_wz_heizung_ersatz_temp_niemand') | float(18)))) %}
-          {{ states('sensor.jans_echo_dot_temperatur') | float(0) >= ziel }}
+          {{ states('sensor.wohnzimmer_temperatur') | float(0) >= ziel }}
       - condition: template
         value_template: >
           {% set ts = state_attr('input_datetime.klima_wohnzimmer_letzte_einschaltung', 'timestamp') %}
@@ -973,9 +973,10 @@ automation:
       - platform: template
         value_template: >
           {% set ziel = (states('input_number.klima_wz_heizung_ersatz_temp_im_raum') | float(21)) if is_state('input_boolean.anwesenheit_wohnbereich', 'on') else ((states('input_number.klima_wz_heizung_ersatz_temp_nacht') | float(19)) if (is_state('input_boolean.anwesnedheit_irgendjemand', 'on') and now().hour < 8) else ((states('input_number.klima_wz_heizung_ersatz_temp_zuhause') | float(20)) if is_state('input_boolean.anwesnedheit_irgendjemand', 'on') else (states('input_number.klima_wz_heizung_ersatz_temp_niemand') | float(18)))) %}
-          {{ states('sensor.jans_echo_dot_temperatur') | float(99) < (ziel - 0.5) }}
+          {{ states('sensor.wohnzimmer_temperatur') | float(99) < (ziel - 0.5) }}
+        for: "00:05:00"
       - platform: time_pattern
-        minutes: "/5"
+        minutes: "/30"
     condition:
       - condition: state
         entity_id: input_boolean.klima_wz_heizung_ersatz_aktiv
@@ -997,7 +998,7 @@ automation:
       - condition: template
         value_template: >
           {% set ziel = (states('input_number.klima_wz_heizung_ersatz_temp_im_raum') | float(21)) if is_state('input_boolean.anwesenheit_wohnbereich', 'on') else ((states('input_number.klima_wz_heizung_ersatz_temp_nacht') | float(19)) if (is_state('input_boolean.anwesnedheit_irgendjemand', 'on') and now().hour < 8) else ((states('input_number.klima_wz_heizung_ersatz_temp_zuhause') | float(20)) if is_state('input_boolean.anwesnedheit_irgendjemand', 'on') else (states('input_number.klima_wz_heizung_ersatz_temp_niemand') | float(18)))) %}
-          {{ states('sensor.jans_echo_dot_temperatur') | float(99) < (ziel - 0.5) }}
+          {{ states('sensor.wohnzimmer_temperatur') | float(99) < (ziel - 0.5) }}
       - condition: or
         conditions:
           - condition: not
