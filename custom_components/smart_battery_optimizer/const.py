@@ -89,3 +89,38 @@ CLIMATE_LABEL_TO_INTERNAL = {
     CLIMATE_TYPE_HEAT_PUMP: CLIMATE_INTERNAL_HEAT_PUMP,
 }
 CLIMATE_INTERNAL_TO_LABEL = {v: k for k, v in CLIMATE_LABEL_TO_INTERNAL.items()}
+
+# Living room heat pump control (climate_control.py); defaults are the live entities
+CONF_AC_ENTITY = "ac_climate_entity"
+CONF_AC_DEVICE_ID = "ac_midea_device_id"
+CONF_AC_ROOM_SENSOR = "ac_room_sensor"
+CONF_AC_ROOM_FALLBACK = "ac_room_fallback_sensor"
+CONF_AC_OUTDOOR_SENSOR = "ac_outdoor_sensor"
+CONF_AC_PRESENCE_HOME = "ac_presence_home"
+CONF_AC_PRESENCE_LIVING = "ac_presence_living"
+CONF_AC_RADIATORS = "ac_radiator_thermostats"
+CONF_AC_HEATING_AUTOMATIONS = "ac_heating_automations"
+
+AC_DEFAULTS = {
+    CONF_AC_ENTITY: "climate.152832118046533_climate",
+    CONF_AC_DEVICE_ID: "152832118046533",
+    CONF_AC_ROOM_SENSOR: "sensor.wohnzimmer_temperatur",
+    CONF_AC_ROOM_FALLBACK: "sensor.jans_echo_dot_temperatur",
+    CONF_AC_OUTDOOR_SENSOR: "sensor.openweathermap_temperature",
+    CONF_AC_PRESENCE_HOME: "input_boolean.anwesnedheit_irgendjemand",
+    CONF_AC_PRESENCE_LIVING: "input_boolean.anwesenheit_wohnbereich",
+    CONF_AC_RADIATORS: [
+        "climate.bt_wohnzimmer_bt_wohnzimmer",
+        "climate.bt_esszimmer_bt_esszimmer",
+        "climate.bt_kuche_bt_kuche",
+        "climate.bt_flur_bt_flur",
+    ],
+    CONF_AC_HEATING_AUTOMATIONS: [
+        "automation.heizung_wohnzimmer",
+        "automation.heizung_esszimmer",
+        "automation.heizung_kuche",
+        "automation.heizung_auf_heat_stellen",
+    ],
+}
+# automations that are triggered once when the radiators get the heating back (like YAML no. 18)
+AC_RETRIGGER_AUTOMATIONS = ["automation.heizung_wohnzimmer", "automation.heizung_kuche"]
