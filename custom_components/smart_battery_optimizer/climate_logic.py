@@ -51,6 +51,7 @@ KP = 1.0  # K setpoint per K room error (immediate)
 KI = 1.5  # K setpoint per K room error and hour
 I_MAX = 2.0
 CORR_MAX = 3.0  # P + I together
+PAUSE_ABOVE_K = 0.5  # replace mode: AC pauses above target + this (smallest stage overheats in mild weather)
 SP_MIN, SP_MAX = 16.0, 30.0
 
 
@@ -243,6 +244,11 @@ def decide(i: Inputs, st: State) -> Decision:
             why = replace_why
         if st.surplus_active:
             why += f", {surplus_why} → +1 K"
+        paused = st.reason_mode == "ersatz_pause"
+        if i.room > t + PAUSE_ABOVE_K or (paused and i.room > t):
+            d = Decision("ersatz_pause", f"{why} – Ziel erreicht ({i.room:.1f} °C > {t:.1f} °C), Klima pausiert",
+                         False, radiators=False, target_room=t)
+            return finish(_apply(i, st, d, dt_h, bypass_lock=True))
         d = Decision("ersatz", why, True, hvac="heat", radiators=False, target_room=t)
         return finish(_apply(i, st, d, dt_h, bypass_lock=True))
 

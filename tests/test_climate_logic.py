@@ -99,7 +99,7 @@ def test_replace_switch_off_ends_immediately():
 
 def test_replace_runs_at_night_and_away():
     st = cl.State()
-    d = cl.decide(inp(now=datetime(2026, 11, 3, 3, 0), home=False, replace_switch=True, price=0.20), st)
+    d = cl.decide(inp(now=datetime(2026, 11, 3, 3, 0), home=False, replace_switch=True, price=0.20, room=18.0), st)
     assert d.mode == "ersatz" and d.target_room == 18.0
 
 
@@ -179,16 +179,16 @@ def test_setpoint_uses_offset_integral_and_rate_limit():
         t += 15 * M
         d = cl.decide(inp(now=t, replace_switch=True, price=0.20, room=20.0, in_living=True, offset_heat=6.0), st)
     assert d.setpoint == 30.0  # 21 + 6 + min(3, 1 + 2)
-    d2 = cl.decide(inp(now=t + 2 * M, replace_switch=True, price=0.20, room=23.0, in_living=True, offset_heat=6.0), st)
-    assert d2.send_setpoint and d2.setpoint == 27.0  # P reacts at once: 21 + 6 - 2 + I 2
+    d2 = cl.decide(inp(now=t + 2 * M, replace_switch=True, price=0.20, room=21.4, in_living=True, offset_heat=6.0), st)
+    assert d2.send_setpoint and d2.setpoint == 28.5  # P reacts at once: 21 + 6 - 0.4 + I 2
     d3 = cl.decide(inp(now=t + 4 * M, replace_switch=True, price=0.20, room=20.0, in_living=True, offset_heat=6.0), st)
-    assert not d3.send_setpoint and d3.setpoint == 27.0  # max. one command per 5 min
+    assert not d3.send_setpoint and d3.setpoint == 28.5  # max. one command per 5 min
     for _ in range(20):
         t += 15 * M
         d = cl.decide(inp(now=t, replace_switch=True, price=0.20, room=10.0, in_living=False, offset_heat=6.0), st)
     assert d.radiators  # < 17 °C: safety
     st = cl.State()
-    d = cl.decide(inp(replace_switch=True, price=0.20, room=21.0, offset_heat=12.0), st)
+    d = cl.decide(inp(replace_switch=True, price=0.20, room=20.0, offset_heat=12.0), st)
     assert d.setpoint == 30.0
 
 
@@ -207,3 +207,17 @@ def test_state_roundtrip():
     cl.decide(inp(replace_switch=True, price=0.20), st)
     st2 = cl.State.from_dict(st.to_dict())
     assert st2 == st
+
+
+def test_replace_pauses_above_target_with_hysteresis():
+    st = cl.State()
+    kw = dict(replace_switch=True, price=0.20, in_living=True)
+    d = cl.decide(inp(room=20.5, **kw), st)
+    assert d.mode == "ersatz" and d.climate_on
+    t = NOON + 31 * M  # after the minimum runtime
+    d = cl.decide(inp(now=t, room=21.6, **kw), st)
+    assert d.mode == "ersatz_pause" and d.climate_on is False and not d.radiators and d.send_hvac
+    d = cl.decide(inp(now=t + 20 * M, room=21.2, **kw), st)
+    assert d.mode == "ersatz_pause" and not d.radiators  # stays paused until the target is reached
+    d = cl.decide(inp(now=t + 40 * M, room=20.9, **kw), st)
+    assert d.mode == "ersatz" and d.climate_on and d.send_hvac  # no 1 h lock in replace mode

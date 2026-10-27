@@ -377,3 +377,18 @@ def test_building_kpis_evaluated_once_and_persisted():
     ctl2 = cc.ClimateController(hass, "entry1", {})
     ctl2.load_dict(ctl.to_dict())
     assert ctl2.building["nights"] == ctl.building["nights"]
+
+
+def test_radiators_switched_back_on_are_turned_off_again():
+    hass, ctl = make(room=19.0)
+    ctl.control_active = True
+    ctl.replace_switch = True
+    run(ctl, NOON, price=0.20)
+    assert ctl.radiators_taken
+    hass.states[BT] = St("heat", {"hvac_action": "idle"})
+    hass.services.calls.clear()
+    run(ctl, NOON + 2 * M, price=0.20)
+    assert not any(c[1] == "set_hvac_mode" and c[2]["entity_id"] == [BT] for c in hass.services.calls)
+    run(ctl, NOON + 5 * M, price=0.20)
+    fix = [c for c in hass.services.calls if c[1] == "set_hvac_mode" and c[2].get("entity_id") == [BT]]
+    assert fix and fix[0][2]["hvac_mode"] == "off" and ctl.radiator_fixes == 1

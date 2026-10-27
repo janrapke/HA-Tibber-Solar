@@ -57,6 +57,7 @@ HVAC_RETRY = timedelta(minutes=2)
 MAX_ACCOUNT_GAP_H = 0.1
 SAVE_DELAY_S = 60
 EXPECTED_LOAD_AHEAD = timedelta(hours=2)
+RADIATOR_CHECK = timedelta(minutes=5)  # BT follows its real valve and may switch back to heat
 KPI_KEEP = 800  # building key figures are kept for years (one entry per night / day)
 
 
@@ -152,6 +153,8 @@ class ClimateController:
         self._last_account: datetime | None = None
         self._last_room: tuple[float, str, datetime] | None = None
         self._started_at: datetime | None = None
+        self._last_radiator_check: datetime | None = None
+        self.radiator_fixes = 0
 
     # ------------------------------------------------------------ lifecycle
     async def async_start(self) -> None:
@@ -434,6 +437,7 @@ class ClimateController:
             "kompressor_hz": freq,
             "heizkoerper_heizen": radiators_on,
             "heizkoerper_uebernommen": self.radiators_taken,
+            "heizkoerper_nachgestellt": self.radiator_fixes,
         }
         self._changed()
         return d
@@ -443,8 +447,18 @@ class ClimateController:
         self._tone_batch = None
         if not d.radiators and not self.radiators_taken:
             await self._radiators_off(now)
+            self._last_radiator_check = now
         elif d.radiators and self.radiators_taken:
             await self._radiators_back()
+        elif self.radiators_taken and (self._last_radiator_check is None
+                                       or now - self._last_radiator_check >= RADIATOR_CHECK):
+            self._last_radiator_check = now
+            back_on = [e for e in self.cfg[CONF_AC_RADIATORS]
+                       if (st := self.hass.states.get(e)) is not None and st.state == "heat"]
+            if back_on:
+                self.radiator_fixes += 1
+                _LOGGER.info("Radiators switched back to heat by someone else, off again: %s", back_on)
+                await self._call("climate", "set_hvac_mode", {"entity_id": back_on, "hvac_mode": "off"})
 
         if ac_hvac is None or d.climate_on is None:
             return
