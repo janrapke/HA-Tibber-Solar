@@ -98,6 +98,9 @@ STALE_NOTIFY_AFTER = timedelta(minutes=30)
 HISTORY_DAYS_SOLAR = 60
 HISTORY_DAYS_LOAD = 10
 EARLY_EXCESS_LOOKAHEAD_H = 6.0
+NOWCAST_WINDOW = timedelta(hours=1)        # measured vs. forecast solar over this window
+NOWCAST_MIN_WH = 100.0                    # summed quarter-hour forecast needed for a ratio
+NOWCAST_FADE_H = 3.0                      # correction fades out over this many hours
 CHARGER_IDLE_W = 30.0                     # above this the grid charger counts as running
 CHARGER_FAULT_NOTIFY_AFTER = timedelta(minutes=3)
 
@@ -201,6 +204,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         self.day_review: dict = {}
         self._day_actual: dict = {}
         self._last_actual_time: datetime | None = None
+        self._recent_solar: list[tuple] = []  # (centre, measured W, forecast W, limited)
 
     # ------------------------------------------------------------------ setup
     async def _async_setup(self):
@@ -923,8 +927,28 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         if len(acc["solar"]) >= 5:
             w = self._weather_at(centre)
             if w is not None:
-                self.solar_model.learn(centre, w["ghi"], w["dni"], w["dhi"],
-                                       sum(acc["solar"]) / len(acc["solar"]), acc["limited"])
+                measured = sum(acc["solar"]) / len(acc["solar"])
+                predicted = self.solar_model.predict(centre, w["ghi"], w["dni"], w["dhi"])
+                # remember for the nowcast (before learning changes the model)
+                self._recent_solar.append((centre, measured, predicted, acc["limited"]))
+                self._recent_solar = self._recent_solar[-8:]
+                self.solar_model.learn(centre, w["ghi"], w["dni"], w["dhi"], measured, acc["limited"])
+
+    def _solar_nowcast_ratio(self, now: datetime) -> float:
+        """Measured / forecast solar over the last hour (unclipped quarters only), clamped."""
+        cap = self.solar_model.cap_w or 0.0
+        num = den = 0.0
+        for centre, measured, predicted, limited in self._recent_solar:
+            if now - centre > NOWCAST_WINDOW or limited:
+                continue
+            if cap and measured >= 0.93 * cap and measured <= predicted:
+                continue  # clipped and below forecast: says nothing (real sun could be higher)
+            # clipped but above forecast still proves at least this much sun: keep it
+            num += measured
+            den += predicted
+        if den < NOWCAST_MIN_WH:
+            return 1.0
+        return max(0.5, min(2.0, num / den))
 
     async def _step_plan(self, now, result) -> None:
         if self._last_plan_time and now - self._last_plan_time < REPLAN_EVERY \
@@ -942,15 +966,20 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         horizon_end = min(horizon_end, slot0 + timedelta(hours=36))
         fallback_price = self._current_price(now) or 0.30
         current_load = result.get("load")
+        ratio = self._solar_nowcast_ratio(now)
+        self._nowcast_ratio = ratio
         slots: list[Slot] = []
         t = slot0
         while t < horizon_end:
             price = self._price_at(t)
             centre = t + timedelta(minutes=7, seconds=30)
+            # nowcast: shift the next hours towards what the sun is really doing right now
+            ahead_h = (t - slot0).total_seconds() / 3600.0
+            nowcast = 1.0 + (ratio - 1.0) * max(0.0, 1.0 - ahead_h / NOWCAST_FADE_H)
             slots.append(Slot(
                 start=t,
                 price=price if price is not None else fallback_price,
-                solar_w=self._solar_forecast(centre),
+                solar_w=self._solar_forecast(centre) * nowcast,
                 load_w=self.load_model.predict(dt_util.as_local(t), dt_util.as_local(now), current_load),
             ))
             t += timedelta(minutes=15)
@@ -967,8 +996,9 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             self._grid_reason = "erlaubt"
         self._params = params
         if allow_grid and self.grid_charge_buffer:
-            # plan grid charging against a reduced solar forecast (safety buffer)
-            factor = max(0.0, 1.0 - float(self.grid_charge_buffer) / 100.0)
+            # grid charging only where the battery would not fill up even with MORE sun
+            # than forecast: plan against an increased solar forecast (safety buffer)
+            factor = 1.0 + max(0.0, float(self.grid_charge_buffer)) / 100.0
             plan_slots = [Slot(s.start, s.price, s.solar_w * factor, s.load_w) for s in slots]
         else:
             plan_slots = slots
@@ -1036,6 +1066,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             if cheapest and eff > 0 else None,
             "solar_prognose_heute_rest_kwh": round(rem_solar / 1000, 2),
             "solar_prognose_morgen_kwh": round(tomorrow_solar / 1000, 2),
+            "solar_korrektur_jetzt": round(getattr(self, "_nowcast_ratio", 1.0), 2),
             "plan_bis": dt_util.as_local(slots[-1].start).strftime("%a %H:%M") if slots else None,
         }
         self.predicted_remaining_solar = rem_solar
