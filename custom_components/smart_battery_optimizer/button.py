@@ -4,6 +4,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from .climate_ac_entities import build as build_climate
 from .const import DOMAIN, CONF_SMART_DEVICES
 from .appliance_entities import ApplianceConfirmButton, ApplianceProposalSelect
 
@@ -18,7 +19,8 @@ async def async_setup_entry(
     coordinator = hass.data[DOMAIN][config_entry.entry_id]["coordinator"]
 
     buttons = [
-        ResetLearningDataButton(coordinator, config_entry)
+        ResetLearningDataButton(coordinator, config_entry),
+        *build_climate("button", coordinator, config_entry.entry_id),
     ]
 
     # Add Smart Appliance Buttons

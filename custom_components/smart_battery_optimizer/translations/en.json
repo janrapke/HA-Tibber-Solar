@@ -174,7 +174,9 @@
           "solar_inverter": "Solar & Inverter",
           "system": "System Parameters",
           "excess": "Excess Power Consumers",
-          "grid_charger": "Grid Charger"
+          "grid_charger": "Grid Charger",
+          "climate_ac": "Living room AC",
+          "climate_devices": "Climate devices (legacy)"
         }
       },
       "tibber": {
@@ -327,6 +329,21 @@
         "data_description": {
           "grid_charger_switch": "Optional: Switch entity that turns the grid charger on and off. Leave empty if you do not want to charge from the grid.",
           "grid_charger_power_w": "Charging power of the grid charger in watts. Used to plan grid charging at cheap Tibber prices."
+        }
+      },
+      "climate_ac": {
+        "title": "Living room AC",
+        "description": "Entities for the living room heat pump (AC) control. Empty fields use the defaults.",
+        "data": {
+          "ac_climate_entity": "Air conditioner",
+          "ac_midea_device_id": "Midea device id (for prompt_tone/indirect_wind)",
+          "ac_room_sensor": "Room temperature sensor",
+          "ac_room_fallback_sensor": "Fallback room sensor",
+          "ac_outdoor_sensor": "Outdoor temperature sensor",
+          "ac_presence_home": "Presence (someone at home)",
+          "ac_presence_living": "Presence living area",
+          "ac_radiator_thermostats": "Radiator thermostats",
+          "ac_heating_automations": "Heating automations"
         }
       }
     }

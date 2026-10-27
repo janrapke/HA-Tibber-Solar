@@ -266,6 +266,15 @@ class ClimateController:
                 return True
         return False
 
+    def counter(self, key: str, now: datetime) -> float:
+        """Counter value; 0 when its day / month is already over."""
+        c = self.counters
+        if key == "kwh_day" and c.get("day") != now.date().isoformat():
+            return 0.0
+        if key != "kwh_day" and c.get("month") != now.strftime("%Y-%m"):
+            return 0.0
+        return float(c.get(key, 0.0))
+
     def power_w(self) -> float:
         """Electrical power of the AC right now (compressor_power, W)."""
         ac = self.hass.states.get(self.cfg[CONF_AC_ENTITY])

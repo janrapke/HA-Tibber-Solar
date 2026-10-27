@@ -323,3 +323,12 @@ def test_stop_hands_radiators_back_and_saves():
     asyncio.run(ctl.async_stop())
     assert not ctl.radiators_taken
     assert ctl._store.data["radiators_taken"] is False
+
+
+def test_counter_is_zero_after_period():
+    hass, ctl = make()
+    ctl.counters = {"day": "2026-11-03", "month": "2026-11", "kwh_day": 2.0, "kwh_month": 5.0}
+    assert ctl.counter("kwh_day", NOON) == 2.0
+    assert ctl.counter("kwh_day", NOON + timedelta(days=1)) == 0.0
+    assert ctl.counter("kwh_month", NOON + timedelta(days=1)) == 5.0
+    assert ctl.counter("kwh_month", NOON + timedelta(days=30)) == 0.0

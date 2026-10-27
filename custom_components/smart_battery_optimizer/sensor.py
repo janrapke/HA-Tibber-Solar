@@ -6,6 +6,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.const import EntityCategory
 
+from .climate_ac_entities import build as build_climate
 from .const import DOMAIN
 from .coordinator import SmartBatteryOptimizerCoordinator
 
@@ -39,6 +40,7 @@ async def async_setup_entry(
         DayForecastSensor(coordinator, entry.entry_id),
         DayRunningForecastSensor(coordinator, entry.entry_id),
         DayReviewSensor(coordinator, entry.entry_id),
+        *build_climate("sensor", coordinator, entry.entry_id),
     ]
 
     app_entities = coordinator.appliance_entities.get('sensor', [])

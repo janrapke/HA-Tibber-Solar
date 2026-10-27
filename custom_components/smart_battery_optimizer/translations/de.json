@@ -174,7 +174,9 @@
           "solar_inverter": "Solar & Wechselrichter",
           "system": "Systemparameter",
           "excess": "Überschuss-Verbraucher",
-          "grid_charger": "Netzladegerät"
+          "grid_charger": "Netzladegerät",
+          "climate_ac": "Klima Wohnzimmer",
+          "climate_devices": "Klimageräte (alt)"
         }
       },
       "tibber": {
@@ -327,6 +329,27 @@
         "data_description": {
           "grid_charger_switch": "Optional: Schalter (Switch-Entity), der das Netz-Ladegerät ein- und ausschaltet. Leer lassen wenn die Batterie nicht aus dem Netz geladen werden soll.",
           "grid_charger_power_w": "Ladeleistung des Netz-Ladegeräts in Watt. Wird für die Planung der Netzladung bei günstigen Tibber-Preisen verwendet."
+        }
+      },
+      "climate_ac": {
+        "title": "Klima Wohnzimmer",
+        "description": "Entitäten für die Steuerung der Klimaanlage (Wärmepumpe) im Wohnzimmer. Leere Felder nutzen die Standardwerte.",
+        "data": {
+          "ac_climate_entity": "Klimaanlage",
+          "ac_midea_device_id": "Midea-Geräte-ID (für prompt_tone/indirect_wind)",
+          "ac_room_sensor": "Raumtemperatur-Sensor",
+          "ac_room_fallback_sensor": "Ersatz-Raumsensor",
+          "ac_outdoor_sensor": "Außentemperatur-Sensor",
+          "ac_presence_home": "Anwesenheit (jemand zuhause)",
+          "ac_presence_living": "Anwesenheit Wohnbereich",
+          "ac_radiator_thermostats": "Heizkörper-Thermostate",
+          "ac_heating_automations": "Heizungsautomationen"
+        },
+        "data_description": {
+          "ac_room_sensor": "Danach wird geregelt. Werte außerhalb 5–40 °C oder älter als 15 min gelten als ungültig.",
+          "ac_room_fallback_sensor": "Wird genutzt, wenn der Raumsensor ausfällt (+0,5 K Korrektur).",
+          "ac_radiator_thermostats": "Werden beim Ersetzen der Heizung auf aus gestellt und danach wieder auf heizen.",
+          "ac_heating_automations": "Werden beim Ersetzen der Heizung abgeschaltet und danach wieder eingeschaltet."
         }
       }
     }

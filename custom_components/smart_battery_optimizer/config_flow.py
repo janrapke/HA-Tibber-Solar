@@ -57,6 +57,16 @@ from .const import (
     CONF_PS_OUTPUT_SENSOR,
     CONF_GENERIC_INVERTER_SWITCH,
     CONF_GENERIC_OUTPUT_SENSOR,
+    AC_DEFAULTS,
+    CONF_AC_ENTITY,
+    CONF_AC_DEVICE_ID,
+    CONF_AC_ROOM_SENSOR,
+    CONF_AC_ROOM_FALLBACK,
+    CONF_AC_OUTDOOR_SENSOR,
+    CONF_AC_PRESENCE_HOME,
+    CONF_AC_PRESENCE_LIVING,
+    CONF_AC_RADIATORS,
+    CONF_AC_HEATING_AUTOMATIONS,
 )
 
 
@@ -212,6 +222,26 @@ def _schema_grid_charger(d: dict) -> vol.Schema:
     })
 
 
+def _schema_climate_ac(d: dict) -> vol.Schema:
+    def ent(key, domain, multiple=False):
+        default = d.get(key) or AC_DEFAULTS[key]
+        return vol.Optional(key, default=default), selector.EntitySelector(
+            selector.EntitySelectorConfig(domain=domain, multiple=multiple))
+
+    fields = dict([
+        ent(CONF_AC_ENTITY, "climate"),
+        ent(CONF_AC_ROOM_SENSOR, "sensor"),
+        ent(CONF_AC_ROOM_FALLBACK, "sensor"),
+        ent(CONF_AC_OUTDOOR_SENSOR, "sensor"),
+        ent(CONF_AC_PRESENCE_HOME, ["input_boolean", "binary_sensor"]),
+        ent(CONF_AC_PRESENCE_LIVING, ["input_boolean", "binary_sensor"]),
+        ent(CONF_AC_RADIATORS, "climate", True),
+        ent(CONF_AC_HEATING_AUTOMATIONS, "automation", True),
+    ])
+    fields[vol.Optional(CONF_AC_DEVICE_ID, default=d.get(CONF_AC_DEVICE_ID) or AC_DEFAULTS[CONF_AC_DEVICE_ID])] = str
+    return vol.Schema(fields)
+
+
 class SmartBatteryOptimizerConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Smart Battery Optimizer."""
 
@@ -305,7 +335,8 @@ class SmartBatteryOptimizerOptionsFlowHandler(config_entries.OptionsFlow):
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         return self.async_show_menu(
             step_id="init",
-            menu_options=["tibber", "battery", "solar_inverter", "system", "excess", "grid_charger", "climate_devices"],
+            menu_options=["tibber", "battery", "solar_inverter", "system", "excess", "grid_charger", "climate_ac",
+                          "climate_devices"],
         )
 
     async def async_step_tibber(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -361,6 +392,11 @@ class SmartBatteryOptimizerOptionsFlowHandler(config_entries.OptionsFlow):
         if user_input is not None:
             return self._save_section(user_input)
         return self.async_show_form(step_id="grid_charger", data_schema=_schema_grid_charger(self._current()))
+
+    async def async_step_climate_ac(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        if user_input is not None:
+            return self._save_section(user_input)
+        return self.async_show_form(step_id="climate_ac", data_schema=_schema_climate_ac(self._current()))
 
     async def async_step_climate_devices(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         return self.async_show_menu(
