@@ -51,7 +51,7 @@ KP = 1.0  # K setpoint per K room error (immediate)
 KI = 1.5  # K setpoint per K room error and hour
 I_MAX = 2.0
 CORR_MAX = 3.0  # P + I together
-PAUSE_ABOVE_K = 0.5  # replace mode: AC pauses above target + this (smallest stage overheats in mild weather)
+PAUSE_ABOVE_K = 0.5  # replace mode: throttle above target + this (smallest stage overheats in mild weather)
 SP_MIN, SP_MAX = 16.0, 30.0
 
 
@@ -246,8 +246,9 @@ def decide(i: Inputs, st: State) -> Decision:
             why += f", {surplus_why} → +1 K"
         paused = st.reason_mode == "ersatz_pause"
         if i.room > t + PAUSE_ABOVE_K or (paused and i.room > t):
-            d = Decision("ersatz_pause", f"{why} – Ziel erreicht ({i.room:.1f} °C > {t:.1f} °C), Klima pausiert",
-                         False, radiators=False, target_room=t)
+            # AC stays on; a setpoint at the room target makes the compressor stop by itself
+            d = Decision("ersatz_pause", f"{why} – Ziel erreicht ({i.room:.1f} °C > {t:.1f} °C), Sollwert gesenkt",
+                         True, hvac="heat", radiators=False, target_room=t)
             return finish(_apply(i, st, d, dt_h, bypass_lock=True))
         d = Decision("ersatz", why, True, hvac="heat", radiators=False, target_room=t)
         return finish(_apply(i, st, d, dt_h, bypass_lock=True))
@@ -351,11 +352,12 @@ def _apply(i: Inputs, st: State, d: Decision, dt_h: float, force: bool = False,
         if d.target_room is None:
             d.target_room = zone_target(i) if d.hvac == "heat" else COOL_TARGET
         offset = i.offset_heat if d.hvac == "heat" else i.offset_cool
-        if i.room is not None:
+        throttle = d.mode == "ersatz_pause"
+        if i.room is not None and not throttle:
             st.integral = max(-I_MAX, min(I_MAX, st.integral + KI * (d.target_room - i.room) * dt_h))
         p_part = KP * (d.target_room - i.room) if i.room is not None else 0.0
         corr = max(-CORR_MAX, min(CORR_MAX, p_part + st.integral))
-        sp = max(SP_MIN, min(SP_MAX, _round_half(d.target_room + offset + corr)))
+        sp = max(SP_MIN, min(SP_MAX, _round_half(d.target_room if throttle else d.target_room + offset + corr)))
         d.setpoint = sp
         due = st.setpoint_sent is None or now - st.setpoint_sent >= CMD_INTERVAL
         if d.send_hvac or (sp != st.setpoint and due):

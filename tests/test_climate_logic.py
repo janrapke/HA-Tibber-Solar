@@ -209,15 +209,17 @@ def test_state_roundtrip():
     assert st2 == st
 
 
-def test_replace_pauses_above_target_with_hysteresis():
+def test_replace_throttles_setpoint_above_target_with_hysteresis():
     st = cl.State()
-    kw = dict(replace_switch=True, price=0.20, in_living=True)
+    kw = dict(replace_switch=True, price=0.20, in_living=True, offset_heat=5.0)
     d = cl.decide(inp(room=20.5, **kw), st)
-    assert d.mode == "ersatz" and d.climate_on
-    t = NOON + 31 * M  # after the minimum runtime
+    assert d.mode == "ersatz" and d.climate_on and d.setpoint == 26.5  # 21 + 5 + P 0.5
+    t = NOON + 10 * M
     d = cl.decide(inp(now=t, room=21.6, **kw), st)
-    assert d.mode == "ersatz_pause" and d.climate_on is False and not d.radiators and d.send_hvac
+    # AC stays on in heat, only the setpoint drops to the room target
+    assert d.mode == "ersatz_pause" and d.climate_on and d.hvac == "heat" and not d.send_hvac
+    assert d.setpoint == 21.0 and d.send_setpoint and not d.radiators
     d = cl.decide(inp(now=t + 20 * M, room=21.2, **kw), st)
-    assert d.mode == "ersatz_pause" and not d.radiators  # stays paused until the target is reached
+    assert d.mode == "ersatz_pause" and d.setpoint == 21.0  # stays throttled until the target is reached
     d = cl.decide(inp(now=t + 40 * M, room=20.9, **kw), st)
-    assert d.mode == "ersatz" and d.climate_on and d.send_hvac  # no 1 h lock in replace mode
+    assert d.mode == "ersatz" and d.setpoint > 25 and d.send_setpoint and not d.send_hvac
