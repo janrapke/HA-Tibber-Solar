@@ -1,5 +1,5 @@
 // Sends Home Assistant websocket commands using the hass-mcp credentials.
-// Usage: node ha_ws.mjs '<json array of command objects without id>'
+// Usage: node ha_ws.mjs '<json array of command objects without id>' (or @file.json)
 import fs from "node:fs";
 import os from "node:os";
 
@@ -12,7 +12,8 @@ for (const [k, p] of Object.entries(cfg.projects || {})) {
 if (!env) throw new Error("no HA credentials found");
 
 const url = env.HASS_URL.replace(/^http/, "ws").replace(/\/$/, "") + "/api/websocket";
-const cmds = JSON.parse(process.argv[2]);
+const arg = process.argv[2];
+const cmds = JSON.parse(arg.startsWith("@") ? fs.readFileSync(arg.slice(1), "utf8") : arg);
 const ws = new WebSocket(url);
 let id = 0;
 const results = [];
