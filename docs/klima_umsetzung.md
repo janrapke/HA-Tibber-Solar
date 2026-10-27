@@ -125,3 +125,4 @@ in denen die App die Klima laufen lässt (Stufe 1: aktuelle Leistung für die n�
 
 ## Protokoll
 - 2026-10-27 18:30 – Plan angelegt (interaktive Sitzung). Raumsensor umgestellt, Paket/Dashboard/BT live auf `sensor.wohnzimmer_temperatur`.
+- 2026-10-27 17:24 START Durchlauf
