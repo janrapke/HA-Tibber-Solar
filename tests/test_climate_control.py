@@ -111,6 +111,7 @@ def make(room=20.0, ac="off", ac_attrs=None, outdoor="8", ts=NOON):
     hass.states[BT] = St("heat", {"hvac_action": "idle"}, ts=ts)
     ctl = cc.ClimateController(hass, "entry1", {})
     asyncio.run(ctl.async_start())
+    ctl._started_at = ts - timedelta(hours=1)  # HA is up for a while
     return hass, ctl
 
 
@@ -339,6 +340,7 @@ def test_startup_without_room_value_does_nothing():
     ctl.control_active = True
     ctl.replace_switch = True
     hass.states[ROOM] = St("unavailable")
+    ctl._started_at = None  # just restarted
     d = run(ctl, NOON, price=0.20)
     assert d.mode == "start" and d.climate_on is None
     assert hass.services.calls == []
@@ -392,3 +394,26 @@ def test_radiators_switched_back_on_are_turned_off_again():
     run(ctl, NOON + 5 * M, price=0.20)
     fix = [c for c in hass.services.calls if c[1] == "set_hvac_mode" and c[2].get("entity_id") == [BT]]
     assert fix and fix[0][2]["hvac_mode"] == "off" and ctl.radiator_fixes == 1
+
+
+def test_no_commands_in_the_first_minutes_after_restart():
+    hass, ctl = make(room=19.0)
+    ctl.control_active = True
+    ctl.replace_switch = True
+    ctl._started_at = None
+    d = run(ctl, NOON, price=0.20)
+    assert d.mode == "ersatz" and hass.services.calls == []
+    run(ctl, NOON + 2 * M, price=0.20)
+    assert ("automation", "turn_off") in services(hass)
+
+
+def test_heating_automation_switched_on_again_is_turned_off():
+    hass, ctl = make(room=19.0)
+    ctl.control_active = True
+    ctl.replace_switch = True
+    run(ctl, NOON, price=0.20)
+    hass.states["automation.heizung_kuche"] = St("on")
+    hass.services.calls.clear()
+    run(ctl, NOON + 5 * M, price=0.20)
+    off = [c for c in hass.services.calls if c[:2] == ("automation", "turn_off")]
+    assert off and off[0][2]["entity_id"] == ["automation.heizung_kuche"]

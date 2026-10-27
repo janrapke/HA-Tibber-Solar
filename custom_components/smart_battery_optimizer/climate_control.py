@@ -48,6 +48,7 @@ ROOM_MIN, ROOM_MAX = 5.0, 40.0
 ROOM_MAX_AGE = timedelta(minutes=15)
 ROOM_HOLD = timedelta(minutes=10)  # WLAN probe drops out briefly: keep the last valid value
 STARTUP_GRACE = timedelta(minutes=5)  # sensors are still unknown right after a restart
+STARTUP_SETTLE = timedelta(minutes=2)  # no commands before the other integrations are up
 OUTDOOR_MAX_AGE = timedelta(hours=3)
 FALLBACK_CORRECTION_K = 0.5  # Echo reads ~0.5 K low
 SAMPLE_MIN = 15
@@ -408,7 +409,9 @@ class ClimateController:
         d = decide(inputs, self.state)
         self.decision = d
 
-        if self.control_active:
+        if self.control_active and now - self._started_at < STARTUP_SETTLE:
+            pass  # right after a restart other integrations (automation, BT) may not be loaded yet
+        elif self.control_active:
             await self._execute(now, d, ac_hvac, attrs)
         elif self.radiators_taken:
             await self._radiators_back()
@@ -455,9 +458,14 @@ class ClimateController:
             self._last_radiator_check = now
             back_on = [e for e in self.cfg[CONF_AC_RADIATORS]
                        if (st := self.hass.states.get(e)) is not None and st.state == "heat"]
-            if back_on:
+            autos_on = [e for e in self.cfg[CONF_AC_HEATING_AUTOMATIONS]
+                        if (st := self.hass.states.get(e)) is not None and st.state == "on"]
+            if back_on or autos_on:
                 self.radiator_fixes += 1
-                _LOGGER.info("Radiators switched back to heat by someone else, off again: %s", back_on)
+                _LOGGER.info("Heating switched back on by someone else, off again: %s", back_on + autos_on)
+            if autos_on:
+                await self._call("automation", "turn_off", {"entity_id": autos_on})
+            if back_on:
                 await self._call("climate", "set_hvac_mode", {"entity_id": back_on, "hvac_mode": "off"})
 
         if ac_hvac is None or d.climate_on is None:
