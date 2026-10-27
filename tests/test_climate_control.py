@@ -456,15 +456,15 @@ def test_real_valves_to_minimum_and_bt_targets_restored():
                                           "current_temperature": 19.0})
     run(ctl, NOON, price=0.20)
     v_calls = [c for c in hass.services.calls if c[2].get("entity_id") == valve]
-    assert [(c[1], c[2].get("temperature")) for c in v_calls] == [("set_temperature", 1)]  # no 'off'
+    assert [(c[1], c[2].get("temperature")) for c in v_calls] == [("set_temperature", 6.0)]  # no 'off'
     assert ctl.saved_bt_targets == {BT: 21.0}
 
     # setpoint not taken / raised again -> minimum again at the next check, nothing while it stays at 1
     hass.services.calls.clear()
     hass.states[ROOM] = St("19.0", ts=NOON + 5 * M)
     run(ctl, NOON + 5 * M, price=0.20)
-    assert [c for c in hass.services.calls if c[2].get("entity_id") == valve and c[2].get("temperature") == 1]
-    hass.states[valve] = St("heat_cool", {"temperature": 1, "min_temp": 1, "hvac_modes": modes})
+    assert [c for c in hass.services.calls if c[2].get("entity_id") == valve and c[2].get("temperature") == 6.0]
+    hass.states[valve] = St("heat_cool", {"temperature": 5.5, "min_temp": 1, "hvac_modes": modes})  # <= 6 = shut
     hass.states[BT] = St("off", {"temperature": 1.0})  # BT copied the valve setpoint
     hass.services.calls.clear()
     hass.states[ROOM] = St("19.0", ts=NOON + 10 * M)

@@ -61,6 +61,7 @@ EXPECTED_LOAD_AHEAD = timedelta(hours=2)
 VALVE_WARM_K = 1.5  # valve head this much above the room = radiator is warm (sensor steps 0.5 K)
 VALVE_WARN_AFTER = timedelta(minutes=30)  # warm this long while it should be off -> notification
 VALVE_COOLDOWN = timedelta(minutes=60)  # radiators need time to cool down after the handover
+VALVE_CLOSED_C = 6.0  # Tuya heads: 'off' is ignored, 1 °C partly too and 5 °C flips to preset temp_auto
 RADIATOR_CHECK = timedelta(minutes=5)  # BT follows its real valve and may switch back to heat
 KPI_KEEP = 800  # building key figures are kept for years (one entry per night / day)
 
@@ -602,18 +603,18 @@ class ClimateController:
         return [AC_RADIATOR_VALVES[bt] for bt in self.cfg[CONF_AC_RADIATORS] if bt in AC_RADIATOR_VALVES]
 
     def _valve_open(self, valve: str) -> bool:
-        """Valve head above its lowest setpoint (the Tuya heads ignore 'off', the minimum is 'off')."""
+        """Valve head set above VALVE_CLOSED_C (a setpoint that low keeps it shut in a heated room)."""
         st = self.hass.states.get(valve)
         if st is None or st.state in UNAVAILABLE:
             return False
-        low, cur = st.attributes.get("min_temp"), st.attributes.get("temperature")
-        return low is not None and cur is not None and cur > low
+        cur = st.attributes.get("temperature")
+        return isinstance(cur, (int, float)) and cur > VALVE_CLOSED_C
 
     async def _valves_off(self, valves: list[str]) -> None:
-        """Real valve heads to their lowest setpoint (BT 'off' does not close them)."""
+        """Real valve heads to VALVE_CLOSED_C (BT 'off' does not close them)."""
         for v in valves:
             if self._valve_open(v):
-                low = self.hass.states.get(v).attributes.get("min_temp")
+                low = max(VALVE_CLOSED_C, self.hass.states.get(v).attributes.get("min_temp") or 0)
                 await self._call("climate", "set_temperature", {"entity_id": v, "temperature": low})
 
     async def _radiators_off(self, now: datetime) -> None:
