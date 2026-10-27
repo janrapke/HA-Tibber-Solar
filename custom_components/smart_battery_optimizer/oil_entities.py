@@ -37,7 +37,7 @@ def build(platform: str, coordinator, entry_id: str) -> list:
                 OilTankSensor(oil, entry_id, "total", "Tankinhalt"),
                 OilTankSensor(oil, entry_id, "usable", "Öl nutzbar"),
                 *[OilReachSensor(oil, entry_id, s) for s in ("optimistisch", "neutral", "pessimistisch")],
-                OilModelSensor(oil, entry_id)]
+                OilModelSensor(oil, entry_id), OilPriceSensor(oil, entry_id)]
     return []
 
 
@@ -196,6 +196,26 @@ class OilModelSensor(_OilEntity, SensorEntity):
     def extra_state_attributes(self) -> dict:
         days = sorted(self.oil.days.values(), key=lambda d: d.day)[-30:]
         return {**self.oil.model, "heiztage": [d.summary() for d in days]}
+
+
+class OilPriceSensor(_OilEntity, SensorEntity):
+    """Local heating oil price (heizoel24) as a measurement, so it gets a long-term history."""
+
+    _attr_native_unit_of_measurement = "€/L"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_suggested_display_precision = 3
+    _attr_icon = "mdi:cash-multiple"
+
+    def __init__(self, oil, entry_id):
+        super().__init__(oil, entry_id, "price", "Heizölpreis")
+
+    @property
+    def native_value(self) -> float | None:
+        return self.oil.price.get("eur_l")
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {"quelle": "heizoel24.de", **self.oil.price}
 
 
 class OilGaugeNumber(_OilEntity, NumberEntity):

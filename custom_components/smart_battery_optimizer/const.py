@@ -150,9 +150,11 @@ OIL_DEFAULTS = {
         "sensor.temperatursensor_flur_temperatur": 16.4,
         "sensor.temperature_schalfzimmer_temperatur": 15.9,
         "sensor.temperature_kinderzimmer_temperatur": 9.6,
-        "sensor.temperature_gastezimmer_temperatur": 11.9,
+        # the former guest room is the office: radiator off, heated by the PC, cooled by its own AC -> not used
         "sensor.h5179_f06f_temperature": 9.6,  # bathroom
-        "sensor.temperatursensor_keller_temperatur": 40.0,  # finished basement, area estimated
+        # basement: big room under kitchen, dining and half the living room (2 radiators, manual valves)
+        "sensor.temperatursensor_keller_temperatur": 34.0,
+        "sensor.temperature_humidity_sensor_16_temperatur": 12.0,  # small basement room (Bällebad)
     },
     CONF_OIL_WINDOW: "binary_sensor.contact_sensor_5_tur",
     CONF_OIL_ZIP: "31582",  # Nienburg (Weser)
