@@ -107,7 +107,7 @@ in denen die App die Klima laufen lässt (Stufe 1: aktuelle Leistung für die n�
 - Hängt ein Schritt (zwei Durchläufe ohne Fortschritt), im Protokoll begründen und `persistent_notification` „Klima-Umsetzung braucht Hilfe“ anlegen.
 
 ## Checkliste
-- [ ] 1. `thermal_model.py`: Effizienzkurve, Grenzpreis, Lernen (Versatz, Auskühlrate, Effizienz, Leistung je Hz), `to_dict`/`load_dict`; Tests
+- [x] 1. `thermal_model.py`: Effizienzkurve, Grenzpreis, Lernen (Versatz, Auskühlrate, Effizienz, Leistung je Hz), `to_dict`/`load_dict`; Tests
 - [ ] 2. `climate_logic.py`: reine Entscheidungsfunktion (Eingaben → Modus, Klima an/aus, hvac_mode, Sollwert, Lüfter, Heizkörper an/aus, Begründungstext) mit Prioritäten, Hysterese, Sperren; Tests für jede Priorität
 - [ ] 3. `climate_control.py`: HA-Anbindung (Zustände lesen inkl. Plausibilität, Kontext-Erkennung Fernbedienung, Befehle mit Ratenbegrenzung, `prompt_tone`/`indirect_wind`, Heizkörper-Übergabe, Sicherheits-Rückfall, Beobachten-Modus, 15-min-Datensätze, Store)
 - [ ] 4. Einhängen in `coordinator.py` (eigener Schritt `climate` nach `execute`, isoliert mit try/except; Klimastrom aus Lastlernen abziehen; Klima-Last in Prognose)
@@ -126,3 +126,4 @@ in denen die App die Klima laufen lässt (Stufe 1: aktuelle Leistung für die n�
 ## Protokoll
 - 2026-10-27 18:30 – Plan angelegt (interaktive Sitzung). Raumsensor umgestellt, Paket/Dashboard/BT live auf `sensor.wohnzimmer_temperatur`.
 - 2026-10-27 17:24 START Durchlauf
+- 2026-10-27 17:26 – Schritt 1 fertig (38c4787): thermal_model.py + tests/test_thermal.py (9 Tests). Entscheidung: Wärmekapazität C fest 1,0 kWh/K (aus 0,42 kW Verlust bei 10 K und 0,4 K/h), weil Effizienz und C mit nur einem Raumsensor nicht trennbar sind; Startversatz Kühlen 0 K; Leistung je Hz in 5-Hz-Klassen; Laufzeit seit Kompressorstart (`run_min`) liefert climate_control.
