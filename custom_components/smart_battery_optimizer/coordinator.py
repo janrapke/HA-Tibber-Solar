@@ -104,6 +104,9 @@ EARLY_EXCESS_LOOKAHEAD_H = 6.0
 NOWCAST_WINDOW = timedelta(hours=1)        # measured vs. forecast solar over this window
 NOWCAST_MIN_WH = 100.0                    # summed quarter-hour forecast needed for a ratio
 NOWCAST_FADE_H = 3.0                      # correction fades out over this many hours
+EXPORT_GUARD_W = 50.0                     # grid export above this while the battery inverter runs...
+EXPORT_GUARD_AFTER = timedelta(minutes=3)  # ...for this long switches the inverter off...
+EXPORT_GUARD_HOLD = timedelta(minutes=15)  # ...for this long (battery energy must not go to the grid)
 CHARGER_IDLE_W = 30.0                     # above this the grid charger counts as running
 CHARGER_FAULT_NOTIFY_AFTER = timedelta(minutes=3)
 
@@ -209,6 +212,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         self.day_review: dict = {}
         self._day_actual: dict = {}
         self._last_actual_time: datetime | None = None
+        self._export_since: datetime | None = None
+        self._export_guard_until: datetime | None = None
         self._recent_solar: list[tuple] = []  # (centre, measured W, forecast W, limited)
 
     # ------------------------------------------------------------------ setup
@@ -779,7 +784,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             load = max(0.0, imp - exp + dtu - excluded + balcony)
             self.calculated_house_consumption = load
         absorption = self._is_absorption()
-        result.update(soc=soc, solar=solar, grid=imp, load=load, absorption=absorption)
+        result.update(soc=soc, solar=solar, grid=imp, load=load, absorption=absorption,
+                      export=exp, inverter_w=dtu)
         self._account_savings(now, dtu)
         self._account_day(now, solar, load, dtu)
 
@@ -1169,6 +1175,12 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 nxt = next((s for s in self.plan.steps if s.action == ACT_DISCHARGE), None)
                 if nxt:
                     mode += f" (Entladen ab {dt_util.as_local(nxt.start).strftime('%H:%M')})"
+        # zero-export guard: the OpenDTU limiter should prevent export, but if it does not
+        # (e.g. stale power meter, other inverters feeding in), battery energy would be given away
+        if (inverter_on and self._export_guard(now, result)
+                and not (absorption or soc >= max_pct - 1) and not self.manual_zero_export):
+            inverter_on = False
+            mode = "Einspeisung ins Netz erkannt: Wechselrichter aus (Haus wird anderweitig versorgt)"
         if planned is not None and inverter_on is not None:
             self._last_action = ACT_DISCHARGE if inverter_on else (ACT_GRID_CHARGE if grid_charge else ACT_HOLD)
         self.current_operating_mode = mode
@@ -1216,6 +1228,21 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
     def _charger_domain(self, sw: str) -> str:
         d = sw.split(".")[0]
         return d if d in ("switch", "input_boolean") else "homeassistant"
+
+    def _export_guard(self, now: datetime, result: dict) -> bool:
+        """True while the battery inverter must stay off because the house exports to the grid."""
+        export = result.get("export") or 0.0
+        inverter_w = result.get("inverter_w") or 0.0
+        if export > EXPORT_GUARD_W and inverter_w > 30.0:
+            self._export_since = self._export_since or now
+            if now - self._export_since >= EXPORT_GUARD_AFTER:
+                if self._export_guard_until is None or now >= self._export_guard_until:
+                    _LOGGER.warning("Grid export %.0f W while battery inverter delivers %.0f W: "
+                                    "switching inverter off", export, inverter_w)
+                self._export_guard_until = now + EXPORT_GUARD_HOLD
+        else:
+            self._export_since = None
+        return self._export_guard_until is not None and now < self._export_guard_until
 
     async def _apply_grid_charger(self, on: bool) -> None:
         sw = self.config.get(CONF_GRID_CHARGER_SWITCH)
