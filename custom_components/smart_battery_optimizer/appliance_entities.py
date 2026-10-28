@@ -265,6 +265,32 @@ class ApplianceTimerSensor(SmartApplianceBase, SensorEntity):
         return "0h 0m"
 
 
+class ApplianceBestTimerSensor(SmartApplianceBase, SensorEntity):
+    """Cheapest whole-hour delay-start within 24 h for the typical program (state = hours to set)."""
+
+    def __init__(self, coordinator, entry_id, sensor_id):
+        super().__init__(coordinator, entry_id, sensor_id)
+        self._attr_unique_id = f"{entry_id}_{sensor_id}_best_timer"
+        self._attr_name = "Bester Timer"
+        self._attr_icon = "mdi:timer-cog-outline"
+        self._attr_native_unit_of_measurement = "h"
+
+    @property
+    def _timer(self):
+        return self.coordinator.appliance_timers.get(self.sensor_id)
+
+    @property
+    def native_value(self):
+        return self._timer["timer_h"] if self._timer else None
+
+    @property
+    def extra_state_attributes(self):
+        t = self._timer
+        if not t:
+            return {}
+        return {**t, "start": t["start"].isoformat(), "ende": t["ende"].isoformat()}
+
+
 class _ApplianceHourNumber(SmartApplianceBase, NumberEntity):
     """Generic hour-of-day number (0–23) stored in device_settings."""
 

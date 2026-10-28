@@ -21,6 +21,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 import homeassistant.util.dt as dt_util
 
 from .appliance_manager import ApplianceStateMachine, ProposalCalculator, SmartApplianceManager
+from .appliance_timer import PriceSlot, best_timer, typical_program
 from .const import (
     CONF_AC_OUTDOOR_SENSOR,
     CONF_BALCONY_POWER_SENSOR,
@@ -177,6 +178,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         self._last_plan_time: datetime | None = None
         self.plan: Plan = Plan()
         self.hourly_plan: list[dict] = []
+        self.appliance_timers: dict[str, dict] = {}  # sensor -> best delay-start timer
 
         self._last_valid: dict[str, tuple[float, datetime]] = {}
         self._quarter_key: tuple | None = None
@@ -245,8 +247,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
 
     def _create_appliance_entities(self, entry_id: str) -> None:
         from .appliance_entities import (
-            ApplianceCancelButton, ApplianceConfirmButton, ApplianceEarliestStartNumber,
-            ApplianceLatestEndNumber, ApplianceProgramNameText, ApplianceProposalSelect,
+            ApplianceBestTimerSensor, ApplianceCancelButton, ApplianceConfirmButton,
+            ApplianceEarliestStartNumber, ApplianceLatestEndNumber, ApplianceProgramNameText, ApplianceProposalSelect,
             ApplianceRecalculateButton, ApplianceScheduleSelect, ApplianceStatusSensor,
             ApplianceTimerSensor,
         )
@@ -265,7 +267,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                                                   ApplianceCancelButton(self, entry_id, dev),
                                                   ApplianceRecalculateButton(self, entry_id, dev)]
             self.appliance_entities['sensor'] += [ApplianceStatusSensor(self, entry_id, dev),
-                                                  ApplianceTimerSensor(self, entry_id, dev)]
+                                                  ApplianceTimerSensor(self, entry_id, dev),
+                                                  ApplianceBestTimerSensor(self, entry_id, dev)]
             self.appliance_entities['text'].append(ApplianceProgramNameText(self, entry_id, dev))
 
         for entity_id in self._list(CONF_EXCLUDED_POWER_SENSORS):
@@ -1048,6 +1051,32 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         self._build_plan_outputs(now, slots, params)
         self._take_day_snapshot(now, slots)
         self._update_day_running()
+        try:
+            self._update_appliance_timers(now, prices_end)
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("Appliance timer calculation failed")
+
+    def _update_appliance_timers(self, now: datetime, prices_end: datetime | None) -> None:
+        """Best whole-hour timer per smart device, recalculated with every plan (each quarter hour)."""
+        if self.appliance_manager is None or prices_end is None:
+            return
+        known_until = prices_end + timedelta(minutes=15)
+        slots = [PriceSlot(s.start, s.price, s.curtailed_wh * 4.0)
+                 for s in self.plan.steps if s.start < known_until]
+        local_now = dt_util.as_local(now).replace(second=0, microsecond=0)
+        timers = {}
+        for dev in [d.strip() for d in self.config.get(CONF_SMART_DEVICES, "").split(",") if d.strip()]:
+            prog = typical_program(self.appliance_manager.get_programs(dev))
+            if prog is None:
+                continue
+            best = best_timer(prog.power_profile, local_now, slots)
+            if best is None:
+                continue
+            best.update(programm=prog.name, dauer_min=prog.duration_minutes,
+                        kwh=round(prog.total_wh / 1000, 2), laeufe=prog.run_count,
+                        berechnet=local_now.isoformat())
+            timers[dev] = best
+        self.appliance_timers = timers
 
     def _build_plan_outputs(self, now: datetime, slots: list[Slot], params: BatteryParams) -> None:
         local_today = dt_util.as_local(now).date()
