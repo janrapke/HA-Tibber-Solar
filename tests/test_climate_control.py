@@ -154,13 +154,17 @@ def test_manual_mode_for():
 def test_account_counts_and_resets():
     c = {}
     cc.account(c, datetime(2026, 11, 3, 12), 1000, 1.0, True, 4.0, 0.25, 1.0, 0.85)
-    assert c["kwh_day"] == 1.0 and c["kwh_month"] == 1.0
-    assert abs(c["oil_l_month"] - 4.0 / 8.5) < 1e-9
-    assert abs(c["savings_month"] - (4.0 / 8.5 - 0.25)) < 1e-9
-    cc.account(c, datetime(2026, 11, 4, 0, 1), 1000, 0.5, False, 4.0, 0.25, 1.0, 0.85)
-    assert c["kwh_day"] == 0.5 and c["kwh_month"] == 1.5
+    assert c["kwh_day"] == 1.0 and c["kwh_month"] == 1.0 and c["heat_kwh_month"] == 1.0
+    assert c["cost_day"] == 0.25 and c["heat_cost_month"] == 0.25
+    assert abs(c["oil_l_month"] - 4.0 / 8.5) < 1e-9 and abs(c["oil_cost_month"] - 4.0 / 8.5) < 1e-9
+    assert abs(c["savings_month"] - (4.0 / 8.5 - 0.25)) < 1e-9 and c["savings_day"] == c["savings_month"]
+    # cooling: cost counts, heat balance does not; missing price -> last known price
+    cc.account(c, datetime(2026, 11, 4, 0, 1), 1000, 0.5, False, 4.0, None, 1.0, 0.85)
+    assert c["kwh_day"] == 0.5 and c["kwh_month"] == 1.5 and c["heat_kwh_month"] == 1.0
+    assert c["cost_day"] == 0.125 and c["heat_cost_day"] == 0.0 and c["savings_day"] == 0.0
     cc.account(c, datetime(2026, 12, 1, 0, 1), 0, 0.5, False, 4.0, 0.25, 1.0, 0.85)
-    assert c["kwh_month"] == 0.0 and c["oil_l_month"] == 0.0
+    assert c["kwh_month"] == 0.0 and c["oil_l_month"] == 0.0 and c["savings_month"] == 0.0
+    assert c["kwh_total"] == 1.5 and c["heat_kwh_total"] == 1.0  # totals never reset
 
 
 # ---- observe only ----

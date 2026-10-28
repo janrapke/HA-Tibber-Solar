@@ -114,22 +114,46 @@ def manual_mode_for(old_hvac: str | None, new_hvac: str | None, own: bool) -> st
     return MODE_MANUAL_OFF if new_hvac == "off" else MODE_MANUAL_ON
 
 
-def account(counters: dict, now: datetime, power_w: float, dt_h: float, replacing: bool,
+DAY_KEYS = ("kwh_day", "cost_day", "heat_kwh_day", "heat_cost_day", "oil_cost_day", "savings_day")
+MONTH_KEYS = ("kwh_month", "cost_month", "heat_kwh_month", "heat_cost_month", "oil_cost_month", "oil_l_month",
+              "savings_month")
+
+
+def account(counters: dict, now: datetime, power_w: float, dt_h: float, heating: bool,
             efficiency: float, price: float | None, oil_eur_l: float, boiler_eff: float) -> dict:
-    """Add one interval to the energy counters (kWh today / month, oil replaced, savings)."""
+    """Add one interval to the counters.
+
+    All modes: kWh and electricity cost. Heat mode only: kWh, electricity cost, what the same heat
+    from oil would have cost, the oil litres replaced and the saving (oil cost - electricity cost).
+    `_total` counters never reset (long-term statistics / energy dashboard).
+    """
     day, month = now.date().isoformat(), now.strftime("%Y-%m")
     if counters.get("month") != month:
-        counters.update(month=month, kwh_month=0.0, oil_l_month=0.0, savings_month=0.0)
+        counters.update({"month": month, **{k: 0.0 for k in MONTH_KEYS}})
     if counters.get("day") != day:
-        counters.update(day=day, kwh_day=0.0)
+        counters.update({"day": day, **{k: 0.0 for k in DAY_KEYS}})
     kwh = max(0.0, power_w) * dt_h / 1000.0
-    counters["kwh_day"] = counters.get("kwh_day", 0.0) + kwh
-    counters["kwh_month"] = counters.get("kwh_month", 0.0) + kwh
-    if replacing and kwh > 0:
+    if kwh <= 0:
+        return counters
+    if price is None:
+        price = counters.get("last_price")
+    else:
+        counters["last_price"] = price
+
+    def add(keys, v):
+        for k in keys:
+            counters[k] = counters.get(k, 0.0) + v
+
+    add(("kwh_day", "kwh_month", "kwh_total"), kwh)
+    cost = kwh * price if price is not None else 0.0
+    add(("cost_day", "cost_month"), cost)
+    if heating:
         oil_l = kwh * efficiency / (OIL_KWH_PER_L * max(0.1, boiler_eff))
-        counters["oil_l_month"] = counters.get("oil_l_month", 0.0) + oil_l
-        if price is not None:
-            counters["savings_month"] = counters.get("savings_month", 0.0) + oil_l * oil_eur_l - kwh * price
+        add(("heat_kwh_day", "heat_kwh_month", "heat_kwh_total"), kwh)
+        add(("heat_cost_day", "heat_cost_month"), cost)
+        add(("oil_l_month",), oil_l)
+        add(("oil_cost_day", "oil_cost_month"), oil_l * oil_eur_l)
+        add(("savings_day", "savings_month"), oil_l * oil_eur_l - cost)
     return counters
 
 
@@ -319,11 +343,11 @@ class ClimateController:
         return False
 
     def counter(self, key: str, now: datetime) -> float:
-        """Counter value; 0 when its day / month is already over."""
+        """Counter value; 0 when its day / month is already over (`_total` never resets)."""
         c = self.counters
-        if key == "kwh_day" and c.get("day") != now.date().isoformat():
+        if key.endswith("_day") and c.get("day") != now.date().isoformat():
             return 0.0
-        if key != "kwh_day" and c.get("month") != now.strftime("%Y-%m"):
+        if key.endswith("_month") and c.get("month") != now.strftime("%Y-%m"):
             return 0.0
         return float(c.get(key, 0.0))
 
@@ -372,6 +396,12 @@ class ClimateController:
             return 0.0
         return max(0.0, _num(ac.attributes.get("compressor_power")))
 
+    def compressor_hz(self) -> float:
+        ac = self.hass.states.get(self.cfg[CONF_AC_ENTITY])
+        if ac is None or ac.state in UNAVAILABLE:
+            return 0.0
+        return max(0.0, _num(ac.attributes.get("compressor_frequency")))
+
     def expected_load_w(self, t: datetime, now: datetime) -> float:
         """AC load the battery planner should add for slot t (stage 1: current power for 2 h)."""
         if t - now >= EXPECTED_LOAD_AHEAD:
@@ -417,8 +447,7 @@ class ClimateController:
         if self._last_account is not None:
             dt_h = (now - self._last_account).total_seconds() / 3600.0
             if 0 < dt_h <= MAX_ACCOUNT_GAP_H:
-                replacing = ac_hvac == "heat" and not radiators_on
-                account(self.counters, now, power, dt_h, replacing, efficiency, price,
+                account(self.counters, now, power, dt_h, ac_hvac == "heat", efficiency, price,
                         s.oil_eur_l, s.boiler_eff_pct / 100.0)
         self._last_account = now
 

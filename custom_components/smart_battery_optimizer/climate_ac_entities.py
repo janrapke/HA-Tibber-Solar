@@ -10,7 +10,7 @@ from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.components.select import SelectEntity
 from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.components.switch import SwitchEntity
-from homeassistant.const import EntityCategory, UnitOfEnergy, UnitOfTemperature, UnitOfVolume
+from homeassistant.const import EntityCategory, UnitOfEnergy, UnitOfFrequency, UnitOfPower, UnitOfTemperature, UnitOfVolume
 import homeassistant.util.dt as dt_util
 
 from .climate_logic import MODES
@@ -45,9 +45,20 @@ def build(platform: str, coordinator, entry_id: str) -> list:
         return [AcSettingNumber(ctl, entry_id, *n) for n in NUMBERS]
     if platform == "sensor":
         return [AcDecisionSensor(ctl, entry_id), AcLearnedSensor(ctl, entry_id),
+                AcPowerSensor(ctl, entry_id), AcCompressorSensor(ctl, entry_id),
                 AcCounterSensor(ctl, entry_id, "kwh_day", "Klimastrom heute", "kwh"),
                 AcCounterSensor(ctl, entry_id, "kwh_month", "Klimastrom Monat", "kwh"),
+                AcCounterSensor(ctl, entry_id, "kwh_total", "Klimastrom gesamt", "kwh"),
+                AcCounterSensor(ctl, entry_id, "cost_day", "Klimastrom Kosten heute", "eur"),
+                AcCounterSensor(ctl, entry_id, "cost_month", "Klimastrom Kosten Monat", "eur"),
+                AcCounterSensor(ctl, entry_id, "heat_kwh_month", "Heizen Strom Monat", "kwh"),
+                AcCounterSensor(ctl, entry_id, "heat_kwh_total", "Heizen Strom gesamt", "kwh"),
+                AcCounterSensor(ctl, entry_id, "heat_cost_day", "Heizen Kosten heute", "eur"),
+                AcCounterSensor(ctl, entry_id, "heat_cost_month", "Heizen Kosten Monat", "eur"),
+                AcCounterSensor(ctl, entry_id, "oil_cost_day", "Öl hätte gekostet heute", "eur"),
+                AcCounterSensor(ctl, entry_id, "oil_cost_month", "Öl hätte gekostet Monat", "eur"),
                 AcCounterSensor(ctl, entry_id, "oil_l_month", "Ersetztes Öl Monat", "oil"),
+                AcCounterSensor(ctl, entry_id, "savings_day", "Ersparnis heute", "eur"),
                 AcCounterSensor(ctl, entry_id, "savings_month", "Ersparnis Monat", "eur"),
                 AcBuildingSensor(ctl, entry_id, "nights", "Auskühlzeit Nacht", "zeitkonstante_h", "h",
                                  "mdi:home-thermometer-outline", "zeitkonstante_h"),
@@ -219,6 +230,39 @@ class AcCounterSensor(_AcEntity, SensorEntity):
     @property
     def native_value(self) -> float:
         return round(self.ctl.counter(self._key, dt_util.now()), 3)
+
+
+class AcPowerSensor(_AcEntity, SensorEntity):
+    """Electrical power of the AC right now (compressor_power, matches the grid meter)."""
+
+    _attr_device_class = SensorDeviceClass.POWER
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfPower.WATT
+    _attr_icon = "mdi:flash"
+
+    def __init__(self, ctl, entry_id):
+        super().__init__(ctl, entry_id, "power", "Klima Leistung")
+
+    @property
+    def native_value(self) -> float:
+        return round(self.ctl.power_w())
+
+
+class AcCompressorSensor(_AcEntity, SensorEntity):
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = UnitOfFrequency.HERTZ
+    _attr_icon = "mdi:engine"
+
+    def __init__(self, ctl, entry_id):
+        super().__init__(ctl, entry_id, "compressor_hz", "Kompressor")
+
+    @property
+    def native_value(self) -> float:
+        return self.ctl.compressor_hz()
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        return {"laeuft": self.ctl.compressor_hz() > 0}
 
 
 class AcBuildingSensor(_AcEntity, SensorEntity):
