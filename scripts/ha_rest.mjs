@@ -18,4 +18,5 @@ const res = await fetch(env.HASS_URL.replace(/\/$/, "") + path, {
   body: body || undefined,
 });
 console.log(res.status);
-console.log(JSON.stringify(await res.json().catch(() => null), null, 1));
+const text = await res.text();  // /api/template answers with plain text
+try { console.log(JSON.stringify(JSON.parse(text), null, 1)); } catch { console.log(text); }
