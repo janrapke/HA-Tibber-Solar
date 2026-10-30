@@ -1,0 +1,35 @@
+# ============================================================
+# Package: Heizung Wohnbereich – wann der Wohnbereich warm sein soll
+# ============================================================
+#
+# Einbinden in configuration.yaml:
+#   homeassistant:
+#     packages:
+#       heizung_wohnbereich: !include ha_packages/heizung_wohnbereich.yaml
+#
+# Nachtphase 23:40–07:00 und wenn niemand zuhause ist zählt nur der Fernseher,
+# der Bewegungsmelder (input_boolean.anwesenheit_wohnbereich) nicht.
+# Genutzt von den Automationen Heizung_Wohnzimmer / Heizung Esszimmer / Heizung Küche
+# (Blueprint ECO Heating Ultimate) und von der Klima-Steuerung der Integration.
+
+template:
+  - binary_sensor:
+      - name: "Heizung Wohnbereich aktiv"
+        unique_id: heizung_wohnbereich_aktiv
+        icon: mdi:sofa
+        state: >
+          {% set tv = is_state('media_player.lg_webos_tv_up75009lf', 'on') %}
+          {% set t = now().strftime('%H:%M') %}
+          {% set night = t >= '23:40' or t < '07:00' %}
+          {{ tv or (is_state('input_boolean.anwesnedheit_irgendjemand', 'on') and not night
+                    and is_state('input_boolean.anwesenheit_wohnbereich', 'on')) }}
+        attributes:
+          fernseher: "{{ is_state('media_player.lg_webos_tv_up75009lf', 'on') }}"
+          nachtphase: "{% set t = now().strftime('%H:%M') %}{{ t >= '23:40' or t < '07:00' }}"
+      - name: "Heizung jemand da"
+        unique_id: heizung_jemand_da
+        icon: mdi:home-account
+        # niemand zuhause, aber der Fernseher läuft (z. B. Gäste) -> trotzdem heizen
+        state: >
+          {{ is_state('input_boolean.anwesnedheit_irgendjemand', 'on')
+             or is_state('media_player.lg_webos_tv_up75009lf', 'on') }}

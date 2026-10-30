@@ -21,6 +21,7 @@ NUMBERS = [
     ("target_living", "Zieltemperatur im Raum", 15, 25, 0.5, UnitOfTemperature.CELSIUS, "mdi:sofa"),
     ("target_home", "Zieltemperatur zuhause", 15, 25, 0.5, UnitOfTemperature.CELSIUS, "mdi:home-thermometer"),
     ("target_night", "Zieltemperatur Nacht", 14, 25, 0.5, UnitOfTemperature.CELSIUS, "mdi:weather-night"),
+    ("target_night_tv", "Zieltemperatur Nacht Fernseher", 14, 25, 0.5, UnitOfTemperature.CELSIUS, "mdi:television"),
     ("target_away", "Zieltemperatur niemand", 12, 25, 0.5, UnitOfTemperature.CELSIUS, "mdi:home-export-outline"),
     ("oil_eur_l", "Ölpreis", 0.3, 3.0, 0.01, "€/L", "mdi:oil"),
     ("boiler_eff_pct", "Kesselwirkungsgrad", 50, 100, 1, "%", "mdi:water-boiler"),

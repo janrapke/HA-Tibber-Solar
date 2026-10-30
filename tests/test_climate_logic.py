@@ -223,3 +223,13 @@ def test_replace_throttles_setpoint_above_target_with_hysteresis():
     assert d.mode == "ersatz_pause" and d.setpoint == 21.0  # stays throttled until the target is reached
     d = cl.decide(inp(now=t + 40 * M, room=20.9, **kw), st)
     assert d.mode == "ersatz" and d.setpoint > 25 and d.send_setpoint and not d.send_hvac
+
+
+# --- zone target: night phase 23:40-07:00, TV only (binary_sensor.heizung_wohnbereich_aktiv) ---
+def test_zone_target_night_phase_and_tv():
+    at = lambda h, m=0, **kw: cl.zone_target(inp(now=datetime(2026, 10, 30, h, m), **kw))
+    assert at(6, 30) == 19.0 and at(6, 59) == 19.0  # home, no TV: night until 7:00
+    assert at(7, 0) == 20.0 and at(23, 39) == 20.0 and at(23, 40) == 19.0
+    assert at(3, 0, in_living=True) == 20.0  # TV at night: 20 instead of 21
+    assert at(20, 0, in_living=True) == 21.0
+    assert at(12, 0, home=False) == 18.0

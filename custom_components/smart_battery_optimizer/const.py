@@ -108,8 +108,9 @@ AC_DEFAULTS = {
     CONF_AC_ROOM_SENSOR: "sensor.wohnzimmer_temperatur",
     CONF_AC_ROOM_FALLBACK: "sensor.jans_echo_dot_temperatur",
     CONF_AC_OUTDOOR_SENSOR: "sensor.openweathermap_temperature",
-    CONF_AC_PRESENCE_HOME: "input_boolean.anwesnedheit_irgendjemand",
-    CONF_AC_PRESENCE_LIVING: "input_boolean.anwesenheit_wohnbereich",
+    # template sensors of ha_packages/heizung_wohnbereich.yaml: at night / when away only the TV counts
+    CONF_AC_PRESENCE_HOME: "binary_sensor.heizung_jemand_da",
+    CONF_AC_PRESENCE_LIVING: "binary_sensor.heizung_wohnbereich_aktiv",
     CONF_AC_RADIATORS: [
         "climate.bt_wohnzimmer_bt_wohnzimmer",
         "climate.bt_esszimmer_bt_esszimmer",

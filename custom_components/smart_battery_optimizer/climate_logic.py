@@ -37,7 +37,7 @@ COOL_TARGET = 24.0
 COOL_ON, COOL_OFF = 24.5, 23.2
 HEAT_ON, HEAT_OFF = 19.0, 21.5
 DAY_START_H, DAY_END_H = 10, 22
-NIGHT_END_H = 8
+NIGHT_START, NIGHT_END = (23, 40), (7, 0)  # same night phase as the heating automations
 MIN_RUN = timedelta(minutes=30)
 LOCK_AFTER_OFF = timedelta(hours=1)
 REPLACE_MIN = timedelta(hours=2)
@@ -60,6 +60,7 @@ class Settings:
     target_living: float = 21.0
     target_home: float = 20.0
     target_night: float = 19.0
+    target_night_tv: float = 20.0  # night phase, but the TV is on
     target_away: float = 18.0
     oil_eur_l: float = 1.00
     boiler_eff_pct: float = 85.0
@@ -143,11 +144,18 @@ class Decision:
     cost_oil: float | None = None
 
 
+def is_night(now: datetime) -> bool:
+    hm = (now.hour, now.minute)
+    return hm >= NIGHT_START or hm < NIGHT_END
+
+
 def zone_target(i: Inputs) -> float:
+    """in_living is binary_sensor.heizung_wohnbereich_aktiv: at night and when away only the TV sets it."""
     s = i.settings
+    night = is_night(i.now)
     if i.in_living:
-        return s.target_living
-    if i.home and i.now.hour < NIGHT_END_H:
+        return min(s.target_living, s.target_night_tv) if night else s.target_living
+    if i.home and night:
         return s.target_night
     if i.home:
         return s.target_home

@@ -106,8 +106,8 @@ def make(room=20.0, ac="off", ac_attrs=None, outdoor="8", ts=NOON):
     hass.states[AC] = St(ac, {"temperature": 26, "fan_mode": "silent", "compressor_power": 0,
                               "compressor_frequency": 0, "indoor_temperature": 25, **(ac_attrs or {})}, ts=ts)
     hass.states["sensor.openweathermap_temperature"] = St(outdoor, ts=ts)
-    hass.states["input_boolean.anwesnedheit_irgendjemand"] = St("on", ts=ts)
-    hass.states["input_boolean.anwesenheit_wohnbereich"] = St("off", ts=ts)
+    hass.states["binary_sensor.heizung_jemand_da"] = St("on", ts=ts)
+    hass.states["binary_sensor.heizung_wohnbereich_aktiv"] = St("off", ts=ts)
     hass.states[BT] = St("heat", {"hvac_action": "idle"}, ts=ts)
     ctl = cc.ClimateController(hass, "entry1", {})
     asyncio.run(ctl.async_start())
