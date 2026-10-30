@@ -12,7 +12,7 @@
 #   Duschen erkannt / Schalter "Dusche"    -> 28 °C = Ventil voll auf, 45 min (Handtuch trocknet),
 #                                             endet früher ab 24 °C im Bad
 #   niemand zuhause                        -> 19 °C
-#   Mo–Fr vorheizen bis 06:00, dann bis 07:00 -> 21 °C (um 6 Uhr warm)
+#   Mo–Fr vorheizen bis 06:00, dann bis 07:00 -> 21 °C (um 6 Uhr warm; nicht bei "Bad Urlaub")
 #   16:00–21:00                            -> 21 °C
 #   sonst                                  -> 20 °C tagsüber, 19 °C nachts (21:00–06:00)
 #
@@ -42,6 +42,9 @@ input_boolean:
   bad_vorheizen:
     name: "Bad Vorheizen aktiv"
     icon: mdi:radiator
+  bad_urlaub:
+    name: "Bad Urlaub"
+    icon: mdi:palm-tree
 
 input_datetime:
   bad_vorheizen_start:
@@ -151,6 +154,9 @@ automation:
         weekday: [mon, tue, wed, thu, fri]
       - condition: state
         entity_id: input_boolean.bad_vorheizen
+        state: "off"
+      - condition: state  # vacation: no morning preheat while it is on
+        entity_id: input_boolean.bad_urlaub
         state: "off"
       - condition: state
         entity_id: input_boolean.anwesnedheit_irgendjemand
