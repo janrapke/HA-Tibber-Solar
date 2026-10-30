@@ -65,6 +65,9 @@ sensor:
     max_age:
       minutes: 15
     sampling_size: 200
+    # the Govee only reports changes: without this the minimum turns unknown after 15 quiet
+    # minutes and the first rising sample would be its own minimum (30.10.2026)
+    keep_last_sample: true
 
 timer:
   bad_dusch_boost:
@@ -80,7 +83,9 @@ template:
         state: >
           {% set h = states('sensor.h5179_f06f_humidity') %}
           {% set lo = states('sensor.bad_luftfeuchte_minimum_15_min') %}
-          {{ h | is_number and lo | is_number and h | float - lo | float >= 8 }}
+          {# no minimum yet (restart/reload): very humid air alone counts as showering #}
+          {{ h | is_number and ((lo | is_number and h | float - lo | float >= 8)
+                                or (not lo | is_number and h | float >= 75)) }}
   - sensor:
       - name: "Bad Vorheizen ab"
         unique_id: bad_vorheizen_ab
