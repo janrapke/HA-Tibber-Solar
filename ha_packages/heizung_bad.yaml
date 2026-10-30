@@ -1,0 +1,110 @@
+# ============================================================
+# Package: Heizung Bad (climate.bt_bad, Fritz-Thermostat mit Govee-Raumsensor)
+# ============================================================
+#
+# Einbinden in configuration.yaml:
+#   homeassistant:
+#     packages:
+#       heizung_bad: !include ha_packages/heizung_bad.yaml
+#
+# Ersetzt die Blueprint-Automation "Heizung Bad". Sollwert nach Priorität:
+#   Fenster offen                          -> 8 °C (aus)
+#   Duschen erkannt / Schalter "Dusche"    -> 28 °C = Ventil voll auf, 60 min (Handtuch trocknet)
+#   niemand zuhause                        -> 17 °C
+#   Mo–Fr 05:00–07:00                      -> 21 °C (vorheizen, um 6 Uhr warm)
+#   16:00–21:00                            -> 21 °C
+#   07:00–16:00 (am Wochenende ab 05:00)   -> 20 °C
+#   21:00–05:00                            -> 18 °C
+# Duschen = Luftfeuchte steigt in 15 min um mindestens 8 Prozentpunkte
+# (gemessen: 61,9 -> 72,7 % am 28.10. 07:27, 60,1 -> 79,7 % am 29.10. 21:07).
+
+sensor:
+  - platform: statistics
+    name: "Bad Luftfeuchte Minimum 15 min"
+    unique_id: bad_luftfeuchte_min_15min
+    entity_id: sensor.h5179_f06f_humidity
+    state_characteristic: value_min
+    max_age:
+      minutes: 15
+    sampling_size: 200
+
+timer:
+  bad_dusch_boost:
+    name: "Bad Dusch-Boost"
+    duration: "01:00:00"
+    icon: mdi:shower-head
+
+template:
+  - binary_sensor:
+      - name: "Bad Duschen erkannt"
+        unique_id: bad_duschen_erkannt
+        icon: mdi:shower
+        state: >
+          {% set h = states('sensor.h5179_f06f_humidity') %}
+          {% set lo = states('sensor.bad_luftfeuchte_minimum_15_min') %}
+          {{ h | is_number and lo | is_number and h | float - lo | float >= 8 }}
+  - sensor:
+      - name: "Bad Solltemperatur"
+        unique_id: bad_solltemperatur
+        unit_of_measurement: "°C"
+        icon: mdi:thermometer-auto
+        state: >
+          {% set t = now().strftime('%H:%M') %}
+          {% set weekday = now().weekday() < 5 %}
+          {% if is_state('binary_sensor.fenster_bad_tur', 'on') %}8
+          {% elif is_state('timer.bad_dusch_boost', 'active') %}28
+          {% elif is_state('input_boolean.anwesnedheit_irgendjemand', 'off') %}17
+          {% elif weekday and '05:00' <= t < '07:00' %}21
+          {% elif '16:00' <= t < '21:00' %}21
+          {% elif ('07:00' if weekday else '05:00') <= t < '16:00' %}20
+          {% else %}18{% endif %}
+        attributes:
+          grund: >
+            {% set t = now().strftime('%H:%M') %}
+            {% set weekday = now().weekday() < 5 %}
+            {% if is_state('binary_sensor.fenster_bad_tur', 'on') %}Fenster offen
+            {% elif is_state('timer.bad_dusch_boost', 'active') %}Dusch-Boost
+            {% elif is_state('input_boolean.anwesnedheit_irgendjemand', 'off') %}niemand zuhause
+            {% elif weekday and '05:00' <= t < '07:00' %}Morgen (Mo–Fr)
+            {% elif '16:00' <= t < '21:00' %}Abend
+            {% elif ('07:00' if weekday else '05:00') <= t < '16:00' %}Tag
+            {% else %}Nacht{% endif %}
+
+automation:
+  - id: heizung_bad_package
+    alias: "Heizung Bad (Zeitplan + Dusch-Boost)"
+    mode: queued
+    triggers:
+      - trigger: state
+        entity_id: sensor.bad_solltemperatur
+      - trigger: time_pattern
+        minutes: "/5"
+      - trigger: homeassistant
+        event: start
+    conditions:
+      - condition: template
+        value_template: >
+          {{ states('sensor.bad_solltemperatur') | is_number and
+             state_attr('climate.bt_bad', 'temperature') | float(0) != states('sensor.bad_solltemperatur') | float }}
+    actions:
+      - action: climate.set_temperature
+        target:
+          entity_id: climate.bt_bad
+        data:
+          hvac_mode: heat
+          temperature: "{{ states('sensor.bad_solltemperatur') | float }}"
+
+  - id: heizung_bad_dusch_boost
+    alias: "Bad Dusch-Boost starten"
+    mode: restart
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.bad_duschen_erkannt
+        to: "on"
+      - trigger: state
+        entity_id: input_boolean.dusche
+        to: "on"
+    actions:
+      - action: timer.start
+        target:
+          entity_id: timer.bad_dusch_boost
