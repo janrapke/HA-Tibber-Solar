@@ -13,8 +13,9 @@
 #                                             endet früher ab 24 °C im Bad
 #   niemand zuhause                        -> 19 °C
 #   Mo–Fr vorheizen bis 06:00, dann bis 07:00 -> 21 °C (um 6 Uhr warm; nicht bei "Bad Urlaub")
-#   16:00–20:00                            -> 21 °C (Bad hält die Wärme danach 1–2 h)
 #   sonst                                  -> 20 °C tagsüber, 19 °C nachts (20:00–06:00)
+# Keine Abendstufe: der Handtuchheizkörper (mit Handtüchern) schafft nur ~0,3 K/h, und die
+# Heizungsrohre im Estrich wärmen das Bad ohnehin; eine 21-°C-Stufe kam erst nachts an (01.11.2026).
 #
 # Vorheizen: Start = 06:00 minus (21 °C - Badtemperatur) / gelernte Aufheizrate + 10 min Puffer,
 # frühestens 03:00. Jeder Morgen misst die echte Rate (Start bis 20,8 °C) und mischt sie
@@ -108,7 +109,6 @@ template:
           {% elif is_state('timer.bad_dusch_boost', 'active') %}28
           {% elif is_state('input_boolean.anwesnedheit_irgendjemand', 'off') %}19
           {% elif is_state('input_boolean.bad_vorheizen', 'on') %}21
-          {% elif '16:00' <= t < '20:00' %}21
           {% elif '06:00' <= t < '20:00' %}20
           {% else %}19{% endif %}
         attributes:
@@ -118,7 +118,6 @@ template:
             {% elif is_state('timer.bad_dusch_boost', 'active') %}Dusch-Boost
             {% elif is_state('input_boolean.anwesnedheit_irgendjemand', 'off') %}niemand zuhause
             {% elif is_state('input_boolean.bad_vorheizen', 'on') %}Morgen (Mo–Fr, warm ab 6 Uhr)
-            {% elif '16:00' <= t < '20:00' %}Abend
             {% elif '06:00' <= t < '20:00' %}Tag
             {% else %}Nacht{% endif %}
 
