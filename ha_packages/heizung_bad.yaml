@@ -26,7 +26,7 @@
 input_number:
   bad_aufheizrate:
     name: "Bad Aufheizrate (gelernt)"
-    min: 0.3
+    min: 0.05
     max: 6
     step: 0.01
     unit_of_measurement: "K/h"
@@ -95,7 +95,7 @@ template:
         state: >
           {% set rate = states('input_number.bad_aufheizrate') | float(1.0) %}
           {% set room = states('sensor.h5179_f06f_temperature') | float(19) %}
-          {% set minutes = ([0, (21 - room)] | max) / ([rate, 0.3] | max) * 60 + 10 %}
+          {% set minutes = ([0, (21 - room)] | max) / ([rate, 0.05] | max) * 60 + 10 %}
           {% set minutes = ([[minutes, 15] | max, 180] | min) %}
           {% set six = today_at('06:00') if now() < today_at('06:00') else today_at('06:00') + timedelta(days=1) %}
           {{ (six - timedelta(minutes=minutes | int)).isoformat() }}
@@ -216,7 +216,7 @@ automation:
             data:
               value: >
                 {% set old = states('input_number.bad_aufheizrate') | float(1.0) %}
-                {{ ([[0.7 * old + 0.3 * rise / hours, 0.3] | max, 6] | min) | round(2) }}
+                {{ ([[0.7 * old + 0.3 * rise / hours, 0.05] | max, 6] | min) | round(2) }}
 
   - id: heizung_bad_vorheizen_ende
     alias: "Bad Vorheizen beenden"
@@ -231,6 +231,23 @@ automation:
         entity_id: input_boolean.bad_vorheizen
         state: "on"
     actions:
+      - variables:
+          hours: "{{ (now() - (states('input_datetime.bad_vorheizen_start') | as_datetime | as_local)).total_seconds() / 3600 }}"
+          rise: "{{ states('sensor.h5179_f06f_temperature') | float(0) - states('input_number.bad_vorheizen_start_temp') | float(99) }}"
+          reached_today: >
+            {{ states('input_datetime.bad_warm_um') not in ['unknown', ''] and
+               (states('input_datetime.bad_warm_um') | as_datetime | as_local).date() == now().date() }}
+      - if:  # 20.8 °C not reached: learn from the rise so far, else the rate never adapts (02.11.2026: 0.4 K in 2.4 h)
+          - condition: template
+            value_template: "{{ not reached_today and hours >= 0.5 and rise >= 0.1 }}"
+        then:
+          - action: input_number.set_value
+            target:
+              entity_id: input_number.bad_aufheizrate
+            data:
+              value: >
+                {% set old = states('input_number.bad_aufheizrate') | float(1.0) %}
+                {{ ([[0.7 * old + 0.3 * rise / hours, 0.05] | max, 6] | min) | round(2) }}
       - action: input_boolean.turn_off
         target:
           entity_id: input_boolean.bad_vorheizen
