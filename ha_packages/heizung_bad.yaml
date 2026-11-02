@@ -9,7 +9,7 @@
 #
 # Ersetzt die Blueprint-Automation "Heizung Bad". Sollwert nach Priorität:
 #   Fenster offen                          -> 8 °C (aus)
-#   Duschen erkannt / Schalter "Dusche"    -> 28 °C = Ventil voll auf, 45 min (Handtuch trocknet),
+#   Schalter "Dusche" (Alexa) / Duschen erkannt (Erkennung aus) -> 28 °C = Ventil voll auf, 45 min (Handtuch trocknet),
 #                                             endet früher ab 24 °C im Bad
 #   niemand zuhause                        -> 19 °C
 #   Mo–Fr vorheizen bis 06:00, dann bis 07:00 -> 21 °C (um 6 Uhr warm; nicht bei "Bad Urlaub")
@@ -235,13 +235,22 @@ automation:
         target:
           entity_id: input_boolean.bad_vorheizen
 
-  - id: heizung_bad_dusch_boost
+  - id: heizung_bad_dusch_boost  # humidity detection; switched off by the owner until the Govee reports reliably
     alias: "Bad Dusch-Boost starten"
     mode: restart
     triggers:
       - trigger: state
         entity_id: binary_sensor.bad_duschen_erkannt
         to: "on"
+    actions:
+      - action: timer.start
+        target:
+          entity_id: timer.bad_dusch_boost
+
+  - id: heizung_bad_dusch_boost_schalter  # "Alexa, ich möchte duschen" sets input_boolean.dusche
+    alias: "Bad Dusch-Boost per Schalter/Alexa"
+    mode: restart
+    triggers:
       - trigger: state
         entity_id: input_boolean.dusche
         to: "on"
