@@ -442,11 +442,11 @@ def test_heating_automation_switched_on_again_is_turned_off():
     ctl.control_active = True
     ctl.replace_switch = True
     run(ctl, NOON, price=0.20)
-    hass.states["automation.heizung_kuche"] = St("on")
+    hass.states["automation.heizung_esszimmer"] = St("on")
     hass.services.calls.clear()
     run(ctl, NOON + 5 * M, price=0.20)
     off = [c for c in hass.services.calls if c[:2] == ("automation", "turn_off")]
-    assert off and off[0][2]["entity_id"] == ["automation.heizung_kuche"]
+    assert off and off[0][2]["entity_id"] == ["automation.heizung_esszimmer"]
 
 
 def test_valve_warm():
