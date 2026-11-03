@@ -9,8 +9,41 @@
 #
 # Nachtphase 23:40–07:00 und wenn niemand zuhause ist zählt nur der Fernseher,
 # der Bewegungsmelder (input_boolean.anwesenheit_wohnbereich) nicht.
-# Genutzt von den Automationen Heizung_Wohnzimmer / Heizung Esszimmer / Heizung Küche
+# Genutzt von den Automationen Heizung_Wohnzimmer / Heizung Esszimmer
 # (Blueprint ECO Heating Ultimate) und von der Klima-Steuerung der Integration.
+#
+# Küche: Heizkörper seit 03.11.2026 dauerhaft aus (sitzt unter der Arbeitsplatte und heizt vor
+# allem die Schubladen; die offene Küche wird vom Wohnzimmer mit warm). BT Küche ist deaktiviert,
+# Automation "Heizung Küche" aus, der Ventilkopf climate.kuche steht auf dem Minimum 1 °C und
+# wird von der Automation unten dort gehalten.
+
+automation:
+  - id: heizung_kuche_aus_halten
+    alias: "Heizung Küche dauerhaft aus halten"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: climate.kuche
+        attribute: temperature
+        for: "00:05:00"
+      - trigger: homeassistant
+        event: start
+      - trigger: time_pattern
+        hours: "/1"
+    conditions:
+      - condition: template
+        value_template: "{{ state_attr('climate.kuche', 'temperature') | float(0) > 1 }}"
+    actions:
+      - action: climate.set_preset_mode
+        target:
+          entity_id: climate.kuche
+        data:
+          preset_mode: manual
+      - action: climate.set_temperature
+        target:
+          entity_id: climate.kuche
+        data:
+          temperature: 1
 
 template:
   - binary_sensor:
