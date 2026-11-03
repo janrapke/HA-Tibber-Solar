@@ -20,8 +20,14 @@
 # Kessel-Regler (Intercal, witterungsgeführt, ohne Raumfühler) – Änderungen für den Vorher-Nachher-Vergleich:
 #   bis 04.11.2026: Heizkurve 1,20, Raumsoll Tag 23 °C, Nacht 19 °C, Warmwasser 50 °C
 #   ab  04.11.2026: Heizkurve 1,10, Raumsoll Tag 21 °C, Nacht 19 °C (Vorlauf ~5–7 K niedriger)
-#   Offen: Tagbeginn im Zeitprogramm werktags auf ~04:30 (Kessel lief bis ~06:00 im Nachtbetrieb,
-#   das Bad-Vorheizen bekam bis dahin kein warmes Wasser).
+#     Direktkreis (DK) reduziert = ECO (nachts Heizkreis ganz aus, nur Frostschutz; war schon so),
+#     Heizsystem-Exponent 1,30 (Heizkörper, unverändert), max. 3 Schaltzeiten pro Tag.
+#     DK Zeitprogramm (P = eigenes): Mo–Fr Tag 04:00–23:00 (vorher 05:30–24:00), Sa–So 06:00–23:30.
+#     Warmwasser: Mo–Fr 00–04 40 °C / 04–22 50 °C / 22–24 40 °C, Sa–So 00–06 40 / 06–22 50 / 22–24 40
+#     (vorher rund um die Uhr 50 °C -> nächtliche Kurzläufe nur fürs Warmwasser),
+#     Legionellenschutz des Reglers montags (eingebaut).
+#   Erwartung: weniger Brennerstarts nachts, längere Läufe, Grundlast < 1,2 L/Tag, Bad-Vorheizen
+#   ab 04:00 mit warmem Wasser (vorher erst ab ~06:00).
 
 automation:
   - id: heizung_kuche_aus_halten
