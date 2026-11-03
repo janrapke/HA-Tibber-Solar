@@ -485,7 +485,7 @@ class ClimateController:
         inputs = Inputs(
             now=now, mode=self.mode, app_enabled=ext.get("app_enabled", True),
             replace_switch=self.replace_switch, surplus_switch=self.surplus_switch,
-            room=room, outdoor=outdoor, price=price,
+            room=room, outdoor=outdoor, price=price, price_ahead=ext.get("price_ahead"),
             home=self._on(self.cfg[CONF_AC_PRESENCE_HOME], True),
             in_living=self._on(self.cfg[CONF_AC_PRESENCE_LIVING], False),
             soc=ext.get("soc"), curtailed_wh_2h=float(ext.get("curtailed_wh_2h") or 0.0),

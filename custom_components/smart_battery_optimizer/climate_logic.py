@@ -41,6 +41,7 @@ NIGHT_START, NIGHT_END = (23, 40), (7, 0)  # same night phase as the heating aut
 MIN_RUN = timedelta(minutes=30)
 LOCK_AFTER_OFF = timedelta(hours=1)
 REPLACE_MIN = timedelta(hours=2)
+REPLACE_END_K = 0.02  # EUR/kWh above the limit: end replacing at once, the 2 h hold is for small swings only
 CMD_INTERVAL = timedelta(minutes=5)
 FAN_INTERVAL = timedelta(minutes=15)
 SURPLUS_CURTAIL_WH = 300.0
@@ -80,6 +81,7 @@ class Inputs:
     room: float | None = None  # already plausibility-checked, fallback applied
     outdoor: float | None = None
     price: float | None = None  # EUR/kWh now
+    price_ahead: float | None = None  # mean EUR/kWh of the next 2 h (Tibber quarter hours)
     home: bool = True
     in_living: bool = False
     soc: float | None = None
@@ -220,14 +222,22 @@ def decide(i: Inputs, st: State) -> Decision:
                   and i.price is not None and i.price < be and not safety_note)
     replace_why = _replace_reason(i, be, safety_note)
     hold = st.replace_changed is not None and now - st.replace_changed < REPLACE_MIN
+    # the known prices of the next 2 h decide too: no start right before a price jump (03.11.2026 15:20:
+    # 0.448 < 0.449, ten minutes later 0.53 and the 2 h hold kept the AC running on expensive power)
+    ahead_bad = i.price_ahead is not None and i.price_ahead >= be
+    far_above = i.price is not None and i.price >= be + REPLACE_END_K
     if st.replace_active and not replace_ok:
-        if not i.replace_switch or safety_note or not hold:
+        if not i.replace_switch or safety_note or not hold or far_above or ahead_bad:
             _end_replace(st, now)
         else:
             replace_why = "Mindestdauer 2 h läuft noch – " + replace_why
     elif not st.replace_active and replace_ok:
         if hold:
             replace_why = "Wechsel frühestens 2 h nach dem letzten – noch nicht ersetzen"
+        elif ahead_bad:
+            replace_ok = False
+            replace_why = (f"Heizung ersetzen: jetzt {i.price:.3f} €/kWh, aber die nächsten 2 h im Schnitt "
+                           f"{i.price_ahead:.3f} ≥ Grenze {be:.3f} €/kWh – lohnt nicht")
         else:
             st.replace_active = True
             st.replace_changed = now

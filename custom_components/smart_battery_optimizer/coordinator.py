@@ -410,6 +410,12 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 return float(p.get("total") or 0.0)
         return None
 
+    def _price_ahead(self, now: datetime, hours: float = 2.0) -> float | None:
+        """Mean Tibber price of the next quarter hours (None when not known)."""
+        prices = [self._price_at(now + timedelta(minutes=15 * k)) for k in range(1, int(hours * 4) + 1)]
+        prices = [p for p in prices if p is not None]
+        return sum(prices) / len(prices) if prices else None
+
     def _current_price(self, now: datetime) -> float | None:
         v = self._read_float(self.config.get(CONF_TIBBER_PRICE_SENSOR))
         return v if v is not None else self._price_at(now)
@@ -1224,6 +1230,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             return
         await self.climate.async_update(dt_util.as_local(now), {
             "price": self._current_price(now),
+            "price_ahead": self._price_ahead(now),
             "soc": result.get("soc"),
             "curtailed_wh_2h": self.plan.curtailed_wh(2.0) if self.plan.steps else 0.0,
             "grid_charging": self._charger_should_run,
