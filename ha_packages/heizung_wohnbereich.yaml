@@ -16,6 +16,12 @@
 # allem die Schubladen; die offene Küche wird vom Wohnzimmer mit warm). BT Küche ist deaktiviert,
 # Automation "Heizung Küche" aus, der Ventilkopf climate.kuche steht auf dem Minimum 1 °C und
 # wird von der Automation unten dort gehalten.
+#
+# Kessel-Regler (Intercal, witterungsgeführt, ohne Raumfühler) – Änderungen für den Vorher-Nachher-Vergleich:
+#   bis 04.11.2026: Heizkurve 1,20, Raumsoll Tag 23 °C, Nacht 19 °C, Warmwasser 50 °C
+#   ab  04.11.2026: Heizkurve 1,10, Raumsoll Tag 21 °C, Nacht 19 °C (Vorlauf ~5–7 K niedriger)
+#   Offen: Tagbeginn im Zeitprogramm werktags auf ~04:30 (Kessel lief bis ~06:00 im Nachtbetrieb,
+#   das Bad-Vorheizen bekam bis dahin kein warmes Wasser).
 
 automation:
   - id: heizung_kuche_aus_halten
