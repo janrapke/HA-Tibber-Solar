@@ -26,6 +26,10 @@
 #     Warmwasser: Mo–Fr 00–04 40 °C / 04–22 50 °C / 22–24 40 °C, Sa–So 00–06 40 / 06–22 50 / 22–24 40
 #     (vorher rund um die Uhr 50 °C -> nächtliche Kurzläufe nur fürs Warmwasser),
 #     Legionellenschutz des Reglers montags (eingebaut).
+#   Zählerstand Regler 04.11.2026 00:48: 62.260 Brennerstarts, 16.733 Betriebsstunden (Lebensdauer-
+#     mittel 16 min je Start; gemessen Ende Okt. nur 3–4 min je Start). Zum Abgleich mit
+#     binary_sensor.olheizung_brenner_lauft: Zählerdifferenz nach einigen Tagen gegen erkannte Starts.
+#   Warmwasser lädt nach ab 42 °C (Schaltdifferenz 8 K unter 50 °C).
 #   Erwartung: weniger Brennerstarts nachts, längere Läufe, Grundlast < 1,2 L/Tag, Bad-Vorheizen
 #   ab 04:00 mit warmem Wasser (vorher erst ab ~06:00).
 
