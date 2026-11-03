@@ -22,7 +22,9 @@
 #   ab  04.11.2026: Heizkurve 1,10, Raumsoll Tag 21 °C, Nacht 19 °C (Vorlauf ~5–7 K niedriger)
 #     Direktkreis (DK) reduziert = ECO (nachts Heizkreis ganz aus, nur Frostschutz; war schon so),
 #     Heizsystem-Exponent 1,30 (Heizkörper, unverändert), max. 3 Schaltzeiten pro Tag.
-#     DK Zeitprogramm (P = eigenes): Mo–Fr Tag 04:00–23:00 (vorher 05:30–24:00), Sa–So 06:00–23:30.
+#     DK Zeitprogramm (P = eigenes): nur EIN Fenster je Tag, Mo–Fr 04:00–23:00, Sa–So 06:00–23:30
+#     (vorher 05:30–24:00). Jedes Fenster ist Heizbetrieb, ECO greift nur außerhalb: am 04.11. 00:48
+#     lief der Kreis wegen lückenloser Fenster nachts weiter, danach "Auto-Eco DK" bestätigt.
 #     Warmwasser: Mo–Fr 00–04 40 °C / 04–22 50 °C / 22–24 40 °C, Sa–So 00–06 40 / 06–22 50 / 22–24 40
 #     (vorher rund um die Uhr 50 °C -> nächtliche Kurzläufe nur fürs Warmwasser),
 #     Legionellenschutz des Reglers montags (eingebaut).
