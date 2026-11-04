@@ -28,6 +28,7 @@ from .cost_model import add, interval, summarize
 _LOGGER = logging.getLogger(__name__)
 
 STORE_VERSION = 1
+METHOD = 2                   # 2: grid import/export of the past from the meter counters, not the power mean
 MAX_GAP_S = 300              # longer gaps between cycles are not integrated (restart, outage)
 SAVE_EVERY = timedelta(minutes=10)
 BACKFILL_START = datetime(2024, 1, 1)
@@ -49,14 +50,17 @@ class CostCompare:
 
     async def async_start(self) -> None:
         data = await self.store.async_load() or {}
-        self.days = data.get("days", {})
-        self.live_from = data.get("live_from")
-        self._backfill_done = bool(data.get("backfill_done"))
+        if data.get("method") == METHOD:
+            self.days = data.get("days", {})
+            self.live_from = data.get("live_from")
+            self._backfill_done = bool(data.get("backfill_done"))
+        else:
+            _LOGGER.info("Cost comparison: calculation changed, refilling from the recorder")
         self._summarize()
 
     async def async_save(self) -> None:
         await self.store.async_save({"days": self.days, "live_from": self.live_from,
-                                     "backfill_done": self._backfill_done})
+                                     "backfill_done": self._backfill_done, "method": METHOD})
 
     def _summarize(self) -> None:
         self.summary = summarize(self.days, dt_util.now().date())
@@ -78,6 +82,20 @@ class CostCompare:
         sw = self.config.get(CONF_GRID_CHARGER_SWITCH)
         st = self.hass.states.get(sw) if sw else None
         return float(self.config.get(CONF_GRID_CHARGER_POWER_W) or 0) if st and st.state == "on" else 0.0
+
+    def meter_sensors(self) -> tuple[str | None, str | None]:
+        """Energy counters (kWh) of the same Tibber device as the power sensor: import, export."""
+        from homeassistant.helpers import entity_registry as er
+        reg = er.async_get(self.hass)
+        ent = reg.async_get(self.config.get(CONF_TIBBER_CONSUMPTION_SENSOR) or "")
+        if ent is None or ent.device_id is None:
+            return None, None
+        found = {"consumption": None, "production": None}
+        for e in er.async_entries_for_device(reg, ent.device_id):
+            for kind in found:
+                if found[kind] is None and f"last_meter_{kind}" in e.entity_id:
+                    found[kind] = e.entity_id
+        return found["consumption"], found["production"]
 
     # ------------------------------------------------------------------ live
     async def async_update(self, now: datetime, price: float | None, imp: float | None, exp: float, inverter: float,
@@ -122,6 +140,23 @@ class CostCompare:
         start = dt_util.as_utc(BACKFILL_START.replace(tzinfo=dt_util.DEFAULT_TIME_ZONE))
         stats = await get_instance(self.hass).async_add_executor_job(
             statistics_during_period, self.hass, start, end, ids, "hour", None, {"mean"})
+        # the meter counters are the truth for grid energy: the power sensor can freeze at its last
+        # value while the Pulse is offline (e.g. 8.-11.12.2025 stuck at 13.5 kW for three days)
+        m_imp, m_exp = self.meter_sensors()
+        meters = {i for i in (m_imp, m_exp) if i}
+        mstats = await get_instance(self.hass).async_add_executor_job(
+            statistics_during_period, self.hass, start, end, meters, "hour", None, {"change"}) if meters else {}
+
+        def counter(eid):
+            out = {}
+            for row in mstats.get(eid, []) if eid else []:
+                ts = row.get("start")
+                ts = dt_util.utc_from_timestamp(ts) if isinstance(ts, (int, float)) else ts
+                if ts is not None and row.get("change") is not None and row["change"] >= 0:
+                    out[ts] = float(row["change"]) * 1000.0   # kWh in one hour -> mean W
+            return out
+
+        imp_m, exp_m = counter(m_imp), counter(m_exp)
 
         def series(eid):
             out = {}
@@ -137,18 +172,21 @@ class CostCompare:
         first_solar = min((min(s) for s in pan if s), default=None)
         days: dict = {}
         for ts in sorted(price):
-            if ts not in imp or (first_solar is not None and ts < first_solar):
+            grid_in = imp_m.get(ts, imp.get(ts))
+            grid_out = exp_m.get(ts, exp.get(ts, 0.0))
+            if grid_in is None or (first_solar is not None and ts < first_solar):
                 continue  # before the panels were measured the "solar only" case can not be computed
             key = dt_util.as_local(ts).date().isoformat()
             days[key] = add(days.get(key), interval(
-                price[ts], 1.0, imp[ts], exp.get(ts, 0.0), max(0.0, inv.get(ts, 0.0)), bal.get(ts, 0.0),
+                price[ts], 1.0, grid_in, grid_out, max(0.0, inv.get(ts, 0.0)), bal.get(ts, 0.0),
                 max(0.0, chg.get(ts, 0.0)), sum(s.get(ts, 0.0) for s in pan)))
         for k, v in days.items():   # live days already recorded keep their own values
             self.days.setdefault(k, v)
         self.live_from = end.isoformat()
         self._summarize()
         await self.async_save()
-        _LOGGER.info("Cost comparison filled from recorder: %d days since %s", len(days), min(days) if days else "-")
+        _LOGGER.info("Cost comparison filled from recorder: %d days since %s (meter counters: %s)",
+                     len(days), min(days) if days else "-", ", ".join(sorted(meters)) or "none")
 
     async def async_rebuild(self) -> None:
         """Forget everything and fill again from the recorder (button)."""
