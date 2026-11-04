@@ -135,6 +135,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         self.climate: ClimateController | None = None
         self.oil: OilMonitor | None = None
         self.price_forecast = None  # PriceForecaster, shadow mode until the nightly agent releases it
+        self.ev = None  # EvChargeController (Tesla charging plan)
 
         # ---- user controls (set by switch / number entities, restored on restart) ----
         self.is_enabled = True
@@ -227,7 +228,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         self._setup_done = True
         entry_id = self.config_entry.entry_id
         steps = [self.learning_engine.async_load, self._load_models, self._start_climate, self._start_oil,
-                 self._start_price_forecast]
+                 self._start_price_forecast, self._start_ev]
         try:
             if not self.appliance_manager:
                 self.appliance_manager = SmartApplianceManager(self.hass, entry_id)
@@ -299,6 +300,12 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         pf = PriceForecaster(self.hass, self.config_entry.entry_id, self.config, self)
         await pf.async_start()
         self.price_forecast = pf
+
+    async def _start_ev(self) -> None:
+        from .ev_control import EvChargeController
+        ev = EvChargeController(self.hass, self.config_entry.entry_id, self.config, self)
+        await ev.async_start()
+        self.ev = ev
 
     async def _load_models(self) -> None:
         self._store = Store(self.hass, STORE_VERSION, f"{DOMAIN}.models.{self.config_entry.entry_id}")
@@ -659,6 +666,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             ("climate", self._step_climate),
             ("oil", self._step_oil),
             ("price_forecast", self._step_price_forecast),
+            ("ev", self._step_ev),
             ("persist", self._step_persist),
         ):
             try:
@@ -1261,6 +1269,10 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             "ac_efficiency": eff,
             "house_w": result.get("load"),
         })
+
+    async def _step_ev(self, now, result) -> None:
+        if self.ev is not None:
+            await self.ev.async_update(now, result)
 
     async def _step_price_forecast(self, now, result) -> None:
         if self.price_forecast is not None:
