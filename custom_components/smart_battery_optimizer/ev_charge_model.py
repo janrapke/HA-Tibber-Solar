@@ -7,7 +7,7 @@ Pure Python, no Home Assistant imports. Rules agreed with the owner (05.11.2026)
   relative to the last 4 weeks (so it works in every season) and absolute (so a long dear
   phase never looks "normal"). The lower of the two caps applies, never above the daily
   maximum (default 80 %).
-- Optional filling waits when a quarter hour at least 2 ct cheaper is known later, even if
+- Optional filling waits when a quarter hour at least 1 ct (setting) cheaper is known later, even if
   the car may be away then: waiting for optional energy costs nothing.
 - Travel: reach 80 % or 100 % by a set time; the part above 80 % is charged as late as
   possible (a full NCA battery should not stand long).
@@ -21,7 +21,7 @@ from datetime import datetime, timedelta
 SLOT = timedelta(minutes=15)
 KWH_PER_PCT = 0.72          # grid kWh per % SoC, measured 02.11.2026 (22.4 kWh for 5 -> 36 %)
 FULL_POWER_KW = 11.1        # 16 A three-phase, measured 05.11.2026
-WAIT_MARGIN = 0.02          # EUR/kWh: a later quarter hour this much cheaper makes optional filling wait
+WAIT_MARGIN = 0.01          # EUR/kWh default: a later quarter hour this much cheaper makes optional filling wait
 # (share of the last 4 weeks' prices that are cheaper or equal, cap %)
 RELATIVE_CAPS = ((0.10, 80), (0.20, 65), (0.35, 50), (0.50, 35), (0.75, 25), (1.01, 20))
 # (price at or above, cap %): a dear quarter hour never fills much, however long prices stay high
@@ -35,6 +35,7 @@ class Settings:
     max_target: float = 80.0
     travel_at: datetime | None = None
     travel_target: float = 80.0
+    wait_margin: float = WAIT_MARGIN
 
 
 @dataclass
@@ -108,7 +109,7 @@ def make_plan(now: datetime, soc: float, prices: dict, reference: list[float], d
         p = future[t]
         if level + step / 2 > price_cap(p, reference, s.max_target):
             continue
-        if any(q <= p - WAIT_MARGIN for u, q in future.items() if u > t and u not in plan.slots):
+        if any(q <= p - s.wait_margin for u, q in future.items() if u > t and u not in plan.slots):
             continue
         add(t, "günstig auffüllen")
     plan.soc_at_departure = round(min(100.0, level), 1)

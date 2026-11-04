@@ -32,7 +32,8 @@ REF_EVERY = timedelta(hours=6)
 FULL_AMPS = 16
 HOUSE_FULL_PCT = 97.0
 DEFAULTS = {"active": False, "min_target": 20.0, "max_target": 80.0, "now_target": 20.0, "now_on": False,
-            "travel_on": False, "travel_at": None, "travel_target": 80.0, "dep_weekday": "06:30", "dep_weekend": "10:00"}
+            "travel_on": False, "travel_at": None, "travel_target": 80.0, "dep_weekday": "06:30", "dep_weekend": "10:00",
+            "wait_ct": 1.0}
 
 
 class EvChargeController:
@@ -118,7 +119,8 @@ class EvChargeController:
         soc = self._float(E_SOC)
         plugged = self._state(E_PLUG) == "on"
         if soc is not None:
-            settings = Settings(self.s["min_target"], self.s["max_target"], travel, self.s["travel_target"])
+            settings = Settings(self.s["min_target"], self.s["max_target"], travel, self.s["travel_target"],
+                                self.s["wait_ct"] / 100.0)
             self.plan = make_plan(local, soc, self._prices(), self.reference, self.departure, settings)
         # what should happen now
         target_amps = 0

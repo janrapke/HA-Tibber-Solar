@@ -1,0 +1,50 @@
+# ============================================================
+# Package: Tesla-Kachel auf der Startseite – aufklappbare Menüs
+# ============================================================
+#
+# Einbinden in configuration.yaml:
+#   homeassistant:
+#     packages:
+#       tesla_ui: !include ha_packages/tesla_ui.yaml
+#
+# Die Knöpfe "Sofort", "Reise/Urlaub" und "Einstellungen" klappen je ein Menü unter der Kachel
+# auf (bedingte Karten). Es ist immer nur eins offen; nach 10 Minuten klappt es von selbst zu.
+
+input_boolean:
+  tesla_menu_sofort:
+    name: "Tesla Menü Sofortladen"
+    icon: mdi:lightning-bolt
+  tesla_menu_reise:
+    name: "Tesla Menü Reise"
+    icon: mdi:bag-suitcase
+  tesla_menu_einstellungen:
+    name: "Tesla Menü Einstellungen"
+    icon: mdi:cog
+
+automation:
+  - id: tesla_menu_nur_eins_offen
+    alias: "Tesla-Kachel: nur ein Menü offen"
+    mode: queued
+    triggers:
+      - trigger: state
+        entity_id: [input_boolean.tesla_menu_sofort, input_boolean.tesla_menu_reise, input_boolean.tesla_menu_einstellungen]
+        to: "on"
+    actions:
+      - action: input_boolean.turn_off
+        target:
+          entity_id: >
+            {{ ['input_boolean.tesla_menu_sofort', 'input_boolean.tesla_menu_reise',
+                'input_boolean.tesla_menu_einstellungen'] | reject('eq', trigger.entity_id) | list }}
+
+  - id: tesla_menu_zuklappen
+    alias: "Tesla-Kachel: Menü nach 10 min zuklappen"
+    mode: parallel
+    triggers:
+      - trigger: state
+        entity_id: [input_boolean.tesla_menu_sofort, input_boolean.tesla_menu_reise, input_boolean.tesla_menu_einstellungen]
+        to: "on"
+        for: "00:10:00"
+    actions:
+      - action: input_boolean.turn_off
+        target:
+          entity_id: "{{ trigger.entity_id }}"

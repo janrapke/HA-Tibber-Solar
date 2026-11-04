@@ -27,7 +27,9 @@ def build(platform: str, coordinator, entry_id: str) -> list:
     if platform == "number":
         return [EvNumber(ev, entry_id, "min_target", "Mindestladestand bei Abfahrt", 10, 60),
                 EvNumber(ev, entry_id, "max_target", "Höchstens laden (Alltag)", 50, 100),
-                EvNumber(ev, entry_id, "now_target", "Sofortladen bis", 10, 100)]
+                EvNumber(ev, entry_id, "now_target", "Sofortladen bis", 10, 100),
+                EvNumber(ev, entry_id, "wait_ct", "Warten ab Ersparnis", 0, 5, step=0.5, unit="ct/kWh",
+                         icon="mdi:timer-sand")]
     if platform == "select":
         return [EvTravelTargetSelect(ev, entry_id)]
     if platform == "datetime":
@@ -105,10 +107,14 @@ class EvNumber(_EvEntity, NumberEntity):
     _attr_mode = NumberMode.SLIDER
     _attr_icon = "mdi:battery-charging-medium"
 
-    def __init__(self, ev, entry_id, key, name, lo, hi):
+    def __init__(self, ev, entry_id, key, name, lo, hi, step=5, unit="%", icon=None):
         super().__init__(ev, entry_id, key, name)
         self._attr_native_min_value = lo
         self._attr_native_max_value = hi
+        self._attr_native_step = step
+        self._attr_native_unit_of_measurement = unit
+        if icon:
+            self._attr_icon = icon
 
     @property
     def native_value(self) -> float:
