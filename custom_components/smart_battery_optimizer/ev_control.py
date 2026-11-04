@@ -71,6 +71,7 @@ class EvChargeController:
         self.listeners: list = []
         # preheating state
         self.pre_status = "aus"
+        self._holidays: set = set()
         self.pre_next: dict = {}
         self._pre_started: datetime | None = None   # we switched the climate on at this time
         self._pre_outdoor: float | None = None
@@ -137,6 +138,7 @@ class EvChargeController:
         local = dt_util.as_local(now)
         await self._refresh_reference(now)
         hol = german_holidays(local.year) | german_holidays(local.year + 1)
+        self._holidays = hol
         wd = time.fromisoformat(self.s["dep_weekday"])
         we = time.fromisoformat(self.s["dep_weekend"])
         self.departure = next_departure(local, (wd.hour, wd.minute), (we.hour, we.minute), hol)
@@ -196,7 +198,7 @@ class EvChargeController:
         for add in range(8):
             day = (local + timedelta(days=add)).date()
             key = WEEKDAY_KEYS[day.weekday()]
-            if not self.s[f"pre_{key}_on"]:
+            if not self.s[f"pre_{key}_on"] or day in self._holidays:  # holidays: nobody drives to work
                 continue
             at = time.fromisoformat(self.s[f"pre_{key}_at"])
             ready = datetime.combine(day, at, tzinfo=local.tzinfo)
