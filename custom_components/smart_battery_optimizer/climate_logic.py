@@ -26,7 +26,10 @@ except ImportError:  # loaded standalone by the tests
 MODE_AUTO = "auto"
 MODE_MANUAL_ON = "manuell_an"
 MODE_MANUAL_OFF = "manuell_aus"
-MODES = [MODE_AUTO, MODE_MANUAL_ON, MODE_MANUAL_OFF]
+MODE_WARMUP = "aufwaermen"   # "Alexa, mir ist kalt": full power until the room is WARMUP_K above its target
+MODES = [MODE_AUTO, MODE_MANUAL_ON, MODE_MANUAL_OFF, MODE_WARMUP]
+WARMUP_K = 0.5
+WARMUP_MAX = timedelta(hours=2)
 
 FAN_NORMAL = "silent"
 FAN_BOOST = "medium"
@@ -212,6 +215,14 @@ def decide(i: Inputs, st: State) -> Decision:
         d = Decision("manuell_an", safety_note + ("Manuell an (Kühlen)" if cool else "Manuell an (Heizen)"), True,
                      hvac="cool" if cool else "heat", target_room=COOL_TARGET if cool else target)
         return finish(_apply(i, st, d, dt_h, force=True))
+    if i.mode == MODE_WARMUP:
+        # comfort wins over price; the radiators keep heating as usual
+        _end_replace(st, now)
+        st.surplus_active = False
+        goal = target + WARMUP_K
+        d = Decision("aufwaermen", safety_note + f"Aufwärmen mit voller Leistung bis {goal:.1f} °C", True,
+                     hvac="heat", target_room=goal)
+        return finish(_apply(i, st, d, dt_h, force=True))
 
     if not sensor_ok:
         st.surplus_active = False
@@ -355,7 +366,7 @@ def _apply(i: Inputs, st: State, d: Decision, dt_h: float, force: bool = False,
         d.climate_on, d.hvac = True, st.hvac
         d.mode = st.reason_mode if st.reason_mode != "ersatz" or st.replace_active else "nachlauf"
         d.reason += " – Mindestlaufzeit 30 min, läuft weiter"
-    elif d.climate_on and not st.climate_on and not bypass_lock and d.mode not in ("manuell_an",) \
+    elif d.climate_on and not st.climate_on and not bypass_lock and d.mode not in ("manuell_an", "aufwaermen") \
             and st.off_since and now - st.off_since < LOCK_AFTER_OFF:
         d.climate_on, d.hvac = False, "off"
         d.reason += " – Sperre 1 h nach Abschalten"
@@ -376,6 +387,8 @@ def _apply(i: Inputs, st: State, d: Decision, dt_h: float, force: bool = False,
         p_part = KP * (d.target_room - i.room) if i.room is not None else 0.0
         corr = max(-CORR_MAX, min(CORR_MAX, p_part + st.integral))
         sp = max(SP_MIN, min(SP_MAX, _round_half(d.target_room if throttle else d.target_room + offset + corr)))
+        if d.mode == "aufwaermen":
+            sp = SP_MAX
         d.setpoint = sp
         due = st.setpoint_sent is None or now - st.setpoint_sent >= CMD_INTERVAL
         if d.send_hvac or (sp != st.setpoint and due):
@@ -387,7 +400,7 @@ def _apply(i: Inputs, st: State, d: Decision, dt_h: float, force: bool = False,
         fan = FAN_NORMAL
         cheap = i.price is not None and i.price < i.settings.boost_price
         cold = d.hvac == "heat" and i.room is not None and i.room < d.target_room - BOOST_BELOW_TARGET_K
-        if st.surplus_active or cheap or cold:
+        if st.surplus_active or cheap or cold or d.mode == "aufwaermen":
             fan = FAN_BOOST
         fan_due = st.fan_changed is None or now - st.fan_changed >= FAN_INTERVAL
         if d.send_hvac or (fan != st.fan and fan_due):

@@ -65,6 +65,15 @@ def test_manual_on_heats_or_cools_by_outdoor():
     assert d.hvac == "cool"
 
 
+def test_warmup_full_power_whatever_the_price_radiators_stay_on():
+    # "Alexa, mir ist kalt": expensive power, AC switched off 10 min ago (lock) - still full power
+    st = cl.State(off_since=NOON - 10 * M)
+    d = cl.decide(inp(mode=cl.MODE_WARMUP, price=0.55, room=19.7, outdoor=6.0), st)
+    assert d.mode == "aufwaermen" and d.climate_on and d.hvac == "heat"
+    assert d.setpoint == cl.SP_MAX and d.fan == cl.FAN_BOOST and d.radiators
+    assert d.target_room == cl.Settings().target_home + cl.WARMUP_K  # target at home, daytime
+
+
 # --- 3. replace heating ----------------------------------------------------
 def test_replace_by_cost():
     # 1.00 EUR/L, 85 %, efficiency 4.0 -> limit 0.1176 * 4 * 0.9 = 0.424

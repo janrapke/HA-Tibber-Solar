@@ -24,7 +24,7 @@ from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.storage import Store
 
 try:
-    from .climate_logic import CMD_INTERVAL, FAN_INTERVAL, MODE_AUTO, MODE_MANUAL_OFF, MODE_MANUAL_ON, MODES, Decision, Inputs, Settings, State, decide
+    from .climate_logic import CMD_INTERVAL, FAN_INTERVAL, MODE_AUTO, MODE_MANUAL_OFF, MODE_MANUAL_ON, MODE_WARMUP, MODES, Decision, Inputs, Settings, State, WARMUP_MAX, decide
     from .const import (
         AC_DEFAULTS, AC_RADIATOR_VALVES, AC_RETRIGGER_AUTOMATIONS, CONF_AC_DEVICE_ID, CONF_AC_ENTITY, CONF_AC_HEATING_AUTOMATIONS,
         CONF_AC_OPENINGS, CONF_AC_OUTDOOR_SENSOR, CONF_AC_PRESENCE_HOME, CONF_AC_PRESENCE_LIVING, CONF_AC_RADIATORS,
@@ -32,7 +32,7 @@ try:
     )
     from .thermal_model import NIGHT_END_H, OIL_KWH_PER_L, Sample, ThermalModel, compare_openings, day_heat_demand, night_cooling
 except ImportError:  # loaded standalone by the tests
-    from climate_logic import CMD_INTERVAL, FAN_INTERVAL, MODE_AUTO, MODE_MANUAL_OFF, MODE_MANUAL_ON, MODES, Decision, Inputs, Settings, State, decide
+    from climate_logic import CMD_INTERVAL, FAN_INTERVAL, MODE_AUTO, MODE_MANUAL_OFF, MODE_MANUAL_ON, MODE_WARMUP, MODES, Decision, Inputs, Settings, State, WARMUP_MAX, decide
     from const import (
         AC_DEFAULTS, AC_RADIATOR_VALVES, AC_RETRIGGER_AUTOMATIONS, CONF_AC_DEVICE_ID, CONF_AC_ENTITY, CONF_AC_HEATING_AUTOMATIONS,
         CONF_AC_OPENINGS, CONF_AC_OUTDOOR_SENSOR, CONF_AC_PRESENCE_HOME, CONF_AC_PRESENCE_LIVING, CONF_AC_RADIATORS,
@@ -169,6 +169,7 @@ class ClimateController:
         self.state = State()
         self.settings = Settings()
         self.mode = MODE_AUTO
+        self._warmup_since: datetime | None = None
         self.control_active = False  # off = observe only
         self.replace_switch = True  # heat with the AC whenever it is cheaper than oil
         self.surplus_switch = False
@@ -274,6 +275,7 @@ class ClimateController:
     def set_mode(self, mode: str) -> None:
         if mode in MODES:
             self.mode = mode
+            self._warmup_since = None
             self.manual_external = False
             self._save()
             self._changed()
@@ -494,6 +496,15 @@ class ClimateController:
             settings=s,
         )
         d = decide(inputs, self.state)
+        if self.mode == MODE_WARMUP:
+            self._warmup_since = self._warmup_since or now
+            warm = room is not None and d.mode == "aufwaermen" and room >= d.target_room
+            if warm or now - self._warmup_since >= WARMUP_MAX:
+                _LOGGER.info("Warm-up finished (%s): back to auto", "warm" if warm else "time limit")
+                self.mode, self._warmup_since = MODE_AUTO, None
+                self._save()
+                inputs.mode = MODE_AUTO
+                d = decide(inputs, self.state)
         self.decision = d
 
         await self._check_valves(now)
