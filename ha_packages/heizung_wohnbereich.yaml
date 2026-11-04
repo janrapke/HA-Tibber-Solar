@@ -34,6 +34,15 @@
 #   Warmwasser lädt nach ab 42 °C (Schaltdifferenz 8 K unter 50 °C).
 #   Erwartung: weniger Brennerstarts nachts, längere Läufe, Grundlast < 1,2 L/Tag, Bad-Vorheizen
 #   ab 04:00 mit warmem Wasser (vorher erst ab ~06:00).
+#
+# Beobachtung ab 04.11.2026 (Besitzer: "gefühlt sehr kalt"): Wohnzimmer 7–23 Uhr Ø 20,0 °C
+#   (28.10.–03.11.: 20,5–21,5 °C). Ab 15 Uhr heizten die BTs 3 h voll, Raum nur 19,7 -> 20,4 °C,
+#   Ventilköpfe nur 20–22 °C (Heizkörper lauwarm, Vorlauf nach Heizkurve 1,1 / Tag 21 °C).
+#   Strom 43–55 ct, darum keine Klima-Hilfe. Küche lag vorher und nachher ~0,5 K unter Wohnzimmer.
+#   Plan des Besitzers: erst beobachten. Liegt das Wohnzimmer bei Anwesenheit (Soll 21 °C) an
+#   mehreren Tagen im Schnitt unter 20,5 °C, als ERSTEN Schritt vorschlagen, den Küchen-Heizkörper
+#   wieder mitlaufen zu lassen (der Besitzer meint, die Küche bringt mehr); erst danach Raumsoll
+#   Tag am Kessel 21 -> 22 °C. Nur vorschlagen, nicht selbst ändern.
 
 automation:
   - id: heizung_kuche_aus_halten
