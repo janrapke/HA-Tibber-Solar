@@ -34,6 +34,7 @@ async def async_setup_entry(
         DiagCurrentGridConsumptionSensor(coordinator, entry.entry_id),
         BatteryTotalSavingsSensor(coordinator, entry.entry_id),
         BatteryVsNoBatterySavingsSensor(coordinator, entry.entry_id),
+        CostCompareSensor(coordinator, entry.entry_id),
         LearningStatusSensor(coordinator, entry.entry_id),
         # Overfill emergency diagnostics
         OverfillAbsorptionSensor(coordinator, entry.entry_id),
@@ -393,6 +394,32 @@ class BatteryVsNoBatterySavingsSensor(CoordinatorEntity, SensorEntity):
             return round(val, 2)
         except (KeyError, TypeError):
             return 0.0
+
+
+class CostCompareSensor(CoordinatorEntity, SensorEntity):
+    """Electricity bill without system / solar only / real. State: total saved by the whole system."""
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_native_unit_of_measurement = "€"
+    _attr_icon = "mdi:cash-multiple"
+
+    def __init__(self, coordinator, entry_id):
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{entry_id}_cost_compare"
+        self._attr_name = "Stromkosten-Vergleich"
+        self._attr_device_info = {"identifiers": {(DOMAIN, entry_id)}, "name": "Smart Battery Optimizer",
+                                  "manufacturer": "Custom"}
+
+    @property
+    def native_value(self):
+        cost = getattr(self.coordinator, "cost", None)
+        total = (cost.summary.get("gesamt") or {}) if cost else {}
+        return total.get("gesamt_spart")
+
+    @property
+    def extra_state_attributes(self):
+        cost = getattr(self.coordinator, "cost", None)
+        return dict(cost.summary) if cost else {}
 
 
 class LearningStatusSensor(CoordinatorEntity, SensorEntity):

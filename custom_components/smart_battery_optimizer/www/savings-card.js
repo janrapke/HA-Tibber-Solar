@@ -1,417 +1,178 @@
-console.info('%c SAVINGS-CARD %c v2.0 ', 'color:white;background:#4CAF50;font-weight:bold', 'color:#4CAF50;background:white;font-weight:bold');
+/**
+ * Smart Battery Optimizer – Stromkosten-Vergleich v3
+ * Electricity bill in three scenarios: without any system, solar panels only (direct feed-in, export unpaid),
+ * real (with battery). Data: sensor "Stromkosten-Vergleich" (attributes heute/7_tage/30_tage/monat/jahr/gesamt, monate).
+ *
+ * Config:
+ *   type: custom:savings-card
+ *   entity: sensor.smart_battery_optimizer_stromkosten_vergleich   # optional, found automatically
+ *   default_period: gesamt                                          # optional
+ */
+console.info('%c SAVINGS-CARD %c v3.0 ', 'color:white;background:#4CAF50;font-weight:bold', 'color:#4CAF50;background:white;font-weight:bold');
 
 const PERIODS = [
-  { key: 'today',  label: 'Heute',    days: 0  },
-  { key: 'week',   label: '7 Tage',   days: 7  },
-  { key: 'month',  label: '30 Tage',  days: 30 },
-  { key: 'total',  label: 'Gesamt',   days: -1 },
+  { key: 'heute', label: 'Heute' },
+  { key: '7_tage', label: '7 Tage' },
+  { key: 'monat', label: 'Monat' },
+  { key: 'jahr', label: 'Jahr' },
+  { key: 'gesamt', label: 'Gesamt' },
 ];
+const C_GRID = '#ef5350', C_SOLAR = '#f9a825', C_BATT = '#1e88e5', C_REAL = '#43a047';
+const MONTHS = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
 
 class SavingsCard extends HTMLElement {
   constructor() {
     super();
     this.attachShadow({ mode: 'open' });
-    this._hass = null;
     this._config = {};
-    this._period = 'total';
-    this._periodData = {};   // cache: { period: { savings, vsNoBatt, cost } }
-    this._fetching = new Set();
-    this._initialized = false;
+    this._period = 'gesamt';
+    this._sig = '';
   }
 
   static getStubConfig() { return {}; }
-  static getConfigElement() { return document.createElement('savings-card-editor'); }
 
   setConfig(config) {
     this._config = config || {};
-    this._period = config?.default_period || 'total';
-    this._periodData = {};
-    if (this.shadowRoot && !this._initialized) {
-      this.shadowRoot.innerHTML = '<div style="padding:16px">⏳ Ersparnisübersicht lädt…</div>';
-    }
+    this._period = this._config.default_period || 'gesamt';
+    this._sig = '';
   }
+
+  getCardSize() { return 6; }
 
   set hass(hass) {
     this._hass = hass;
-    if (!this._initialized) {
-      this._buildShell();
-      this._initialized = true;
-    }
-    this._fetchPeriod(this._period);
+    const st = this._state();
+    const sig = st ? st.last_updated + this._period : 'none';
+    if (sig !== this._sig) { this._sig = sig; this._render(st); }
   }
 
-  // ── Shell (built once) ────────────────────────────────────────────
-  _buildShell() {
-    const cfg = this._config;
-    this.shadowRoot.innerHTML = `
+  _state() {
+    const h = this._hass;
+    if (!h) return null;
+    if (this._config.entity) return h.states[this._config.entity] || null;
+    const id = Object.keys(h.states).find(e => e.startsWith('sensor.') && h.states[e].attributes?.monate && h.states[e].attributes?.gesamt);
+    return id ? h.states[id] : null;
+  }
+
+  _render(st) {
+    const eur = (v, d = 2) => (v ?? 0).toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d }) + ' €';
+    const kwh = v => Math.round(v ?? 0).toLocaleString('de-DE') + ' kWh';
+    const css = `
       <style>
-        * { box-sizing: border-box; }
-        ha-card { overflow: hidden; }
-
-        .header {
-          display: flex; align-items: center; gap: 10px;
-          padding: 14px 16px 0;
-        }
-        .header ha-icon { color: var(--primary-color); --mdi-icon-size: 22px; flex-shrink: 0; }
-        .header-name { flex: 1; font-size: 1.05em; font-weight: 500; }
-
-        .tabs {
-          display: flex; gap: 4px;
-          padding: 10px 16px 0;
-        }
-        .tab {
-          flex: 1; padding: 6px 4px; border: none; border-radius: 8px;
-          font-size: 0.8em; font-weight: 500; cursor: pointer;
-          background: var(--secondary-background-color);
-          color: var(--secondary-text-color);
-          transition: background 0.15s, color 0.15s;
-        }
-        .tab.active {
-          background: var(--primary-color);
-          color: var(--text-primary-color, #fff);
-        }
-
-        .body { padding: 16px; }
-
-        .metrics {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-          gap: 10px;
-          margin-bottom: 14px;
-        }
-        .metric {
-          background: var(--secondary-background-color);
-          border-radius: 10px; padding: 12px 14px;
-        }
-        .metric-label {
-          font-size: 0.72em; color: var(--secondary-text-color);
-          text-transform: uppercase; letter-spacing: 0.05em;
-          font-weight: 600; margin-bottom: 6px;
-          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-        }
-        .metric-value {
-          font-size: 1.55em; font-weight: 300; line-height: 1;
-          color: var(--primary-text-color);
-        }
-        .metric-value.green { color: var(--success-color, #4caf50); }
-        .metric-value.muted { color: var(--secondary-text-color); font-size: 1.1em; }
-
-        .comparison {
-          border-top: 1px solid var(--divider-color);
-          padding-top: 12px;
-        }
-        .comp-label {
-          font-size: 0.75em; color: var(--secondary-text-color);
-          margin-bottom: 8px; font-weight: 600;
-          text-transform: uppercase; letter-spacing: 0.05em;
-        }
-        .bars { display: flex; flex-direction: column; gap: 6px; }
-        .bar-row { display: flex; align-items: center; gap: 8px; font-size: 0.82em; }
-        .bar-name { width: 90px; flex-shrink: 0; color: var(--secondary-text-color); }
-        .bar-track { flex: 1; height: 10px; background: var(--divider-color); border-radius: 5px; overflow: hidden; }
-        .bar-fill { height: 100%; border-radius: 5px; transition: width 0.5s ease; }
-        .bar-fill.actual { background: var(--primary-color); }
-        .bar-fill.without { background: #EF5350; }
-        .bar-val { font-weight: 500; width: 60px; text-align: right; flex-shrink: 0; }
-
-        .loading { color: var(--secondary-text-color); font-size: 0.85em; padding: 8px 0; }
-      </style>
-
-      <ha-card>
-        <div class="header">
-          <ha-icon icon="mdi:piggy-bank"></ha-icon>
-          <span class="header-name">${cfg.title || 'Batterie Ersparnisse'}</span>
-        </div>
-        <div class="tabs">
-          ${PERIODS.map(p => `<button class="tab${p.key === this._period ? ' active' : ''}" data-period="${p.key}">${p.label}</button>`).join('')}
-        </div>
-        <div class="body">
-          <div id="content"><div class="loading">Lade Daten…</div></div>
-        </div>
-      </ha-card>
-    `;
-
-    this.shadowRoot.querySelectorAll('.tab').forEach(btn => {
-      btn.addEventListener('click', () => {
-        this._period = btn.dataset.period;
-        this.shadowRoot.querySelectorAll('.tab').forEach(b => b.classList.toggle('active', b.dataset.period === this._period));
-        this._fetchPeriod(this._period);
-      });
-    });
-  }
-
-  // ── Data fetching ─────────────────────────────────────────────────
-  async _fetchPeriod(periodKey) {
-    if (this._fetching.has(periodKey)) return;
-    this._fetching.add(periodKey);
-
-    try {
-      const period = PERIODS.find(p => p.key === periodKey);
-      const totalId   = this._config.entity_total    || 'sensor.batterie_ersparnis_gesamt';
-      const vsNoBattId = this._config.entity_vs_no_batt || 'sensor.batterie_ersparnis_ggu_ohne_akku';
-      const costId    = this._config.entity_cost;
-
-      let savings = null, vsNoBatt = null, cost = null;
-
-      if (period.days === -1) {
-        // Gesamt: read current sensor values directly
-        savings  = this._stateVal(totalId);
-        vsNoBatt = this._stateVal(vsNoBattId);
-        cost     = costId ? this._stateVal(costId) : null;
-      } else {
-        const start = new Date();
-        if (period.days === 0) {
-          start.setHours(0, 0, 0, 0);
-        } else {
-          start.setDate(start.getDate() - period.days);
-          start.setHours(0, 0, 0, 0);
-        }
-
-        [savings, vsNoBatt] = await Promise.all([
-          this._statChange(totalId, start),
-          this._statChange(vsNoBattId, start),
-        ]);
-        cost = costId ? await this._statChange(costId, start) : null;
-      }
-
-      this._periodData[periodKey] = { savings, vsNoBatt, cost };
-    } catch (e) {
-      this._periodData[periodKey] = { savings: null, vsNoBatt: null, cost: null };
+        ha-card { padding: 14px 16px 12px; }
+        .head { display: flex; align-items: center; gap: 10px; }
+        .head ha-icon { color: ${C_REAL}; --mdc-icon-size: 26px; }
+        .title { flex: 1; font-size: 1.05em; font-weight: 500; }
+        .big { text-align: right; }
+        .big .v { font-size: 1.6em; font-weight: 700; color: ${C_REAL}; line-height: 1.1; }
+        .big .l { font-size: .72em; color: var(--secondary-text-color); }
+        .tabs { display: flex; gap: 4px; margin: 12px 0 14px; }
+        .tab { flex: 1; text-align: center; padding: 6px 0; border-radius: 14px; font-size: .8em; cursor: pointer;
+               background: var(--secondary-background-color); color: var(--primary-text-color); user-select: none; }
+        .tab.on { background: var(--primary-color); color: var(--text-primary-color, #fff); font-weight: 600; }
+        .row { margin-bottom: 12px; }
+        .rl { display: flex; align-items: center; gap: 6px; font-size: .85em; margin-bottom: 4px; }
+        .rl ha-icon { --mdc-icon-size: 18px; }
+        .rl .n { flex: 1; }
+        .rl .c { font-weight: 700; font-size: 1.05em; }
+        .bar { display: flex; height: 22px; border-radius: 6px; overflow: hidden; background: var(--divider-color); }
+        .seg { height: 100%; display: flex; align-items: center; justify-content: center; font-size: .7em; color: #fff;
+               white-space: nowrap; overflow: hidden; font-weight: 600; }
+        .saved { background-image: repeating-linear-gradient(135deg, rgba(255,255,255,.25) 0 4px, transparent 4px 8px); }
+        .chips { display: flex; gap: 6px; margin: 4px 0 12px; }
+        .chip { flex: 1; border-radius: 10px; padding: 7px 6px; text-align: center; }
+        .chip .v { font-size: 1.1em; font-weight: 700; }
+        .chip .l { font-size: .7em; opacity: .8; }
+        .kwh { display: flex; justify-content: space-around; font-size: .75em; color: var(--secondary-text-color); margin-bottom: 10px; }
+        .kwh b { color: var(--primary-text-color); }
+        .sub { font-size: .8em; font-weight: 600; margin: 4px 0 2px; color: var(--secondary-text-color); }
+        svg text { font-family: inherit; }
+        .foot { font-size: .68em; color: var(--secondary-text-color); margin-top: 6px; line-height: 1.4; }
+        .empty { padding: 20px; text-align: center; color: var(--secondary-text-color); }
+      </style>`;
+    if (!st) {
+      this.shadowRoot.innerHTML = `${css}<ha-card><div class="empty">Sensor „Stromkosten-Vergleich“ nicht gefunden.</div></ha-card>`;
+      return;
     }
+    const a = st.attributes;
+    const p = a[this._period] || {};
+    const A = p.ohne_system || 0, B = p.nur_solar || 0, C = p.tatsaechlich || 0;
+    const sol = p.solar_spart || 0, bat = p.akku_spart || 0, tot = p.gesamt_spart || 0;
+    const max = Math.max(A, B, C, 0.01);
+    const w = v => Math.max(0, 100 * v / max).toFixed(2) + '%';
+    const lbl = (v, minPct) => (100 * Math.abs(v) / max >= minPct ? eur(v, Math.abs(v) >= 100 ? 0 : 2) : '');
+    const pct = (v) => A > 0 ? Math.round(100 * v / A) + ' %' : '–';
 
-    this._fetching.delete(periodKey);
-    if (periodKey === this._period) this._renderContent();
-  }
-
-  async _statChange(entityId, startTime) {
-    if (!entityId || !this._hass) return null;
-    try {
-      const result = await this._hass.callWS({
-        type: 'recorder/statistics_during_period',
-        start_time: startTime.toISOString(),
-        statistic_ids: [entityId],
-        period: 'hour',
-        types: ['change'],
-      });
-      const stats = (result[entityId] || []);
-      return stats.reduce((sum, s) => sum + (s.change ?? 0), 0);
-    } catch {
-      // Fallback: history diff
-      try {
-        const end = new Date();
-        const history = await this._hass.callWS({
-          type: 'history/history_during_period',
-          start_time: startTime.toISOString(),
-          end_time: end.toISOString(),
-          entity_ids: [entityId],
-          minimal_response: true,
-          no_attributes: true,
-          significant_changes_only: false,
-        });
-        const entries = history[entityId] || [];
-        if (entries.length < 2) return null;
-        const first = parseFloat(entries[0].s ?? entries[0].state);
-        const last  = parseFloat(entries[entries.length - 1].s ?? entries[entries.length - 1].state);
-        return isNaN(first) || isNaN(last) ? null : last - first;
-      } catch { return null; }
-    }
-  }
-
-  _stateVal(entityId) {
-    if (!entityId || !this._hass) return null;
-    const s = this._hass.states[entityId];
-    return s ? parseFloat(s.state) : null;
-  }
-
-  // ── Content rendering ─────────────────────────────────────────────
-  _renderContent() {
-    const content = this.shadowRoot.querySelector('#content');
-    if (!content) return;
-
-    const data = this._periodData[this._period];
-    if (!data) { content.innerHTML = '<div class="loading">Lade Daten…</div>'; return; }
-
-    const { savings, vsNoBatt, cost } = data;
-    const fmt = v => v === null ? '–' : v.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
-
-    const costWithout = (cost !== null && savings !== null) ? cost + savings : null;
-
-    // Bar widths
-    const maxBar = Math.max(cost ?? 0, costWithout ?? 0, 0.001);
-    const actualPct  = cost !== null        ? (cost / maxBar * 100).toFixed(1) : 0;
-    const withoutPct = costWithout !== null ? (costWithout / maxBar * 100).toFixed(1) : 0;
-
-    const hasCost = this._config.entity_cost;
-
-    content.innerHTML = `
-      <div class="metrics">
-        ${hasCost ? `
-          <div class="metric">
-            <div class="metric-label">Tatsächliche Kosten</div>
-            <div class="metric-value">${fmt(cost)}</div>
-          </div>
-          <div class="metric">
-            <div class="metric-label">Kosten ohne System</div>
-            <div class="metric-value">${fmt(costWithout)}</div>
-          </div>
-        ` : ''}
-        <div class="metric">
-          <div class="metric-label">Batterie Ersparnis</div>
-          <div class="metric-value green">${fmt(savings)}</div>
-        </div>
-        <div class="metric">
-          <div class="metric-label">Ersparnis ggü. ohne Akku</div>
-          <div class="metric-value green">${fmt(vsNoBatt)}</div>
-        </div>
+    const rows = `
+      <div class="row">
+        <div class="rl"><ha-icon icon="mdi:transmission-tower" style="color:${C_GRID}"></ha-icon><span class="n">Ohne System – alles aus dem Netz</span><span class="c">${eur(A)}</span></div>
+        <div class="bar"><div class="seg" style="width:${w(A)};background:${C_GRID}">${lbl(A, 18)}</div></div>
       </div>
-
-      ${hasCost && cost !== null && costWithout !== null ? `
-        <div class="comparison">
-          <div class="comp-label">Kostenvergleich</div>
-          <div class="bars">
-            <div class="bar-row">
-              <span class="bar-name">Mit System</span>
-              <div class="bar-track"><div class="bar-fill actual" style="width:${actualPct}%"></div></div>
-              <span class="bar-val">${fmt(cost)}</span>
-            </div>
-            <div class="bar-row">
-              <span class="bar-name">Ohne System</span>
-              <div class="bar-track"><div class="bar-fill without" style="width:${withoutPct}%"></div></div>
-              <span class="bar-val">${fmt(costWithout)}</span>
-            </div>
-          </div>
-        </div>
-      ` : ''}
-    `;
-  }
-
-  getCardSize() { return 3; }
-}
-
-
-// ── Editor ────────────────────────────────────────────────────────────
-class SavingsCardEditor extends HTMLElement {
-  constructor() {
-    super();
-    this.attachShadow({ mode: 'open' });
-    this._config = {};
-    this._hass = null;
-    this._initialized = false;
-  }
-
-  set hass(hass) {
-    this._hass = hass;
-    if (!this._initialized) this._render();
-    else if (!this.shadowRoot?.activeElement || this.shadowRoot.activeElement.tagName !== 'SELECT') {
-      this._populateSelects();
-    }
-  }
-
-  setConfig(config) {
-    this._config = config || {};
-    if (!this._initialized) this._render();
-    else this._syncValues();
-  }
-
-  _monetarySensors() {
-    if (!this._hass) return [];
-    return Object.entries(this._hass.states)
-      .filter(([, s]) => ['€', 'EUR'].includes(s.attributes?.unit_of_measurement))
-      .map(([id, s]) => ({ id, name: s.attributes.friendly_name || id }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }
-
-  _render() {
-    this.shadowRoot.innerHTML = `
-      <style>
-        .form { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
-        label { font-size: 0.85em; color: var(--secondary-text-color); margin-bottom: 4px; display: block; }
-        select, input {
-          width: 100%; padding: 9px 10px; border-radius: 8px;
-          border: 1px solid var(--divider-color);
-          background: var(--card-background-color); color: var(--primary-text-color);
-          font-size: 0.9em; box-sizing: border-box;
-        }
-        .hint { font-size: 0.78em; color: var(--secondary-text-color); margin-top: 3px; }
-      </style>
-      <div class="form">
-        <div>
-          <label>Titel (optional)</label>
-          <input id="title" type="text" placeholder="Batterie Ersparnisse">
-        </div>
-        <div>
-          <label>Standard-Zeitraum</label>
-          <select id="default_period">
-            ${PERIODS.map(p => `<option value="${p.key}">${p.label}</option>`).join('')}
-          </select>
-        </div>
-        <div>
-          <label>Sensor: Gesamtersparnis</label>
-          <select id="entity_total"></select>
-        </div>
-        <div>
-          <label>Sensor: Ersparnis ggü. ohne Akku</label>
-          <select id="entity_vs_no_batt"></select>
-        </div>
-        <div>
-          <label>Sensor: Tatsächliche Kosten (optional)</label>
-          <select id="entity_cost"></select>
-          <div class="hint">Wenn angegeben, wird ein Kostenvergleich Mit/Ohne System angezeigt.</div>
-        </div>
+      <div class="row">
+        <div class="rl"><ha-icon icon="mdi:solar-panel" style="color:${C_SOLAR}"></ha-icon><span class="n">Nur Solarmodule, ohne Speicher</span><span class="c">${eur(B)}</span></div>
+        <div class="bar"><div class="seg" style="width:${w(B)};background:${C_GRID}">${lbl(B, 18)}</div>
+          <div class="seg saved" style="width:${w(Math.max(0, sol))};background:${C_SOLAR}">${lbl(-sol, 14)}</div></div>
       </div>
-    `;
+      <div class="row">
+        <div class="rl"><ha-icon icon="mdi:home-battery" style="color:${C_BATT}"></ha-icon><span class="n">Mit Speicher – tatsächlich bezahlt</span><span class="c">${eur(C)}</span></div>
+        <div class="bar"><div class="seg" style="width:${w(C)};background:${C_GRID}">${lbl(C, 18)}</div>
+          <div class="seg saved" style="width:${w(Math.max(0, bat))};background:${C_BATT}">${lbl(-bat, 14)}</div>
+          <div class="seg saved" style="width:${w(Math.max(0, Math.min(sol, A - C - Math.max(0, bat))))};background:${C_SOLAR}">${lbl(-sol, 14)}</div></div>
+      </div>`;
 
-    ['title'].forEach(id => {
-      this.shadowRoot.querySelector(`#${id}`).addEventListener('change', e =>
-        this._dispatch({ ...this._config, [id]: e.target.value }));
-    });
-    ['default_period', 'entity_total', 'entity_vs_no_batt', 'entity_cost'].forEach(id => {
-      this.shadowRoot.querySelector(`#${id}`).addEventListener('change', e =>
-        this._dispatch({ ...this._config, [id]: e.target.value || undefined }));
-    });
+    const chips = `
+      <div class="chips">
+        <div class="chip" style="background:${C_SOLAR}22"><div class="v" style="color:${C_SOLAR}">${eur(sol)}</div><div class="l">Solar spart · ${pct(sol)}</div></div>
+        <div class="chip" style="background:${C_BATT}22"><div class="v" style="color:${C_BATT}">${eur(bat)}</div><div class="l">Speicher spart zusätzlich · ${pct(bat)}</div></div>
+        <div class="chip" style="background:${C_REAL}22"><div class="v" style="color:${C_REAL}">${eur(tot)}</div><div class="l">zusammen · ${pct(tot)}</div></div>
+      </div>
+      <div class="kwh"><span>Verbrauch <b>${kwh(p.verbrauch_kwh)}</b></span><span>Solar <b>${kwh(p.solar_kwh)}</b></span><span>aus dem Netz <b>${kwh(p.netz_kwh)}</b></span></div>`;
 
-    this._initialized = true;
-    this._populateSelects();
-    this._syncValues();
-  }
+    // monthly savings: solar (amber) + battery (blue, may be negative) stacked
+    const mon = Object.entries(a.monate || {}).slice(-12);
+    let chart = '';
+    if (mon.length) {
+      const W = 320, H = 120, PB = 16, PT = 12;
+      const vals = mon.map(([, v]) => ({ s: v[0] - v[1], b: v[1] - v[2] }));
+      const top = Math.max(1, ...vals.map(v => v.s + Math.max(0, v.b)));
+      const bottom = Math.min(0, ...vals.map(v => Math.min(0, v.b)));
+      const y = v => PT + (top - v) / (top - bottom) * (H - PT - PB);
+      const bw = W / mon.length;
+      let bars = '';
+      mon.forEach(([k, _], i) => {
+        const v = vals[i], x = i * bw + bw * 0.18, ww = bw * 0.64;
+        bars += `<rect x="${x}" y="${y(v.s)}" width="${ww}" height="${Math.max(0, y(0) - y(v.s))}" fill="${C_SOLAR}" rx="2"><title>${k}: Solar ${eur(v.s)}</title></rect>`;
+        if (v.b >= 0) bars += `<rect x="${x}" y="${y(v.s + v.b)}" width="${ww}" height="${Math.max(0, y(v.s) - y(v.s + v.b))}" fill="${C_BATT}" rx="2"><title>${k}: Speicher ${eur(v.b)}</title></rect>`;
+        else bars += `<rect x="${x}" y="${y(0)}" width="${ww}" height="${Math.max(0, y(v.b) - y(0))}" fill="${C_BATT}" opacity=".5" rx="2"><title>${k}: Speicher ${eur(v.b)}</title></rect>`;
+        const tot = v.s + v.b;
+        bars += `<text x="${x + ww / 2}" y="${y(v.s + Math.max(0, v.b)) - 3}" font-size="8" text-anchor="middle" fill="var(--secondary-text-color)">${Math.round(tot)}</text>`;
+        bars += `<text x="${x + ww / 2}" y="${H - 3}" font-size="9" text-anchor="middle" fill="var(--secondary-text-color)">${MONTHS[Number(k.slice(5)) - 1]}</text>`;
+      });
+      chart = `<div class="sub">Ersparnis pro Monat (€)</div>
+        <svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="none" style="display:block">
+          <line x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}" stroke="var(--divider-color)"/>${bars}</svg>
+        <div class="kwh" style="margin:2px 0 0"><span><span style="color:${C_SOLAR}">■</span> Solar</span><span><span style="color:${C_BATT}">■</span> Speicher</span></div>`;
+    }
 
-  _populateSelects() {
-    const sensors = this._monetarySensors();
-    const opts = sensors.map(s => `<option value="${s.id}">${s.name}</option>`).join('');
-    ['entity_total', 'entity_vs_no_batt'].forEach(id => {
-      const sel = this.shadowRoot.querySelector(`#${id}`);
-      if (sel) sel.innerHTML = '<option value="">– bitte wählen –</option>' + opts;
-    });
-    const costSel = this.shadowRoot.querySelector('#entity_cost');
-    if (costSel) costSel.innerHTML = '<option value="">– kein –</option>' + opts;
-    this._syncValues();
-  }
-
-  _syncValues() {
-    const active = this.shadowRoot.activeElement;
-    const set = (id, val) => {
-      const el = this.shadowRoot.querySelector(`#${id}`);
-      if (el && el !== active) el.value = val || '';
-    };
-    set('title', this._config.title);
-    set('default_period', this._config.default_period || 'total');
-    set('entity_total', this._config.entity_total || 'sensor.batterie_ersparnis_gesamt');
-    set('entity_vs_no_batt', this._config.entity_vs_no_batt || 'sensor.batterie_ersparnis_ggu_ohne_akku');
-    set('entity_cost', this._config.entity_cost || '');
-  }
-
-  _dispatch(config) {
-    this._config = config;
-    this.dispatchEvent(new CustomEvent('config-changed', { detail: { config }, bubbles: true, composed: true }));
+    const since = a.seit ? new Date(a.seit + 'T12:00').toLocaleDateString('de-DE') : '–';
+    this.shadowRoot.innerHTML = `${css}<ha-card>
+      <div class="head"><ha-icon icon="mdi:piggy-bank"></ha-icon><div class="title">Stromkosten-Vergleich</div>
+        <div class="big"><div class="v">${eur(tot, tot >= 100 ? 0 : 2)}</div><div class="l">gespart</div></div></div>
+      <div class="tabs">${PERIODS.map(x => `<div class="tab ${x.key === this._period ? 'on' : ''}" data-k="${x.key}">${x.label}</div>`).join('')}</div>
+      ${rows}${chips}${chart}
+      <div class="foot">„Nur Solar“: Solarstrom zählt nur, soweit das Haus ihn im selben Moment verbraucht hätte; Überschuss wäre unbezahlt eingespeist worden. Speicher-Ersparnis enthält Lade­verluste und Netzladen. Daten seit ${since}, Werte vor Einführung aus Stundenmitteln. Grundgebühr nicht enthalten.</div>
+    </ha-card>`;
+    this.shadowRoot.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+      this._period = t.dataset.k; this._sig = ''; this._render(this._state());
+    }));
   }
 }
 
 customElements.define('savings-card', SavingsCard);
-customElements.define('savings-card-editor', SavingsCardEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: 'savings-card',
-  name: 'Smart Battery: Ersparnisse',
-  description: 'Smart Battery Optimizer — Kostenvergleich mit/ohne System, Zeitraum wählbar',
+  name: 'Smart Battery: Stromkosten-Vergleich',
+  description: 'Stromrechnung ohne System, nur mit Solar und tatsächlich mit Speicher',
   preview: true,
 });

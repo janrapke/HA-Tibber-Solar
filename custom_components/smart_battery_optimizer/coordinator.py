@@ -136,6 +136,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         self.oil: OilMonitor | None = None
         self.price_forecast = None  # PriceForecaster, shadow mode until the nightly agent releases it
         self.ev = None  # EvChargeController (Tesla charging plan)
+        self.cost = None  # CostCompare (bill without system / solar only / real)
 
         # ---- user controls (set by switch / number entities, restored on restart) ----
         self.is_enabled = True
@@ -228,7 +229,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         self._setup_done = True
         entry_id = self.config_entry.entry_id
         steps = [self.learning_engine.async_load, self._load_models, self._start_climate, self._start_oil,
-                 self._start_price_forecast, self._start_ev]
+                 self._start_price_forecast, self._start_ev, self._start_cost]
         try:
             if not self.appliance_manager:
                 self.appliance_manager = SmartApplianceManager(self.hass, entry_id)
@@ -306,6 +307,12 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         ev = EvChargeController(self.hass, self.config_entry.entry_id, self.config, self)
         await ev.async_start()
         self.ev = ev
+
+    async def _start_cost(self) -> None:
+        from .cost_compare import CostCompare
+        cost = CostCompare(self.hass, self.config_entry.entry_id, self.config, self)
+        await cost.async_start()
+        self.cost = cost
 
     async def _load_models(self) -> None:
         self._store = Store(self.hass, STORE_VERSION, f"{DOMAIN}.models.{self.config_entry.entry_id}")
@@ -661,6 +668,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             ("appliances", self._step_appliances),
             ("sources", self._step_sources),
             ("measure", self._step_measure),
+            ("cost", self._step_cost),
             ("plan", self._step_plan),
             ("execute", self._step_execute),
             ("climate", self._step_climate),
@@ -1269,6 +1277,14 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             "ac_efficiency": eff,
             "house_w": result.get("load"),
         })
+
+    async def _step_cost(self, now, result) -> None:
+        if self.cost is None:
+            return
+        balcony = self._read_float(self.config.get(CONF_BALCONY_POWER_SENSOR)) or 0.0
+        await self.cost.async_update(now, self._current_price(now), result.get("grid"), result.get("export") or 0.0,
+                                     max(0.0, result.get("inverter_w") or 0.0), balcony,
+                                     self.cost.charger_w(self._read_float), result.get("solar"))
 
     async def _step_ev(self, now, result) -> None:
         if self.ev is not None:
