@@ -14,6 +14,9 @@
 #   niemand zuhause                        -> 19 °C
 #   Mo–Fr vorheizen bis 06:00, dann bis 07:00 -> 21 °C (um 6 Uhr warm; nicht bei "Bad Urlaub")
 #   sonst                                  -> 20 °C tagsüber, 19 °C nachts (20:00–06:00)
+# Ventil-Voreinstellung Bad (Handtuchheizkörper): bis 04.11.2026 01:20 auf 3 von 6, danach ca. 4,5 von 6
+# (Heizkörper war oben warm, unten kalt = zu wenig Durchfluss; Luft war keine drin). Vorher/nachher:
+# Aufheizrate beim Vorheizen und wie schnell der Fritz-Kopf warm wird.
 # Keine Abendstufe: der Handtuchheizkörper (mit Handtüchern) schafft nur ~0,3 K/h, und die
 # Heizungsrohre im Estrich wärmen das Bad ohnehin; eine 21-°C-Stufe kam erst nachts an (01.11.2026).
 #
