@@ -41,7 +41,10 @@ def build(platform: str, coordinator, entry_id: str) -> list:
                 EvNumber(ev, entry_id, "pre_below", "Vorklima nur unter", -10, 20, step=1, unit="°C",
                          icon="mdi:thermometer-chevron-down"),
                 EvNumber(ev, entry_id, "pre_target", "Vorklima Innenraum", 17, 24, step=0.5, unit="°C",
-                         icon="mdi:thermometer")]
+                         icon="mdi:thermometer"),
+                # learned by the integration after each run; the nightly agent may correct it
+                EvNumber(ev, entry_id, "pre_per_k", "Vorklima Minuten pro Grad", 0.1, 2.0, step=0.05, unit="min/K",
+                         icon="mdi:timer-cog-outline")]
     if platform == "select":
         return [EvTravelTargetSelect(ev, entry_id)]
     if platform == "datetime":
