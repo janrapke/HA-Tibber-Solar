@@ -194,5 +194,28 @@ class EvChargeController:
             "ladestand_bei_abfahrt": p.soc_at_departure if p else None,
             "kwh": p.kwh if p else None, "kosten_eur": p.cost_eur if p else None,
             "viertelstunden": [{"start": t.strftime("%a %H:%M"), "preis": round(v[0], 3), "grund": v[1]} for t, v in slots],
+            "fenster": _windows(slots),
             "referenz_tage": 28, "referenz_preise": len(self.reference),
         }
+
+
+WEEKDAYS = ("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So")
+
+
+def _windows(slots) -> list[dict]:
+    """Planned quarter hours merged into charging windows for the dashboard."""
+    out = []
+    for t, (price, why) in slots:
+        if out and out[-1]["_end"] == t:
+            w = out[-1]
+        else:
+            w = {"tag": WEEKDAYS[t.weekday()], "von": t.strftime("%H:%M"), "_prices": [], "grund": why}
+            out.append(w)
+        w["_prices"].append(price)
+        w["_end"] = t + SLOT
+    for w in out:
+        prices = w.pop("_prices")
+        w["bis"] = w.pop("_end").strftime("%H:%M")
+        w["preis"] = round(sum(prices) / len(prices), 3)
+        w["viertelstunden"] = len(prices)
+    return out
