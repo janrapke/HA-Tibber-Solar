@@ -6,7 +6,7 @@ Pure Python, no Home Assistant imports. Rules agreed with the owner (05.11.2026)
 - Above that, a quarter hour may fill the car up to a cap that depends on its price, both
   relative to the last 4 weeks (so it works in every season) and absolute (so a long dear
   phase never looks "normal"). The lower of the two caps applies, never above the daily
-  maximum (default 80 %).
+  maximum (default 80 %); only a negative price incl. all fees may go to 90 %.
 - Optional filling waits when a quarter hour at least 1 ct (setting) cheaper is known later, even if
   the car may be away then: waiting for optional energy costs nothing.
 - Travel: reach 80 % or 100 % by a set time; the part above 80 % is charged as late as
@@ -27,6 +27,7 @@ RELATIVE_CAPS = ((0.10, 80), (0.20, 65), (0.35, 50), (0.50, 35), (0.75, 25), (1.
 # (price at or above, cap %): a dear quarter hour never fills much, however long prices stay high
 ABSOLUTE_CAPS = ((0.45, 20), (0.40, 25), (0.35, 40), (0.30, 60), (-99.0, 80))
 ALWAYS_FULL_BELOW = 0.20    # EUR/kWh: always worth filling up to the maximum
+NEGATIVE_TARGET = 90.0      # % allowed when the price incl. all fees is below zero (we are paid to charge)
 
 
 @dataclass
@@ -36,6 +37,7 @@ class Settings:
     travel_at: datetime | None = None
     travel_target: float = 80.0
     wait_margin: float = WAIT_MARGIN
+    negative_target: float = NEGATIVE_TARGET
 
 
 @dataclass
@@ -59,8 +61,10 @@ def pct_per_slot(power_kw: float = FULL_POWER_KW) -> float:
     return power_kw * 0.25 / KWH_PER_PCT
 
 
-def price_cap(price: float, reference: list[float], max_target: float) -> float:
+def price_cap(price: float, reference: list[float], max_target: float, negative_target: float = NEGATIVE_TARGET) -> float:
     """Highest SoC a quarter hour at this price may fill the car to."""
+    if price < 0:
+        return max(max_target, negative_target)
     if price < ALWAYS_FULL_BELOW:
         return max_target
     rel = 20.0
@@ -107,7 +111,7 @@ def make_plan(now: datetime, soc: float, prices: dict, reference: list[float], d
     # 3. optional filling, cheapest first, capped by price, waiting for clearly cheaper quarter hours
     for t in sorted((t for t in future if t + SLOT <= departure and t not in plan.slots), key=lambda t: future[t]):
         p = future[t]
-        if level + step / 2 > price_cap(p, reference, s.max_target):
+        if level + step / 2 > price_cap(p, reference, s.max_target, s.negative_target):
             continue
         if any(q <= p - s.wait_margin for u, q in future.items() if u > t and u not in plan.slots):
             continue

@@ -29,7 +29,9 @@ def build(platform: str, coordinator, entry_id: str) -> list:
                 EvNumber(ev, entry_id, "max_target", "Höchstens laden (Alltag)", 50, 100),
                 EvNumber(ev, entry_id, "now_target", "Sofortladen bis", 10, 100),
                 EvNumber(ev, entry_id, "wait_ct", "Warten ab Ersparnis", 0, 5, step=0.5, unit="ct/kWh",
-                         icon="mdi:timer-sand")]
+                         icon="mdi:timer-sand"),
+                EvNumber(ev, entry_id, "negative_target", "Bei negativem Preis bis", 80, 100,
+                         icon="mdi:cash-plus")]
     if platform == "select":
         return [EvTravelTargetSelect(ev, entry_id)]
     if platform == "datetime":

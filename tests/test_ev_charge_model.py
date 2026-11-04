@@ -64,3 +64,11 @@ def test_next_departure_and_surplus():
     assert ev.surplus_amps(94, 97, True, 100, 900, 1) == 1   # hysteresis keeps it running
     assert ev.surplus_amps(91, 97, True, 100, 900, 1) == 0
     assert ev.surplus_amps(99, 97, False, 600, 900, 0) == 0  # inverter off: the car would charge from the grid
+
+
+def test_negative_price_allows_90():
+    assert ev.price_cap(-0.02, REF, 80) == 90
+    assert ev.price_cap(0.05, REF, 80) == 80  # cheap but not negative: daily maximum
+    p = prices(lambda t: -0.03 if 1 <= t.hour < 4 and t.date() != NOW.date() else 0.40)
+    plan = ev.make_plan(NOW, 60.0, p, REF, DEP, ev.Settings())
+    assert 85 <= plan.soc_at_departure <= 92

@@ -33,7 +33,7 @@ FULL_AMPS = 16
 HOUSE_FULL_PCT = 97.0
 DEFAULTS = {"active": False, "min_target": 20.0, "max_target": 80.0, "now_target": 20.0, "now_on": False,
             "travel_on": False, "travel_at": None, "travel_target": 80.0, "dep_weekday": "06:30", "dep_weekend": "10:00",
-            "wait_ct": 1.0}
+            "wait_ct": 1.0, "negative_target": 90.0}
 
 
 class EvChargeController:
@@ -120,7 +120,7 @@ class EvChargeController:
         plugged = self._state(E_PLUG) == "on"
         if soc is not None:
             settings = Settings(self.s["min_target"], self.s["max_target"], travel, self.s["travel_target"],
-                                self.s["wait_ct"] / 100.0)
+                                self.s["wait_ct"] / 100.0, self.s["negative_target"])
             self.plan = make_plan(local, soc, self._prices(), self.reference, self.departure, settings)
         # what should happen now
         target_amps = 0
@@ -158,6 +158,9 @@ class EvChargeController:
         want_limit = 100 if travel and self.s["travel_target"] > 80 else max(50, int(self.s["max_target"]))
         if self.s["now_on"]:
             want_limit = max(want_limit, int(self.s["now_target"]))
+        slot = self.plan.slots.get(slot_start(dt_util.as_local(now))) if self.plan else None
+        if slot and slot[0] < 0:  # paid to charge: the car may go up to the negative-price target
+            want_limit = max(want_limit, int(self.s["negative_target"]))
         limit, soc = self._float(E_LIMIT), self._float(E_SOC)
         try:
             if amps and not charging and limit is not None and soc is not None and soc >= limit - 1:
