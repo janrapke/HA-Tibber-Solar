@@ -31,6 +31,7 @@ E_CLIMATE = f"climate.{CAR}_climate"
 E_CABIN = f"sensor.{CAR}_cabin_temperature"
 E_OUTSIDE = f"sensor.{CAR}_outside_temperature"
 E_WAKE = f"button.{CAR}_wake_up"
+E_ASLEEP = f"binary_sensor.{CAR}_asleep"
 E_SEAT = f"select.aussen_{CAR}_front_left_seat_climate"
 E_WHEEL = f"switch.aussen_{CAR}_steering_wheel_heater"
 OUTDOOR_FALLBACK = "sensor.openweathermap_temperature"
@@ -73,6 +74,7 @@ class EvChargeController:
         self.pre_next: dict = {}
         self._pre_started: datetime | None = None   # we switched the climate on at this time
         self._pre_outdoor: float | None = None
+        self._pre_from: float | None = None         # cabin (or outside) temperature at the start
         self._pre_learned = False
         self._pre_done_for: datetime | None = None  # ready time already started
         self._pre_woken_for: datetime | None = None
@@ -80,6 +82,8 @@ class EvChargeController:
     async def async_start(self) -> None:
         data = await self.store.async_load() or {}
         self.s.update({k: v for k, v in data.items() if k in DEFAULTS})
+        if data.get("pre_per_k") == 0.5:  # first default (measured against outside), not learned
+            self.s["pre_per_k"] = PREHEAT_MIN_PER_K
 
     async def async_set(self, key: str, value) -> None:
         self.s[key] = value
@@ -207,11 +211,12 @@ class EvChargeController:
         if self._pre_started:                      # started by us: learn the warm-up, end after the hold
             cabin = self._float(E_CABIN)
             mins = (local - self._pre_started).total_seconds() / 60
-            if not self._pre_learned and cabin is not None and cabin >= target - 1 and self._pre_outdoor is not None:
-                await self.async_set("pre_per_k", learn_per_k(self.s["pre_per_k"], mins, self._pre_outdoor, target))
+            if not self._pre_learned and cabin is not None and cabin >= target - 1 and self._pre_from is not None:
+                frost = self._pre_outdoor is not None and self._pre_outdoor < 0
+                await self.async_set("pre_per_k", learn_per_k(self.s["pre_per_k"], mins, self._pre_from, target, frost))
                 self._pre_learned = True
-                _LOGGER.info("Tesla preheat: %.1f K in %.0f min, now %.2f min/K",
-                             target - self._pre_outdoor, mins, self.s["pre_per_k"])
+                _LOGGER.info("Tesla preheat: from %.1f °C to %.0f °C in %.1f min, now %.2f min/K",
+                             self._pre_from, target - 1, mins, self.s["pre_per_k"])
             if link and not climate_on:
                 self._pre_started = None           # switched off by hand: leave it alone
             elif local >= self._pre_done_for + PRE_HOLD or not self.s["pre_on"]:
@@ -231,11 +236,14 @@ class EvChargeController:
                 self.pre_status = "aus" if not self.s["pre_on"] else "kein Tag aktiv"
             return
         outdoor = self._outdoor()
-        mins = preheat_minutes(outdoor, target, self.s["pre_per_k"])
+        # the cabin value is only fresh while the car is awake (it is woken 3 min before the start)
+        cabin = self._float(E_CABIN) if self._state(E_ASLEEP) == "off" else None
+        from_temp = cabin if cabin is not None else outdoor
+        mins = preheat_minutes(from_temp, target, self.s["pre_per_k"], outdoor is not None and outdoor < 0)
         start = ready - timedelta(minutes=mins)
         needed = preheat_needed(outdoor, self.s["pre_below"])
         self.pre_next = {"fertig_um": ready.isoformat(), "start": start.isoformat(), "minuten": round(mins),
-                         "aussen": outdoor, "noetig": needed, "min_pro_k": self.s["pre_per_k"]}
+                         "aussen": outdoor, "innen": cabin, "noetig": needed, "min_pro_k": self.s["pre_per_k"]}
         if self._pre_started or self._pre_done_for == ready:
             return
         if not needed:
@@ -256,7 +264,7 @@ class EvChargeController:
             if outdoor is not None and outdoor < PRE_COLD_EXTRAS:
                 await self._try("select", "select_option", E_SEAT, option="Medium heat")
                 await self._try("switch", "turn_on", E_WHEEL)
-            self._pre_started, self._pre_outdoor, self._pre_learned = local, outdoor, False
+            self._pre_started, self._pre_outdoor, self._pre_from, self._pre_learned = local, outdoor, from_temp, False
             self.pre_status = "läuft"
         elif local >= start and self._pre_woken_for == ready:
             await self._try("button", "press", E_WAKE)  # no link yet: keep trying to reach the car

@@ -76,9 +76,10 @@ def test_negative_price_allows_90():
 
 def test_preheat_need_duration_learning():
     assert ev.preheat_needed(4.0, 10.0) and not ev.preheat_needed(12.0, 10.0) and ev.preheat_needed(None, 10.0)
-    assert ev.preheat_minutes(8.0, 21.0) == 11.5
-    assert ev.preheat_minutes(-5.0, 21.0) == 23.0  # incl. ice
-    assert ev.preheat_minutes(-30.0, 21.0) == 30.0
-    k = ev.learn_per_k(0.5, 3.0, 8.0, 21.0)  # faster than expected -> fewer minutes per K
-    assert k < 0.5
-    assert ev.learn_per_k(0.5, 10.0, 20.0, 21.0) == 0.5  # too small a difference to learn
+    assert round(ev.preheat_minutes(13.8, 21.0), 2) == 5.24   # test of 04.11.: ~3 min real
+    assert round(ev.preheat_minutes(-5.0, 21.0, frost=True), 1) == 17.7
+    assert ev.preheat_minutes(-30.0, 21.0, frost=True) == 25.0
+    assert ev.preheat_minutes(20.5, 21.0) == 3.0
+    k = ev.learn_per_k(0.45, 3.0, 13.8, 21.0)  # faster than expected -> fewer minutes per K
+    assert k < 0.45
+    assert ev.learn_per_k(0.45, 10.0, 19.0, 21.0) == 0.45  # too small a difference to learn

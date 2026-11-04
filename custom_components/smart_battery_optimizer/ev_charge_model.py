@@ -153,10 +153,12 @@ def surplus_amps(house_soc: float | None, house_full_pct: float, inverter_on: bo
 
 
 # ---------------------------------------------------------------- preheating
-PREHEAT_BASE_MIN = 5.0       # fixed part (fans, glass), minutes
-PREHEAT_MIN_PER_K = 0.5      # start value, learned: minutes per K between target and outside (test 04.11.: 13.6 -> 19.8 °C in ~3 min)
-PREHEAT_FROST_EXTRA = 5.0    # minutes extra below 0 °C (ice on the glass)
-PREHEAT_MAX_MIN = 30.0
+# Test 04.11.2026 (~2 kW at the wall): cabin air 13.8 -> 19.8 °C and 15.4 -> 20.5 °C in about 3 min each.
+PREHEAT_BASE_MIN = 2.0       # fixed part (start-up, a little margin for glass and seats), minutes
+PREHEAT_MIN_PER_K = 0.45     # start value, learned: minutes per K between target and the cabin (or outside)
+PREHEAT_FROST_EXTRA = 4.0    # minutes extra below 0 °C outside (ice on the windscreen)
+PREHEAT_MIN_MIN = 3.0
+PREHEAT_MAX_MIN = 25.0
 WEEKDAY_KEYS = ("mo", "di", "mi", "do", "fr", "sa", "so")
 
 
@@ -165,16 +167,18 @@ def preheat_needed(outdoor: float | None, below: float) -> bool:
     return outdoor is None or outdoor < below
 
 
-def preheat_minutes(outdoor: float | None, target: float, per_k: float = PREHEAT_MIN_PER_K) -> float:
-    o = 5.0 if outdoor is None else outdoor
-    m = PREHEAT_BASE_MIN + per_k * max(0.0, target - o) + (PREHEAT_FROST_EXTRA if o < 0 else 0.0)
-    return min(PREHEAT_MAX_MIN, max(5.0, m))
+def preheat_minutes(start_temp: float | None, target: float, per_k: float = PREHEAT_MIN_PER_K,
+                    frost: bool = False) -> float:
+    """Minutes from climate on to a warm cabin; start_temp = cabin when the car is awake, else outside."""
+    t = 5.0 if start_temp is None else start_temp
+    m = PREHEAT_BASE_MIN + per_k * max(0.0, target - t) + (PREHEAT_FROST_EXTRA if frost else 0.0)
+    return min(PREHEAT_MAX_MIN, max(PREHEAT_MIN_MIN, m))
 
 
-def learn_per_k(per_k: float, minutes: float, outdoor: float, target: float) -> float:
-    """Blend a measured warm-up (start to target - 1 K) into the minutes per K (30 %)."""
-    dk = target - outdoor
+def learn_per_k(per_k: float, minutes: float, start_temp: float, target: float, frost: bool = False) -> float:
+    """Blend a measured warm-up (climate on until target - 1 K) into the minutes per K (30 %)."""
+    dk = target - 1 - start_temp
     if dk < 3 or minutes <= 0:
         return per_k
-    measured = max(0.0, minutes - PREHEAT_BASE_MIN - (PREHEAT_FROST_EXTRA if outdoor < 0 else 0.0)) / dk
+    measured = max(0.0, minutes - PREHEAT_BASE_MIN - (PREHEAT_FROST_EXTRA if frost else 0.0)) / dk
     return round(min(3.0, max(0.1, 0.7 * per_k + 0.3 * measured)), 3)
