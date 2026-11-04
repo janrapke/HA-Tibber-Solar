@@ -26,6 +26,27 @@ _CARD_FILES = [
 _CARD_RESOURCE_URLS = [url for _, url in _CARD_FILES]
 
 
+def _card_versions() -> dict[str, str]:
+    """Short content hash per card; also refresh a stale .gz next to it (HA serves the .gz first)."""
+    import gzip
+    import hashlib
+
+    out = {}
+    for filename, _ in _CARD_FILES:
+        js = _WWW / filename
+        if not js.exists():
+            continue
+        data = js.read_bytes()
+        out[filename] = hashlib.sha1(data).hexdigest()[:8]
+        gz = js.with_name(filename + ".gz")
+        try:
+            if gz.exists() and gzip.decompress(gz.read_bytes()) != data:
+                gz.write_bytes(gzip.compress(data, 9))
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning("Could not refresh %s: %s", gz.name, err)
+    return out
+
+
 async def _register_static_paths(hass: HomeAssistant) -> None:
     """Register static file paths, compatible with old and new HA APIs."""
     try:
@@ -66,13 +87,21 @@ async def _ensure_lovelace_resources(hass: HomeAssistant) -> None:
             )
             return
 
-        existing = {item["url"] for item in resources.async_items()}
-        for url in _CARD_RESOURCE_URLS:
-            if url not in existing:
+        versions = await hass.async_add_executor_job(_card_versions)
+        for filename, base in _CARD_FILES:
+            url = f"{base}?v={versions[filename]}" if versions.get(filename) else base
+            same = [i for i in resources.async_items() if i["url"].split("?")[0] == base]
+            if not same:
                 await resources.async_create_item({"res_type": "module", "url": url})
                 _LOGGER.info("Lovelace resource registered: %s", url)
-            else:
-                _LOGGER.debug("Lovelace resource already present: %s", url)
+                continue
+            # one entry per card, carrying the content version so browsers fetch a changed card
+            if same[0]["url"] != url:
+                await resources.async_update_item(same[0]["id"], {"res_type": "module", "url": url})
+                _LOGGER.info("Lovelace resource updated: %s", url)
+            for extra in same[1:]:
+                await resources.async_delete_item(extra["id"])
+                _LOGGER.info("Duplicate Lovelace resource removed: %s", extra["url"])
     except Exception as err:
         _LOGGER.warning("Lovelace resource registration failed: %s", err)
 
