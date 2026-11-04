@@ -134,6 +134,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         self.climate_device_states: dict = {}
         self.climate: ClimateController | None = None
         self.oil: OilMonitor | None = None
+        self.price_forecast = None  # PriceForecaster, shadow mode until the nightly agent releases it
 
         # ---- user controls (set by switch / number entities, restored on restart) ----
         self.is_enabled = True
@@ -225,7 +226,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             return
         self._setup_done = True
         entry_id = self.config_entry.entry_id
-        steps = [self.learning_engine.async_load, self._load_models, self._start_climate, self._start_oil]
+        steps = [self.learning_engine.async_load, self._load_models, self._start_climate, self._start_oil,
+                 self._start_price_forecast]
         try:
             if not self.appliance_manager:
                 self.appliance_manager = SmartApplianceManager(self.hass, entry_id)
@@ -291,6 +293,12 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
         oil = OilMonitor(self.hass, self.config_entry.entry_id, self.config, self)
         await oil.async_start()
         self.oil = oil
+
+    async def _start_price_forecast(self) -> None:
+        from .price_forecast_control import PriceForecaster
+        pf = PriceForecaster(self.hass, self.config_entry.entry_id, self.config, self)
+        await pf.async_start()
+        self.price_forecast = pf
 
     async def _load_models(self) -> None:
         self._store = Store(self.hass, STORE_VERSION, f"{DOMAIN}.models.{self.config_entry.entry_id}")
@@ -650,6 +658,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             ("execute", self._step_execute),
             ("climate", self._step_climate),
             ("oil", self._step_oil),
+            ("price_forecast", self._step_price_forecast),
             ("persist", self._step_persist),
         ):
             try:
@@ -1252,6 +1261,10 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             "ac_efficiency": eff,
             "house_w": result.get("load"),
         })
+
+    async def _step_price_forecast(self, now, result) -> None:
+        if self.price_forecast is not None:
+            await self.price_forecast.async_update(now)
 
     def _outdoor_forecast(self, now: datetime) -> float | None:
         """Outdoor temperature from the weather forecast (nearest hour)."""

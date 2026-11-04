@@ -8,6 +8,7 @@ from homeassistant.const import EntityCategory
 
 from .climate_ac_entities import build as build_climate
 from .oil_entities import build as build_oil
+from .price_forecast_entities import build as build_price_forecast
 from .const import DOMAIN
 from .coordinator import SmartBatteryOptimizerCoordinator
 
@@ -43,6 +44,7 @@ async def async_setup_entry(
         DayReviewSensor(coordinator, entry.entry_id),
         *build_climate("sensor", coordinator, entry.entry_id),
         *build_oil("sensor", coordinator, entry.entry_id),
+        *build_price_forecast("sensor", coordinator, entry.entry_id),
     ]
 
     app_entities = coordinator.appliance_entities.get('sensor', [])

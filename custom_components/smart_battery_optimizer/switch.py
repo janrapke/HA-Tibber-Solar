@@ -8,6 +8,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .climate_ac_entities import build as build_climate
+from .price_forecast_entities import build as build_price_forecast
 from .const import DOMAIN, CONF_PRESUNNY_SOLAR_MARGIN_PCT
 from .coordinator import SmartBatteryOptimizerCoordinator
 
@@ -28,6 +29,7 @@ async def async_setup_entry(
         PresunnyDischargeSwitch(coordinator, entry.entry_id),
         *coordinator.appliance_entities.get('switch', []),
         *build_climate("switch", coordinator, entry.entry_id),
+        *build_price_forecast("switch", coordinator, entry.entry_id),
     ]
     async_add_entities(entities)
 
