@@ -191,7 +191,9 @@ class EvChargeController:
         return {
             "modus": self.mode, "grund": self.reason, "steuerung_aktiv": self.s["active"],
             "abfahrt": self.departure.isoformat() if self.departure else None,
-            "ladestand_bei_abfahrt": p.soc_at_departure if p else None,
+            # an instant charge runs outside the plan; the departure value must include it
+            "ladestand_bei_abfahrt": (max(p.soc_at_departure, self.s["now_target"]) if self.s["now_on"]
+                                      else p.soc_at_departure) if p else None,
             "kwh": p.kwh if p else None, "kosten_eur": p.cost_eur if p else None,
             "viertelstunden": [{"start": t.strftime("%a %H:%M"), "preis": round(v[0], 3), "grund": v[1]} for t, v in slots],
             "fenster": _windows(slots),
