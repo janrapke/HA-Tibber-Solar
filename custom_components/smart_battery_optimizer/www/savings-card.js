@@ -85,6 +85,7 @@ class SavingsCard extends HTMLElement {
         .chip .l { font-size: .7em; opacity: .8; }
         .kwh { display: flex; justify-content: space-around; font-size: .75em; color: var(--secondary-text-color); margin-bottom: 10px; }
         .kwh b { color: var(--primary-text-color); }
+        .kwh > span { white-space: nowrap; }
         .sub { font-size: .8em; font-weight: 600; margin: 4px 0 2px; color: var(--secondary-text-color); }
         svg text { font-family: inherit; }
         .foot { font-size: .68em; color: var(--secondary-text-color); margin-top: 6px; line-height: 1.4; }
