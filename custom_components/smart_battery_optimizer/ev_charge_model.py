@@ -150,3 +150,31 @@ def surplus_amps(house_soc: float | None, house_full_pct: float, inverter_on: bo
     if current > 0 and house_soc < house_full_pct - 5:
         return 0
     return 2 if balcony_w >= 500 and solar_w >= 600 else 1
+
+
+# ---------------------------------------------------------------- preheating
+PREHEAT_BASE_MIN = 5.0       # fixed part (fans, glass), minutes
+PREHEAT_MIN_PER_K = 0.5      # start value, learned: minutes per K between target and outside (test 04.11.: 13.6 -> 19.8 °C in ~3 min)
+PREHEAT_FROST_EXTRA = 5.0    # minutes extra below 0 °C (ice on the glass)
+PREHEAT_MAX_MIN = 30.0
+WEEKDAY_KEYS = ("mo", "di", "mi", "do", "fr", "sa", "so")
+
+
+def preheat_needed(outdoor: float | None, below: float) -> bool:
+    """Preheat only when it is cold; unknown temperature counts as cold (better warm than iced)."""
+    return outdoor is None or outdoor < below
+
+
+def preheat_minutes(outdoor: float | None, target: float, per_k: float = PREHEAT_MIN_PER_K) -> float:
+    o = 5.0 if outdoor is None else outdoor
+    m = PREHEAT_BASE_MIN + per_k * max(0.0, target - o) + (PREHEAT_FROST_EXTRA if o < 0 else 0.0)
+    return min(PREHEAT_MAX_MIN, max(5.0, m))
+
+
+def learn_per_k(per_k: float, minutes: float, outdoor: float, target: float) -> float:
+    """Blend a measured warm-up (start to target - 1 K) into the minutes per K (30 %)."""
+    dk = target - outdoor
+    if dk < 3 or minutes <= 0:
+        return per_k
+    measured = max(0.0, minutes - PREHEAT_BASE_MIN - (PREHEAT_FROST_EXTRA if outdoor < 0 else 0.0)) / dk
+    return round(min(3.0, max(0.1, 0.7 * per_k + 0.3 * measured)), 3)

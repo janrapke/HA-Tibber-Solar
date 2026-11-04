@@ -13,8 +13,9 @@ import logging
 from homeassistant.helpers.storage import Store
 import homeassistant.util.dt as dt_util
 
-from .const import CONF_BALCONY_POWER_SENSOR, DOMAIN
-from .ev_charge_model import SLOT, Settings, make_plan, next_departure, slot_start, surplus_amps
+from .const import CONF_AC_OUTDOOR_SENSOR, CONF_BALCONY_POWER_SENSOR, DOMAIN
+from .ev_charge_model import (PREHEAT_MIN_PER_K, SLOT, WEEKDAY_KEYS, Settings, learn_per_k, make_plan,
+                              next_departure, preheat_minutes, preheat_needed, slot_start, surplus_amps)
 from .price_forecast import german_holidays
 
 _LOGGER = logging.getLogger(__name__)
@@ -26,6 +27,17 @@ E_LINK = f"binary_sensor.{CAR}_connection"
 E_CHARGING = f"switch.{CAR}_charging"
 E_AMPS = f"number.{CAR}_charging_amps"
 E_LIMIT = f"number.{CAR}_charge_limit"
+E_CLIMATE = f"climate.{CAR}_climate"
+E_CABIN = f"sensor.{CAR}_cabin_temperature"
+E_OUTSIDE = f"sensor.{CAR}_outside_temperature"
+E_WAKE = f"button.{CAR}_wake_up"
+E_SEAT = f"select.aussen_{CAR}_front_left_seat_climate"
+E_WHEEL = f"switch.aussen_{CAR}_steering_wheel_heater"
+OUTDOOR_FALLBACK = "sensor.openweathermap_temperature"
+PRE_HOLD = timedelta(minutes=10)     # safety: 10 min after the ready time the climate goes off if the car is still in reach
+PRE_GIVE_UP = timedelta(minutes=60)  # no BLE contact until then: assume driven away and forget it
+PRE_WAKE = timedelta(minutes=3)      # wake the car this long before the start so the values are fresh
+PRE_COLD_EXTRAS = 3.0                # below this outside temperature also seat and steering wheel heating
 STORE_VERSION = 1
 CMD_GAP = timedelta(seconds=60)
 REF_EVERY = timedelta(hours=6)
@@ -33,7 +45,11 @@ FULL_AMPS = 16
 HOUSE_FULL_PCT = 97.0
 DEFAULTS = {"active": False, "min_target": 20.0, "max_target": 80.0, "now_target": 20.0, "now_on": False,
             "travel_on": False, "travel_at": None, "travel_target": 80.0, "dep_weekday": "06:30", "dep_weekend": "10:00",
-            "wait_ct": 1.0, "negative_target": 90.0}
+            "wait_ct": 1.0, "negative_target": 90.0,
+            # preheating: overall switch, per weekday on/off and ready time, only needed below pre_below °C
+            "pre_on": True, "pre_below": 10.0, "pre_target": 21.0, "pre_per_k": PREHEAT_MIN_PER_K,
+            **{f"pre_{d}_on": d in ("mo", "di", "do", "fr") for d in WEEKDAY_KEYS},
+            **{f"pre_{d}_at": "06:40" for d in WEEKDAY_KEYS}}
 
 
 class EvChargeController:
@@ -52,6 +68,14 @@ class EvChargeController:
         self._last_cmd: datetime | None = None
         self._surplus_a = 0
         self.listeners: list = []
+        # preheating state
+        self.pre_status = "aus"
+        self.pre_next: dict = {}
+        self._pre_started: datetime | None = None   # we switched the climate on at this time
+        self._pre_outdoor: float | None = None
+        self._pre_learned = False
+        self._pre_done_for: datetime | None = None  # ready time already started
+        self._pre_woken_for: datetime | None = None
 
     async def async_start(self) -> None:
         data = await self.store.async_load() or {}
@@ -149,7 +173,108 @@ class EvChargeController:
             self.reason = "nicht angesteckt – " + self.reason
         if self.s["active"] and plugged and self._state(E_LINK) == "on":
             await self._execute(now, target_amps, travel)
+        try:
+            await self._preheat(local)
+        except Exception:  # noqa: BLE001 - never break the charging loop
+            _LOGGER.exception("Tesla preheat failed")
         self._changed()
+
+    # ------------------------------------------------------------------ preheating
+    def _outdoor(self) -> float | None:
+        """House weather sensor first (the car value is stale while it sleeps), the car as fallback."""
+        v = self._float(self.config.get(CONF_AC_OUTDOOR_SENSOR) or OUTDOOR_FALLBACK)
+        return v if v is not None else self._float(E_OUTSIDE)
+
+    def _next_ready(self, local: datetime) -> datetime | None:
+        """Next ready time from the weekday schedule; today's stays current until its hold is over."""
+        if not self.s["pre_on"]:
+            return None
+        for add in range(8):
+            day = (local + timedelta(days=add)).date()
+            key = WEEKDAY_KEYS[day.weekday()]
+            if not self.s[f"pre_{key}_on"]:
+                continue
+            at = time.fromisoformat(self.s[f"pre_{key}_at"])
+            ready = datetime.combine(day, at, tzinfo=local.tzinfo)
+            if ready + PRE_HOLD > local:
+                return ready
+        return None
+
+    async def _preheat(self, local: datetime) -> None:
+        target = float(self.s["pre_target"])
+        climate_on = self._state(E_CLIMATE) not in (None, "off")
+        link = self._state(E_LINK) == "on"
+        if self._pre_started:                      # started by us: learn the warm-up, end after the hold
+            cabin = self._float(E_CABIN)
+            mins = (local - self._pre_started).total_seconds() / 60
+            if not self._pre_learned and cabin is not None and cabin >= target - 1 and self._pre_outdoor is not None:
+                await self.async_set("pre_per_k", learn_per_k(self.s["pre_per_k"], mins, self._pre_outdoor, target))
+                self._pre_learned = True
+                _LOGGER.info("Tesla preheat: %.1f K in %.0f min, now %.2f min/K",
+                             target - self._pre_outdoor, mins, self.s["pre_per_k"])
+            if link and not climate_on:
+                self._pre_started = None           # switched off by hand: leave it alone
+            elif local >= self._pre_done_for + PRE_HOLD or not self.s["pre_on"]:
+                if link:                           # still in BLE reach = not driven away: switch off
+                    await self._pre_off(link)
+                elif local >= self._pre_done_for + PRE_GIVE_UP:
+                    self._pre_started, self.pre_status = None, "fertig"
+                else:
+                    self.pre_status = "aus wartet auf Verbindung"
+                    await self._try("button", "press", E_WAKE)
+            else:
+                self.pre_status = "läuft"
+        ready = self._next_ready(local)
+        if ready is None:
+            self.pre_next = {}
+            if not self._pre_started:
+                self.pre_status = "aus" if not self.s["pre_on"] else "kein Tag aktiv"
+            return
+        outdoor = self._outdoor()
+        mins = preheat_minutes(outdoor, target, self.s["pre_per_k"])
+        start = ready - timedelta(minutes=mins)
+        needed = preheat_needed(outdoor, self.s["pre_below"])
+        self.pre_next = {"fertig_um": ready.isoformat(), "start": start.isoformat(), "minuten": round(mins),
+                         "aussen": outdoor, "noetig": needed, "min_pro_k": self.s["pre_per_k"]}
+        if self._pre_started or self._pre_done_for == ready:
+            return
+        if not needed:
+            self.pre_status = f"nicht nötig ({outdoor:.0f} °C)"
+            return
+        self.pre_status = "geplant"
+        if local >= ready:
+            return
+        if start - PRE_WAKE <= local < start and self._pre_woken_for != ready:
+            self._pre_woken_for = ready
+            await self._try("button", "press", E_WAKE)
+        if local >= start and link:
+            self._pre_done_for = ready
+            if climate_on:                         # already on by hand: nothing to do
+                return
+            await self._try("climate", "set_hvac_mode", E_CLIMATE, hvac_mode="heat_cool")
+            await self._try("climate", "set_temperature", E_CLIMATE, temperature=target)
+            if outdoor is not None and outdoor < PRE_COLD_EXTRAS:
+                await self._try("select", "select_option", E_SEAT, option="Medium heat")
+                await self._try("switch", "turn_on", E_WHEEL)
+            self._pre_started, self._pre_outdoor, self._pre_learned = local, outdoor, False
+            self.pre_status = "läuft"
+        elif local >= start and self._pre_woken_for == ready:
+            await self._try("button", "press", E_WAKE)  # no link yet: keep trying to reach the car
+
+    async def _pre_off(self, link: bool) -> None:
+        if link:
+            await self._try("climate", "set_hvac_mode", E_CLIMATE, hvac_mode="off")
+            if self._pre_outdoor is not None and self._pre_outdoor < PRE_COLD_EXTRAS:
+                await self._try("select", "select_option", E_SEAT, option="Off")
+                await self._try("switch", "turn_off", E_WHEEL)
+        self._pre_started = None
+        self.pre_status = "fertig"
+
+    async def _try(self, domain, service, entity_id, **data) -> None:
+        try:
+            await self._call(domain, service, entity_id, **data)
+        except Exception as err:  # noqa: BLE001 - BLE may drop
+            _LOGGER.warning("Tesla preheat command failed: %s", err)
 
     async def _execute(self, now: datetime, amps: int, travel) -> None:
         if self._last_cmd and now - self._last_cmd < CMD_GAP:
@@ -201,6 +326,7 @@ class EvChargeController:
             "viertelstunden": [{"start": t.strftime("%a %H:%M"), "preis": round(v[0], 3), "grund": v[1]} for t, v in slots],
             "fenster": _windows(slots),
             "referenz_tage": 28, "referenz_preise": len(self.reference),
+            "vorklima": {"status": self.pre_status, **self.pre_next},
         }
 
 

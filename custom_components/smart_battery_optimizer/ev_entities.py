@@ -12,6 +12,9 @@ from homeassistant.components.time import TimeEntity
 import homeassistant.util.dt as dt_util
 
 from .const import DOMAIN
+from .ev_charge_model import WEEKDAY_KEYS
+
+DAY_NAMES = ("Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag")
 
 
 def build(platform: str, coordinator, entry_id: str) -> list:
@@ -23,7 +26,10 @@ def build(platform: str, coordinator, entry_id: str) -> list:
     if platform == "switch":
         return [EvSwitch(ev, entry_id, "active", "Ladesteuerung aktiv", "mdi:ev-station"),
                 EvSwitch(ev, entry_id, "now_on", "Sofortladen", "mdi:lightning-bolt"),
-                EvSwitch(ev, entry_id, "travel_on", "Reise aktiv", "mdi:map-marker-path")]
+                EvSwitch(ev, entry_id, "travel_on", "Reise aktiv", "mdi:map-marker-path"),
+                EvSwitch(ev, entry_id, "pre_on", "Vorklimatisierung", "mdi:car-defrost-front")] + [
+                EvSwitch(ev, entry_id, f"pre_{d}_on", f"Vorklima {n}", "mdi:calendar-check")
+                for d, n in zip(WEEKDAY_KEYS, DAY_NAMES)]
     if platform == "number":
         return [EvNumber(ev, entry_id, "min_target", "Mindestladestand bei Abfahrt", 10, 60),
                 EvNumber(ev, entry_id, "max_target", "Höchstens laden (Alltag)", 50, 100),
@@ -31,14 +37,19 @@ def build(platform: str, coordinator, entry_id: str) -> list:
                 EvNumber(ev, entry_id, "wait_ct", "Warten ab Ersparnis", 0, 5, step=0.5, unit="ct/kWh",
                          icon="mdi:timer-sand"),
                 EvNumber(ev, entry_id, "negative_target", "Bei negativem Preis bis", 80, 100,
-                         icon="mdi:cash-plus")]
+                         icon="mdi:cash-plus"),
+                EvNumber(ev, entry_id, "pre_below", "Vorklima nur unter", -10, 20, step=1, unit="°C",
+                         icon="mdi:thermometer-chevron-down"),
+                EvNumber(ev, entry_id, "pre_target", "Vorklima Innenraum", 17, 24, step=0.5, unit="°C",
+                         icon="mdi:thermometer")]
     if platform == "select":
         return [EvTravelTargetSelect(ev, entry_id)]
     if platform == "datetime":
         return [EvTravelAt(ev, entry_id)]
     if platform == "time":
         return [EvDeparture(ev, entry_id, "dep_weekday", "Abfahrt werktags"),
-                EvDeparture(ev, entry_id, "dep_weekend", "Abfahrt Wochenende/Feiertag")]
+                EvDeparture(ev, entry_id, "dep_weekend", "Abfahrt Wochenende/Feiertag")] + [
+                EvDeparture(ev, entry_id, f"pre_{d}_at", f"Vorklima fertig {n}") for d, n in zip(WEEKDAY_KEYS, DAY_NAMES)]
     return []
 
 

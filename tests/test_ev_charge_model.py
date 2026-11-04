@@ -72,3 +72,13 @@ def test_negative_price_allows_90():
     p = prices(lambda t: -0.03 if 1 <= t.hour < 4 and t.date() != NOW.date() else 0.40)
     plan = ev.make_plan(NOW, 60.0, p, REF, DEP, ev.Settings())
     assert 85 <= plan.soc_at_departure <= 92
+
+
+def test_preheat_need_duration_learning():
+    assert ev.preheat_needed(4.0, 10.0) and not ev.preheat_needed(12.0, 10.0) and ev.preheat_needed(None, 10.0)
+    assert ev.preheat_minutes(8.0, 21.0) == 11.5
+    assert ev.preheat_minutes(-5.0, 21.0) == 23.0  # incl. ice
+    assert ev.preheat_minutes(-30.0, 21.0) == 30.0
+    k = ev.learn_per_k(0.5, 3.0, 8.0, 21.0)  # faster than expected -> fewer minutes per K
+    assert k < 0.5
+    assert ev.learn_per_k(0.5, 10.0, 20.0, 21.0) == 0.5  # too small a difference to learn

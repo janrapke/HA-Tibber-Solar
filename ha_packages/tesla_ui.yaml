@@ -7,7 +7,7 @@
 #     packages:
 #       tesla_ui: !include ha_packages/tesla_ui.yaml
 #
-# Die Knöpfe "Sofort", "Reise/Urlaub" und "Einstellungen" klappen je ein Menü unter der Kachel
+# Die Knöpfe "Sofort", "Reise/Urlaub", "Einstellungen" und "Vorklimatisierung" klappen je ein Menü unter der Kachel
 # auf (bedingte Karten). Es ist immer nur eins offen; nach 10 Minuten klappt es von selbst zu.
 
 input_boolean:
@@ -20,6 +20,9 @@ input_boolean:
   tesla_menu_einstellungen:
     name: "Tesla Menü Einstellungen"
     icon: mdi:cog
+  tesla_menu_klima:
+    name: "Tesla Menü Vorklimatisierung"
+    icon: mdi:car-defrost-front
 
 automation:
   - id: tesla_menu_nur_eins_offen
@@ -27,21 +30,21 @@ automation:
     mode: queued
     triggers:
       - trigger: state
-        entity_id: [input_boolean.tesla_menu_sofort, input_boolean.tesla_menu_reise, input_boolean.tesla_menu_einstellungen]
+        entity_id: [input_boolean.tesla_menu_sofort, input_boolean.tesla_menu_reise, input_boolean.tesla_menu_einstellungen, input_boolean.tesla_menu_klima]
         to: "on"
     actions:
       - action: input_boolean.turn_off
         target:
           entity_id: >
             {{ ['input_boolean.tesla_menu_sofort', 'input_boolean.tesla_menu_reise',
-                'input_boolean.tesla_menu_einstellungen'] | reject('eq', trigger.entity_id) | list }}
+                'input_boolean.tesla_menu_einstellungen', 'input_boolean.tesla_menu_klima'] | reject('eq', trigger.entity_id) | list }}
 
   - id: tesla_menu_zuklappen
     alias: "Tesla-Kachel: Menü nach 10 min zuklappen"
     mode: parallel
     triggers:
       - trigger: state
-        entity_id: [input_boolean.tesla_menu_sofort, input_boolean.tesla_menu_reise, input_boolean.tesla_menu_einstellungen]
+        entity_id: [input_boolean.tesla_menu_sofort, input_boolean.tesla_menu_reise, input_boolean.tesla_menu_einstellungen, input_boolean.tesla_menu_klima]
         to: "on"
         for: "00:10:00"
     actions:
