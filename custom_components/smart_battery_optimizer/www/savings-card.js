@@ -90,7 +90,7 @@ class SavingsCard extends HTMLElement {
         .chip { flex: 1; border-radius: 10px; padding: 7px 6px; text-align: center; }
         .chip .v { font-size: 1.1em; font-weight: 700; }
         .chip .l { font-size: .7em; opacity: .8; }
-        .kwh { display: flex; justify-content: space-around; font-size: .75em; color: var(--secondary-text-color); margin-bottom: 10px; }
+        .kwh { display: flex; flex-wrap: wrap; gap: 4px 14px; justify-content: center; font-size: .75em; color: var(--secondary-text-color); margin-bottom: 10px; }
         .kwh b { color: var(--primary-text-color); }
         .kwh > span { white-space: nowrap; }
         .sub { font-size: .8em; font-weight: 600; margin: 4px 0 2px; color: var(--secondary-text-color); }
