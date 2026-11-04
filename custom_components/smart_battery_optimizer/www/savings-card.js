@@ -10,13 +10,14 @@
  */
 console.info('%c SAVINGS-CARD %c v3.0 ', 'color:white;background:#4CAF50;font-weight:bold', 'color:#4CAF50;background:white;font-weight:bold');
 
+// fixed periods; months ("m:YYYY-MM") and years ("y:YYYY") are picked from the drop-downs
 const PERIODS = [
   { key: 'heute', label: 'Heute' },
   { key: '7_tage', label: '7 Tage' },
-  { key: 'monat', label: 'Monat' },
-  { key: 'jahr', label: 'Jahr' },
+  { key: '30_tage', label: '30 Tage' },
   { key: 'gesamt', label: 'Gesamt' },
 ];
+const MONTHS_LONG = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
 const C_GRID = '#ef5350', C_SOLAR = '#f9a825', C_BATT = '#1e88e5', C_REAL = '#43a047';
 const MONTHS = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
 
@@ -66,7 +67,13 @@ class SavingsCard extends HTMLElement {
         .big { text-align: right; }
         .big .v { font-size: 1.6em; font-weight: 700; color: ${C_REAL}; line-height: 1.1; }
         .big .l { font-size: .72em; color: var(--secondary-text-color); }
-        .tabs { display: flex; gap: 4px; margin: 12px 0 14px; }
+        .tabs { display: flex; gap: 4px; margin: 12px 0 6px; }
+        .pick { display: flex; gap: 6px; margin-bottom: 6px; }
+        .pick select { flex: 1; padding: 6px 8px; border-radius: 14px; font-size: .8em; border: 1px solid var(--divider-color);
+               background: var(--secondary-background-color); color: var(--primary-text-color); font-family: inherit; }
+        .pick select.on { background: var(--primary-color); color: var(--text-primary-color, #fff); border-color: var(--primary-color); font-weight: 600; }
+        .what { font-size: .75em; color: var(--secondary-text-color); text-align: center; margin-bottom: 12px; }
+        svg .mb { cursor: pointer; }
         .tab { flex: 1; text-align: center; padding: 6px 0; border-radius: 14px; font-size: .8em; cursor: pointer;
                background: var(--secondary-background-color); color: var(--primary-text-color); user-select: none; }
         .tab.on { background: var(--primary-color); color: var(--text-primary-color, #fff); font-weight: 600; }
@@ -96,7 +103,19 @@ class SavingsCard extends HTMLElement {
       return;
     }
     const a = st.attributes;
-    const p = a[this._period] || {};
+    const months = a.monate || {}, years = a.jahre || {};
+    const per = this._period;
+    const mName = k => MONTHS_LONG[Number(k.slice(5)) - 1] + ' ' + k.slice(0, 4);
+    const p = per.startsWith('m:') ? (months[per.slice(2)] || {}) : per.startsWith('y:') ? (years[per.slice(2)] || {}) : (a[per] || {});
+    const dfmt = d => new Date(d + 'T12:00').toLocaleDateString('de-DE');
+    const today = new Date();
+    const back = n => { const d = new Date(today); d.setDate(d.getDate() - n); return d.toLocaleDateString('de-DE'); };
+    const what = per === 'heute' ? 'Heute, ' + today.toLocaleDateString('de-DE')
+      : per === '7_tage' ? `Letzte 7 Tage: ${back(6)} – heute`
+      : per === '30_tage' ? `Letzte 30 Tage: ${back(29)} – heute`
+      : per === 'gesamt' ? `Gesamt: seit ${a.seit ? dfmt(a.seit) : '–'} (${p.tage || 0} Tage mit Messwerten)`
+      : per.startsWith('m:') ? `${mName(per.slice(2))} (${p.tage || 0} Tage)`
+      : `Jahr ${per.slice(2)} (${p.tage || 0} Tage)`;
     const A = p.ohne_system || 0, B = p.nur_solar || 0, C = p.tatsaechlich || 0;
     const sol = p.solar_spart || 0, bat = p.akku_spart || 0, tot = p.gesamt_spart || 0;
     const max = Math.max(A, B, C, 0.01);
@@ -130,11 +149,13 @@ class SavingsCard extends HTMLElement {
       <div class="kwh"><span>Verbrauch <b>${kwh(p.verbrauch_kwh)}</b></span><span>Solar <b>${kwh(p.solar_kwh)}</b></span><span>aus dem Netz <b>${kwh(p.netz_kwh)}</b></span></div>`;
 
     // monthly savings: solar (amber) + battery (blue, may be negative) stacked
-    const mon = Object.entries(a.monate || {}).slice(-12);
+    const yearSel = per.startsWith('y:') ? per.slice(2) : (per.startsWith('m:') ? per.slice(2, 6) : null);
+    const allMon = Object.entries(months);
+    const mon = per.startsWith('y:') ? allMon.filter(([k]) => k.startsWith(yearSel)) : allMon.slice(-12);
     let chart = '';
     if (mon.length) {
       const W = 320, H = 120, PB = 16, PT = 12;
-      const vals = mon.map(([, v]) => ({ s: v[0] - v[1], b: v[1] - v[2] }));
+      const vals = mon.map(([, v]) => ({ s: v.solar_spart || 0, b: v.akku_spart || 0 }));
       const top = Math.max(1, ...vals.map(v => v.s + Math.max(0, v.b)));
       const bottom = Math.min(0, ...vals.map(v => Math.min(0, v.b)));
       const y = v => PT + (top - v) / (top - bottom) * (H - PT - PB);
@@ -142,6 +163,8 @@ class SavingsCard extends HTMLElement {
       let bars = '';
       mon.forEach(([k, _], i) => {
         const v = vals[i], x = i * bw + bw * 0.18, ww = bw * 0.64;
+        if (per === 'm:' + k) bars += `<rect x="${i * bw + 1}" y="0" width="${bw - 2}" height="${H}" fill="var(--primary-color)" opacity=".12" rx="4"/>`;
+        bars += `<rect class="mb" data-k="m:${k}" x="${i * bw}" y="0" width="${bw}" height="${H}" fill="transparent"/>`;
         bars += `<rect x="${x}" y="${y(v.s)}" width="${ww}" height="${Math.max(0, y(0) - y(v.s))}" fill="${C_SOLAR}" rx="2"><title>${k}: Solar ${eur(v.s)}</title></rect>`;
         if (v.b >= 0) bars += `<rect x="${x}" y="${y(v.s + v.b)}" width="${ww}" height="${Math.max(0, y(v.s) - y(v.s + v.b))}" fill="${C_BATT}" rx="2"><title>${k}: Speicher ${eur(v.b)}</title></rect>`;
         else bars += `<rect x="${x}" y="${y(0)}" width="${ww}" height="${Math.max(0, y(v.b) - y(0))}" fill="${C_BATT}" opacity=".5" rx="2"><title>${k}: Speicher ${eur(v.b)}</title></rect>`;
@@ -149,7 +172,7 @@ class SavingsCard extends HTMLElement {
         bars += `<text x="${x + ww / 2}" y="${y(v.s + Math.max(0, v.b)) - 3}" font-size="8" text-anchor="middle" fill="var(--secondary-text-color)">${Math.round(tot)}</text>`;
         bars += `<text x="${x + ww / 2}" y="${H - 3}" font-size="9" text-anchor="middle" fill="var(--secondary-text-color)">${MONTHS[Number(k.slice(5)) - 1]}</text>`;
       });
-      chart = `<div class="sub">Ersparnis pro Monat (€)</div>
+      chart = `<div class="sub">Ersparnis pro Monat (€)${per.startsWith('y:') ? ' · ' + yearSel : ''} – Balken antippen für den Monat</div>
         <svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="none" style="display:block">
           <line x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}" stroke="var(--divider-color)"/>${bars}</svg>
         <div class="kwh" style="margin:2px 0 0"><span><span style="color:${C_SOLAR}">■</span> Solar</span><span><span style="color:${C_BATT}">■</span> Speicher</span></div>`;
@@ -159,13 +182,19 @@ class SavingsCard extends HTMLElement {
     this.shadowRoot.innerHTML = `${css}<ha-card>
       <div class="head"><ha-icon icon="mdi:piggy-bank"></ha-icon><div class="title">Stromkosten-Vergleich</div>
         <div class="big"><div class="v">${eur(tot, tot >= 100 ? 0 : 2)}</div><div class="l">gespart</div></div></div>
-      <div class="tabs">${PERIODS.map(x => `<div class="tab ${x.key === this._period ? 'on' : ''}" data-k="${x.key}">${x.label}</div>`).join('')}</div>
+      <div class="tabs">${PERIODS.map(x => `<div class="tab ${x.key === per ? 'on' : ''}" data-k="${x.key}">${x.label}</div>`).join('')}</div>
+      <div class="pick">
+        <select id="mon" class="${per.startsWith('m:') ? 'on' : ''}"><option value="">Monat wählen …</option>${Object.keys(months).reverse().map(k => `<option value="m:${k}" ${per === 'm:' + k ? 'selected' : ''}>${mName(k)}</option>`).join('')}</select>
+        <select id="yr" class="${per.startsWith('y:') ? 'on' : ''}"><option value="">Jahr wählen …</option>${Object.keys(years).reverse().map(k => `<option value="y:${k}" ${per === 'y:' + k ? 'selected' : ''}>${k}</option>`).join('')}</select>
+      </div>
+      <div class="what">${what}</div>
       ${rows}${chips}${chart}
       <div class="foot">„Nur Solar“: Solarstrom zählt nur, soweit das Haus ihn im selben Moment verbraucht hätte; Überschuss wäre unbezahlt eingespeist worden. Speicher-Ersparnis enthält Lade­verluste und Netzladen. Daten seit ${since}, Werte vor Einführung aus Stundenmitteln. Grundgebühr nicht enthalten.</div>
     </ha-card>`;
-    this.shadowRoot.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
-      this._period = t.dataset.k; this._sig = ''; this._render(this._state());
-    }));
+    const go = k => { if (!k) return; this._period = k; this._sig = ''; this._render(this._state()); };
+    this.shadowRoot.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => go(t.dataset.k)));
+    this.shadowRoot.querySelectorAll('svg .mb').forEach(t => t.addEventListener('click', () => go(t.dataset.k)));
+    this.shadowRoot.querySelectorAll('.pick select').forEach(t => t.addEventListener('change', () => go(t.value)));
   }
 }
 

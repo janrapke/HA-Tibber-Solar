@@ -40,10 +40,16 @@ def summarize(days: dict, today: date) -> dict:
                 n += 1
         out[name] = _fmt(t, n)
     months: dict = defaultdict(lambda: [0.0] * FIELDS)
+    mdays: dict = defaultdict(int)
+    years: dict = defaultdict(lambda: [0.0] * FIELDS)
+    ydays: dict = defaultdict(int)
     for k, v in days.items():
         months[k[:7]] = [a + b for a, b in zip(months[k[:7]], v)]
-    keys = sorted(months)[-13:]
-    out["monate"] = {k: [round(months[k][0], 2), round(months[k][1], 2), round(months[k][2], 2)] for k in keys}
+        years[k[:4]] = [a + b for a, b in zip(years[k[:4]], v)]
+        mdays[k[:7]] += 1
+        ydays[k[:4]] += 1
+    out["monate"] = {k: _fmt(months[k], mdays[k]) for k in sorted(months)}
+    out["jahre"] = {k: _fmt(years[k], ydays[k]) for k in sorted(years)}
     out["seit"] = min(days) if days else None
     return out
 

@@ -43,3 +43,5 @@ def test_summary_periods_and_months():
     assert s["7_tage"]["ohne_system"] == 16 and s["monat"]["ohne_system"] == 6
     assert s["gesamt"]["solar_spart"] == 3 and s["gesamt"]["akku_spart"] == 2.5
     assert list(s["monate"]) == ["2026-10", "2026-11"] and s["seit"] == "2026-10-30"
+    assert s["monate"]["2026-11"]["ohne_system"] == 6 and s["monate"]["2026-11"]["tage"] == 2
+    assert s["jahre"]["2026"]["gesamt_spart"] == 5.5
