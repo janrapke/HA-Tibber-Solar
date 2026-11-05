@@ -14,6 +14,7 @@ CATS = {
     'auto': ('Auto', '#8b5cf6', 'mdi:car-electric'),
     'klima': ('Klima', '#0ea5e9', 'mdi:air-conditioner'),
     'heizung': ('Heizung', '#ef4444', 'mdi:fire'),
+    'kuehl': ('Kühlen', '#22d3ee', 'mdi:fridge-industrial-outline'),
     'spuel': ('Spülmaschine', '#3b82f6', 'mdi:dishwasher'),
     'wasch': ('Waschmaschine', '#06b6d4', 'mdi:washing-machine'),
     'licht': ('Licht', '#f59e0b', 'mdi:lightbulb-on-outline'),
@@ -32,6 +33,8 @@ DEVICES = [
     # helpers sensor.olbrenner_leistung (template on binary_sensor.olheizung_brenner_lauft) and
     # sensor.olbrenner_strom (Riemann integral) were created in the UI
     ('Ölheizung Brenner (≈300 W)', 'heizung', 'sensor.olbrenner_leistung', 'sensor.olbrenner_strom'),
+    # former plug "Monitor Kamera Keller", since 06.11.2026 on the chest freezer (history cleared, must stay on)
+    ('TK-Kühltruhe', 'kuehl', 'sensor.tk_kuehltruhe_leistung', 'sensor.tk_kuehltruhe_energie_gesamt'),
     ('Spülmaschine', 'spuel', 'sensor.tasmota_energy_power', 'sensor.tasmota_energy_total'),
     ('Waschmaschine', 'wasch', 'sensor.waschmaschiene_energy_power', 'sensor.miner_energy_total'),
     ('Licht außen 1', 'licht', 'sensor.shellydimmer2_08f9e04436dc_power', 'sensor.shellydimmer2_08f9e04436dc_energy'),
@@ -54,7 +57,6 @@ DEVICES = [
     ('Pool-Pumpe Dach (?)', 'pool', 'sensor.steckdose_pool_pumpe_dach_leistung', 'sensor.steckdose_pool_pumpe_dach_energie_gesamt'),
     ('Pool außen (?)', 'pool', 'sensor.antela_smart_plug_leistung', 'sensor.antela_smart_plug_energie_gesamt'),
     ('Hydo Paprika (?)', 'klaeren', 'sensor.tasmota_energy_power_2', 'sensor.tasmota_energy_total_2'),
-    ('Monitor Kamera Keller (?)', 'klaeren', 'sensor.wlan_steckdose_2_leistung', 'sensor.monitor_kamera_keller_energie_gesamt'),
 ]
 
 # House load of the optimizer: grid - export + inverters (Hoymiles, Ecoflow plug), but WITHOUT wallbox

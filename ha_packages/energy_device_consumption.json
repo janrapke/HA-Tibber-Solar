@@ -12,6 +12,10 @@
   "name": "Ölheizung Brenner (≈300 W)"
  },
  {
+  "stat_consumption": "sensor.tk_kuehltruhe_energie_gesamt",
+  "name": "TK-Kühltruhe"
+ },
+ {
   "stat_consumption": "sensor.tasmota_energy_total",
   "name": "Spülmaschine"
  },
@@ -82,9 +86,5 @@
  {
   "stat_consumption": "sensor.tasmota_energy_total_2",
   "name": "Hydo Paprika (?)"
- },
- {
-  "stat_consumption": "sensor.monitor_kamera_keller_energie_gesamt",
-  "name": "Monitor Kamera Keller (?)"
  }
 ]
