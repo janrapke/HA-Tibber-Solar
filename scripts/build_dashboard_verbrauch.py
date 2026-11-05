@@ -37,8 +37,8 @@ DEVICES = [
     ('TK-Kühltruhe', 'kuehl', 'sensor.tk_kuehltruhe_leistung', 'sensor.tk_kuehltruhe_energie_gesamt'),
     ('Spülmaschine', 'spuel', 'sensor.tasmota_energy_power', 'sensor.tasmota_energy_total'),
     ('Waschmaschine', 'wasch', 'sensor.waschmaschiene_energy_power', 'sensor.miner_energy_total'),
-    ('Licht außen 1', 'licht', 'sensor.shellydimmer2_08f9e04436dc_power', 'sensor.shellydimmer2_08f9e04436dc_energy'),
-    ('Licht außen 2', 'licht', 'sensor.shellydimmer2_4cebd6edf59d_power', 'sensor.shellydimmer2_4cebd6edf59d_energy'),
+    ('Licht Außen Garage', 'licht', 'sensor.shellydimmer2_08f9e04436dc_power', 'sensor.shellydimmer2_08f9e04436dc_energy'),
+    ('Licht Außen Einfahrt', 'licht', 'sensor.shellydimmer2_4cebd6edf59d_power', 'sensor.shellydimmer2_4cebd6edf59d_energy'),
     ('Licht Wohnzimmer', 'licht', 'sensor.licht_wohnzimmer_leistung', 'sensor.licht_wohnzimmer_energie_gesamt'),
     ('Licht Bücherregal', 'licht', 'sensor.antela_smart_steckdose_leistung', 'sensor.antela_smart_steckdose_energie_gesamt'),
     # plug formerly on the bunk bed light, since 06.11.2026: TV with Teufel box and everything around it

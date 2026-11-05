@@ -25,11 +25,11 @@
  },
  {
   "stat_consumption": "sensor.shellydimmer2_08f9e04436dc_energy",
-  "name": "Licht außen 1"
+  "name": "Licht Außen Garage"
  },
  {
   "stat_consumption": "sensor.shellydimmer2_4cebd6edf59d_energy",
-  "name": "Licht außen 2"
+  "name": "Licht Außen Einfahrt"
  },
  {
   "stat_consumption": "sensor.licht_wohnzimmer_energie_gesamt",

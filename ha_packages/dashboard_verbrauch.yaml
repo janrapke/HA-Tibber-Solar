@@ -38,11 +38,11 @@ sections:
         \ {maximumFractionDigits: 2}) + ' kW' : Math.round(v) + ' W';\n  const DEV = [{\"n\": \"Tesla Wallbox\", \"c\": \"auto\", \"p\": \"sensor.tesla_wall_connector_gesamtleistung\"}, {\"n\": \"Klima\
         \ Wohnzimmer\", \"c\": \"klima\", \"p\": \"sensor.klima_wohnzimmer_klima_leistung\"}, {\"n\": \"Ölheizung Brenner (≈300 W)\", \"c\": \"heizung\", \"p\": \"sensor.olbrenner_leistung\"}, {\"n\": \"\
         TK-Kühltruhe\", \"c\": \"kuehl\", \"p\": \"sensor.tk_kuehltruhe_leistung\"}, {\"n\": \"Spülmaschine\", \"c\": \"spuel\", \"p\": \"sensor.tasmota_energy_power\"}, {\"n\": \"Waschmaschine\", \"c\"\
-        : \"wasch\", \"p\": \"sensor.waschmaschiene_energy_power\"}, {\"n\": \"Licht außen 1\", \"c\": \"licht\", \"p\": \"sensor.shellydimmer2_08f9e04436dc_power\"}, {\"n\": \"Licht außen 2\", \"c\": \"\
-        licht\", \"p\": \"sensor.shellydimmer2_4cebd6edf59d_power\"}, {\"n\": \"Licht Wohnzimmer\", \"c\": \"licht\", \"p\": \"sensor.licht_wohnzimmer_leistung\"}, {\"n\": \"Licht Bücherregal\", \"c\":\
-        \ \"licht\", \"p\": \"sensor.antela_smart_steckdose_leistung\"}, {\"n\": \"Fernseher Wohnzimmer\", \"c\": \"tv\", \"p\": \"sensor.kinderzimmer_hochbett_licht_leistung\"}, {\"n\": \"Licht Keller\
-        \ Lasercutter\", \"c\": \"licht\", \"p\": \"sensor.licht_keller_lasercutter_leistung\"}, {\"n\": \"Licht LED Keller (?)\", \"c\": \"licht\", \"p\": \"sensor.licht_schrank_esszimmer_leistung\"},\
-        \ {\"n\": \"Fernseher Keller (≈120 W)\", \"c\": \"tv\", \"p\": \"sensor.fernseher_keller_leistung\"}, {\"n\": \"Surface (geschätzt)\", \"c\": \"computer\", \"p\": \"sensor.surface_netzbezug\"},\
+        : \"wasch\", \"p\": \"sensor.waschmaschiene_energy_power\"}, {\"n\": \"Licht Außen Garage\", \"c\": \"licht\", \"p\": \"sensor.shellydimmer2_08f9e04436dc_power\"}, {\"n\": \"Licht Außen Einfahrt\"\
+        , \"c\": \"licht\", \"p\": \"sensor.shellydimmer2_4cebd6edf59d_power\"}, {\"n\": \"Licht Wohnzimmer\", \"c\": \"licht\", \"p\": \"sensor.licht_wohnzimmer_leistung\"}, {\"n\": \"Licht Bücherregal\"\
+        , \"c\": \"licht\", \"p\": \"sensor.antela_smart_steckdose_leistung\"}, {\"n\": \"Fernseher Wohnzimmer\", \"c\": \"tv\", \"p\": \"sensor.kinderzimmer_hochbett_licht_leistung\"}, {\"n\": \"Licht\
+        \ Keller Lasercutter\", \"c\": \"licht\", \"p\": \"sensor.licht_keller_lasercutter_leistung\"}, {\"n\": \"Licht LED Keller (?)\", \"c\": \"licht\", \"p\": \"sensor.licht_schrank_esszimmer_leistung\"\
+        }, {\"n\": \"Fernseher Keller (≈120 W)\", \"c\": \"tv\", \"p\": \"sensor.fernseher_keller_leistung\"}, {\"n\": \"Surface (geschätzt)\", \"c\": \"computer\", \"p\": \"sensor.surface_netzbezug\"},\
         \ {\"n\": \"Akku laden (Netz)\", \"c\": \"akku\", \"p\": \"sensor.shellyplus1pm_e86beaeae1a0_switch_0_power\"}, {\"n\": \"Hydrotower Erdbeere (?)\", \"c\": \"pool\", \"p\": \"sensor.pool_warmepumpe_leistung\"\
         }, {\"n\": \"Hydrotower Salat (?)\", \"c\": \"pool\", \"p\": \"sensor.poolpumpe_leistung\"}, {\"n\": \"Pool-Pumpe (?)\", \"c\": \"pool\", \"p\": \"sensor.steckdose_pool_pumpe_leistung\"}, {\"n\"\
         : \"Pool-Pumpe Dach (?)\", \"c\": \"pool\", \"p\": \"sensor.steckdose_pool_pumpe_dach_leistung\"}, {\"n\": \"Pool außen (?)\", \"c\": \"pool\", \"p\": \"sensor.antela_smart_plug_leistung\"}, {\"\
@@ -153,7 +153,7 @@ sections:
         duration: 10min
         fill: zero
     - entity: sensor.shellydimmer2_08f9e04436dc_power
-      name: Licht außen 1
+      name: Licht Außen Garage
       color: '#f59e0b'
       type: area
       opacity: 0.55
@@ -163,7 +163,7 @@ sections:
         duration: 10min
         fill: zero
     - entity: sensor.shellydimmer2_4cebd6edf59d_power
-      name: Licht außen 2
+      name: Licht Außen Einfahrt
       color: '#f59e0b'
       type: area
       opacity: 0.55
