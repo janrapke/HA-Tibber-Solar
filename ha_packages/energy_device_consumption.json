@@ -32,6 +32,10 @@
   "name": "Licht Außen Einfahrt"
  },
  {
+  "stat_consumption": "sensor.licht_wohnzimmer_vitrine_strom",
+  "name": "Licht Wohnzimmer Vitrine (≈8 W)"
+ },
+ {
   "stat_consumption": "sensor.licht_wohnzimmer_energie_gesamt",
   "name": "Licht Wohnzimmer"
  },
