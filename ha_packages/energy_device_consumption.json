@@ -1,0 +1,82 @@
+[
+ {
+  "stat_consumption": "sensor.tesla_wall_connector_energie",
+  "name": "Tesla Wallbox"
+ },
+ {
+  "stat_consumption": "sensor.klima_wohnzimmer_klimastrom_gesamt",
+  "name": "Klima Wohnzimmer"
+ },
+ {
+  "stat_consumption": "sensor.tasmota_energy_total",
+  "name": "Spülmaschine"
+ },
+ {
+  "stat_consumption": "sensor.miner_energy_total",
+  "name": "Waschmaschine"
+ },
+ {
+  "stat_consumption": "sensor.shellydimmer2_08f9e04436dc_energy",
+  "name": "Licht außen 1"
+ },
+ {
+  "stat_consumption": "sensor.shellydimmer2_4cebd6edf59d_energy",
+  "name": "Licht außen 2"
+ },
+ {
+  "stat_consumption": "sensor.licht_wohnzimmer_energie_gesamt",
+  "name": "Licht Wohnzimmer"
+ },
+ {
+  "stat_consumption": "sensor.antela_smart_steckdose_energie_gesamt",
+  "name": "Licht Bücherregal"
+ },
+ {
+  "stat_consumption": "sensor.kinderzimmer_hochbett_licht_energie_gesamt",
+  "name": "Licht Hochbett Kinderzimmer"
+ },
+ {
+  "stat_consumption": "sensor.licht_keller_lasercutter_energie_gesamt",
+  "name": "Licht Keller Lasercutter"
+ },
+ {
+  "stat_consumption": "sensor.licht_led_keller_energie_gesamt",
+  "name": "Licht LED Keller (?)"
+ },
+ {
+  "stat_consumption": "sensor.shellyplus1pm_e86beaeae1a0_switch_0_energy",
+  "name": "Akku laden (Netz)"
+ },
+ {
+  "stat_consumption": "sensor.pool_warmepumpe_energie_gesamt",
+  "name": "Hydrotower Erdbeere (?)"
+ },
+ {
+  "stat_consumption": "sensor.poolpumpe_energie_gesamt",
+  "name": "Hydrotower Salat (?)"
+ },
+ {
+  "stat_consumption": "sensor.steckdose_pool_pumpe_energie_gesamt",
+  "name": "Pool-Pumpe (?)"
+ },
+ {
+  "stat_consumption": "sensor.steckdose_pool_pumpe_dach_energie_gesamt",
+  "name": "Pool-Pumpe Dach (?)"
+ },
+ {
+  "stat_consumption": "sensor.antela_smart_plug_energie_gesamt",
+  "name": "Pool außen (?)"
+ },
+ {
+  "stat_consumption": "sensor.tasmota_energy_total_2",
+  "name": "Hydo Paprika (?)"
+ },
+ {
+  "stat_consumption": "sensor.monitor_kamera_keller_energie_gesamt",
+  "name": "Monitor Kamera Keller (?)"
+ },
+ {
+  "stat_consumption": "sensor.antela_smart_steckdose_4_energie_gesamt",
+  "name": "Steckdose 4 (?)"
+ }
+]
