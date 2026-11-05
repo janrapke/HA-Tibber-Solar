@@ -1,0 +1,368 @@
+# ============================================================
+# Dashboard-Ansicht „Öl & Heizung“ (Dashboard dashboard-home, path oel-heizung)
+# Daten: Integration smart_battery_optimizer, Modul Ölheizung (sensor/number.olheizung_*)
+# Einspielen: per Websocket lovelace/config/save (diese Ansicht ersetzen)
+# Benötigt: button-card, apexcharts-card (HACS).
+# ============================================================
+
+title: Öl & Heizung
+path: oel-heizung
+icon: mdi:oil
+type: sections
+max_columns: 3
+dense_section_placement: true
+sections:
+
+  # ══════════════════════════════════════════════════════════
+  # TANK
+  # ══════════════════════════════════════════════════════════
+  - type: grid
+    cards:
+      - type: heading
+        heading: Öltank
+        icon: mdi:storage-tank
+        badges:
+          - type: entity
+            entity: binary_sensor.olheizung_brenner_lauft
+            name: Brenner läuft
+            show_icon: true
+            show_state: false
+            show_name: true
+            color: deep-orange
+            visibility:
+              - condition: state
+                entity: binary_sensor.olheizung_brenner_lauft
+                state: 'on'
+
+      - type: custom:button-card
+        entity: sensor.olheizung_tankinhalt
+        grid_options: {columns: full}
+        show_name: false
+        show_icon: false
+        show_state: false
+        triggers_update:
+          - sensor.olheizung_ol_nutzbar
+          - sensor.olheizung_ol_reicht_bis_optimistisch
+          - sensor.olheizung_ol_reicht_bis_neutral
+          - sensor.olheizung_ol_reicht_bis_pessimistisch
+        tap_action: {action: more-info}
+        styles:
+          card: [{padding: 0}, {border-radius: 18px}, {overflow: hidden}]
+          grid: [{grid-template-areas: '"c"'}, {grid-template-columns: 1fr}]
+          custom_fields:
+            c: [{white-space: normal}, {text-align: left}, {width: 100%}]
+        custom_fields:
+          c: |
+            [[[
+              const a = entity.attributes;
+              const n = (v) => { const x = parseFloat(v); return isNaN(x) ? null : x; };
+              const f = (v, d) => { const x = n(v); return x === null ? '–' : x.toLocaleString('de-DE', {minimumFractionDigits: d, maximumFractionDigits: d}); };
+              const tot = n(entity.state) ?? 0, cap = n(a.kapazitaet_l) ?? 6000, res = n(a.reserve_l) ?? 0;
+              const use = n(states['sensor.olheizung_ol_nutzbar']?.state) ?? Math.max(0, tot - res);
+              const pTot = Math.min(100, tot / cap * 100), pRes = Math.min(100, res / cap * 100);
+              const col = use < 200 ? '#ef4444' : use < 500 ? '#f59e0b' : '#10b981';
+              const day = (k) => { const s = states['sensor.olheizung_ol_reicht_bis_' + k]?.state; const t = Date.parse(s); return isNaN(t) ? null : t; };
+              const dN = day('neutral'), dO = day('optimistisch'), dP = day('pessimistisch');
+              const days = (t) => t === null ? null : Math.round((t - Date.now()) / 864e5);
+              const date = (t) => t === null ? '–' : new Date(t).toLocaleDateString('de-DE', {day: '2-digit', month: 'short', year: 'numeric'});
+              const last = a.letzte_ablesung;
+              const tank = `
+                <div style="position:relative;width:96px;height:170px;flex:none">
+                  <div style="position:absolute;inset:0;border-radius:22px;border:3px solid var(--divider-color);overflow:hidden;background:rgba(127,127,127,.06)">
+                    <div style="position:absolute;left:0;right:0;bottom:0;height:${pTot}%;background:linear-gradient(180deg,${col}cc,${col}88)"></div>
+                    <div style="position:absolute;left:0;right:0;bottom:0;height:${pRes}%;background:repeating-linear-gradient(45deg,rgba(239,68,68,.55) 0 6px,rgba(239,68,68,.35) 6px 12px)"></div>
+                    <div style="position:absolute;left:0;right:0;bottom:${pRes}%;border-top:2px dashed #ef4444"></div>
+                    ${[25, 50, 75].map(p => `<div style="position:absolute;right:0;width:12px;bottom:${p}%;border-top:1px solid var(--divider-color)"></div>`).join('')}
+                  </div>
+                  <div style="position:absolute;left:0;right:0;top:50%;transform:translateY(-50%);text-align:center;font-weight:700;font-size:15px;color:var(--primary-text-color);text-shadow:0 0 6px var(--card-background-color)">${f(pTot, 0)} %</div>
+                </div>`;
+              const range = (dO !== null && dP !== null && dN !== null) ? (() => {
+                const lo = dP, hi = dO, span = Math.max(1, hi - lo);
+                return `<div style="position:relative;height:8px;border-radius:4px;margin:10px 0 4px;background:linear-gradient(90deg,#60a5fa,#f59e0b 50%,#10b981)">
+                    <div style="position:absolute;left:calc(${(dN - lo) / span * 100}% - 7px);top:-4px;width:14px;height:14px;border-radius:50%;background:var(--card-background-color);border:3px solid var(--primary-text-color);box-sizing:border-box"></div></div>
+                  <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--secondary-text-color)">
+                    <span>kalt: ${date(dP)}</span><span>mild: ${date(dO)}</span></div>`; })() : '';
+              return `
+              <div style="padding:18px;background:linear-gradient(135deg, ${col}22 0%, transparent 60%)">
+                <div style="display:flex;gap:18px;align-items:center">
+                  ${tank}
+                  <div style="flex:1;min-width:0">
+                    <div style="font-size:12px;color:var(--secondary-text-color);text-transform:uppercase;letter-spacing:.06em">Nutzbar bis zur Reserve</div>
+                    <div style="font-size:40px;font-weight:300;line-height:1.05;color:${col}">${f(use, 0)}<span style="font-size:18px"> L</span></div>
+                    <div style="font-size:13px;margin-top:2px">${f(tot, 0)} L im Tank von ${f(cap, 0)} L</div>
+                    <div style="font-size:12px;color:var(--secondary-text-color);margin-top:2px"><span style="color:#ef4444">■</span> ${f(res, 0)} L Reserve – nicht verplanen</div>
+                    <div style="font-size:12px;color:var(--secondary-text-color);margin-top:6px">Anzeige jetzt ca. <b>${f(a.anzeige_cm_berechnet, 1)} cm</b> · rot ab ${f(a.reserve_cm, 0)} cm</div>
+                  </div>
+                </div>
+                <div style="margin-top:16px;padding:12px 14px;border-radius:14px;background:rgba(127,127,127,.08)">
+                  <div style="display:flex;justify-content:space-between;align-items:baseline">
+                    <span style="font-size:12px;color:var(--secondary-text-color)">Öl reicht bis (normaler Winter)</span>
+                    <span style="font-size:12px;color:var(--secondary-text-color)">${days(dN) === null ? '' : 'noch ' + days(dN) + ' Tage'}</span></div>
+                  <div style="font-size:22px;font-weight:600;margin-top:2px">${dN === null ? 'länger als 2 Jahre / unbekannt' : date(dN)}</div>
+                  ${range}
+                </div>
+                <div style="font-size:11px;color:var(--secondary-text-color);margin-top:10px">${last
+                  ? `Letzte Ablesung ${f(last.cm, 0)} cm am ${new Date(last.ts).toLocaleDateString('de-DE')} · seitdem ${f(a.seit_ablesung_verbraucht_l, 0)} L verbraucht`
+                  : '⚠️ Noch keine Ablesung – unten „Tank ablesen“ eintragen.'}</div>
+              </div>`;
+            ]]]
+
+      - type: heading
+        heading: Tank ablesen
+        heading_style: subtitle
+      - &num
+        type: tile
+        entity: number.olheizung_tankanzeige_ablesen
+        name: Tankanzeige (cm)
+        icon: mdi:gauge
+        color: amber
+        grid_options: {columns: full}
+        features_position: inline
+        features:
+          - {type: numeric-input, style: buttons}
+      - <<: *num
+        entity: number.olheizung_reserve_rot_auf_der_anzeige
+        name: Reserve (rot ab cm)
+        icon: mdi:car-brake-low-pressure
+        color: red
+        grid_options: {columns: 6, rows: 2}
+        features_position: bottom
+      - <<: *num
+        entity: number.olheizung_oldurchsatz_brenner
+        name: Brenner-Durchsatz
+        icon: mdi:spray
+        color: deep-orange
+        grid_options: {columns: 6, rows: 2}
+        features_position: bottom
+
+  # ══════════════════════════════════════════════════════════
+  # BRENNER HEUTE UND VERBRAUCH
+  # ══════════════════════════════════════════════════════════
+  - type: grid
+    cards:
+      - type: heading
+        heading: Brenner heute
+        icon: mdi:fire
+
+      - type: custom:button-card
+        entity: sensor.olheizung_brennerlaufzeit_heute
+        grid_options: {columns: full}
+        show_name: false
+        show_icon: false
+        show_state: false
+        triggers_update:
+          - binary_sensor.olheizung_brenner_lauft
+          - sensor.heizung_abgasrohr_temperatur
+          - sensor.olheizung_ol_heute
+          - sensor.olheizung_ol_monat
+          - sensor.olheizung_brennerstarts_heute
+        tap_action: {action: more-info}
+        styles:
+          card: [{padding: 0}, {border-radius: 18px}, {overflow: hidden}]
+          grid: [{grid-template-areas: '"c"'}, {grid-template-columns: 1fr}]
+          custom_fields:
+            c: [{white-space: normal}, {text-align: left}, {width: 100%}]
+        custom_fields:
+          c: |
+            [[[
+              const n = (v) => { const x = parseFloat(v); return isNaN(x) ? null : x; };
+              const f = (v, d) => { const x = n(v); return x === null ? '–' : x.toLocaleString('de-DE', {minimumFractionDigits: d, maximumFractionDigits: d}); };
+              const on = states['binary_sensor.olheizung_brenner_lauft']?.state === 'on';
+              const col = on ? '#f97316' : '#9ca3af';
+              const gas = n(states['sensor.heizung_abgasrohr_temperatur']?.state);
+              const lh = n(states['sensor.olheizung_ol_heute']?.state), lm = n(states['sensor.olheizung_ol_monat']?.state);
+              const starts = n(states['sensor.olheizung_brennerstarts_heute']?.state);
+              const mins = n(entity.state);
+              const price = n(states['number.klima_wohnzimmer_olpreis']?.state);
+              const runs = entity.attributes.laeufe || [];
+              const sec = (t) => { const p = String(t).split(':').map(Number); return (p[0] || 0) * 3600 + (p[1] || 0) * 60 + (p[2] || 0); };
+              const nowS = (() => { const d = new Date(); return d.getHours() * 3600 + d.getMinutes() * 60; })();
+              const segs = runs.map(r => { const s = sec(r.start), e = r.ende ? sec(r.ende) : nowS;
+                return `<div title="${r.start}–${r.ende || 'läuft'} · ${f(r.minuten, 1)} min" style="position:absolute;top:0;bottom:0;left:${s / 864}%;width:max(2px,${Math.max(0, e - s) / 864}%);background:#f97316;border-radius:2px"></div>`; }).join('');
+              const tile = (icon, v, lab, c) => `<div style="padding:10px;border-radius:14px;background:rgba(127,127,127,.08)">
+                  <ha-icon icon="${icon}" style="--mdc-icon-size:18px;color:${c}"></ha-icon>
+                  <div style="font-size:18px;font-weight:600;margin-top:2px;white-space:nowrap">${v}</div>
+                  <div style="font-size:11px;color:var(--secondary-text-color)">${lab}</div></div>`;
+              return `
+              <div style="padding:18px;background:linear-gradient(135deg, ${col}26 0%, transparent 60%)">
+                <div style="display:flex;align-items:center;gap:12px">
+                  <div style="width:44px;height:44px;border-radius:14px;display:flex;align-items:center;justify-content:center;background:${col}2e">
+                    <ha-icon icon="mdi:fire" style="--mdc-icon-size:26px;color:${col}"></ha-icon></div>
+                  <div style="flex:1">
+                    <div style="font-size:12px;color:var(--secondary-text-color);text-transform:uppercase;letter-spacing:.06em">Ölbrenner</div>
+                    <div style="font-size:18px;font-weight:700">${on ? 'Brenner läuft' : 'Brenner aus'}</div></div>
+                  <div style="text-align:right">
+                    <div style="font-size:30px;font-weight:300;line-height:1">${f(gas, 0)}<span style="font-size:15px;vertical-align:top">°C</span></div>
+                    <div style="font-size:11px;color:var(--secondary-text-color)">Abgasrohr</div></div>
+                </div>
+                <div style="font-size:11px;color:var(--secondary-text-color);margin:16px 0 4px">Laufzeiten heute</div>
+                <div style="position:relative;height:22px;border-radius:6px;background:rgba(127,127,127,.12);overflow:hidden">${segs}
+                  <div style="position:absolute;top:-2px;bottom:-2px;left:${nowS / 864}%;width:2px;background:var(--primary-text-color);opacity:.6"></div></div>
+                <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--secondary-text-color);margin-top:3px">
+                  <span>0</span><span>6</span><span>12</span><span>18</span><span>24 Uhr</span></div>
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:14px">
+                  ${tile('mdi:oil', f(lh, 1) + ' L', price ? '≈ ' + f(lh * price, 2) + ' € heute' : 'Öl heute', '#a16207')}
+                  ${tile('mdi:timer-outline', f(mins, 0) + ' min', 'Laufzeit', '#f97316')}
+                  ${tile('mdi:counter', f(starts, 0), 'Starts', '#8b5cf6')}
+                  ${tile('mdi:calendar-month', f(lm, 0) + ' L', 'diesen Monat', '#a16207')}
+                </div>
+              </div>`;
+            ]]]
+
+      - type: custom:apexcharts-card
+        grid_options: {columns: full}
+        graph_span: 24h
+        header: {show: true, title: Abgasrohr 24 h, show_states: true, colorize_states: true}
+        apex_config:
+          chart: {height: 160, toolbar: {show: false}}
+          grid: {strokeDashArray: 4}
+          legend: {show: false}
+        series:
+          - entity: sensor.heizung_abgasrohr_temperatur
+            name: Abgasrohr
+            color: '#f97316'
+            type: area
+            opacity: 0.2
+            stroke_width: 2
+            float_precision: 0
+            group_by: {func: max, duration: 5min}
+
+      - type: heading
+        heading: Heiztage
+        icon: mdi:calendar-range
+      - type: custom:apexcharts-card
+        grid_options: {columns: full}
+        header: {show: true, title: Öl pro Tag und Außentemperatur, show_states: false}
+        graph_span: 10d
+        span: {end: day}
+        apex_config:
+          chart: {height: 200, toolbar: {show: false}}
+          grid: {strokeDashArray: 4}
+          legend: {show: true, position: bottom}
+          plotOptions: {bar: {borderRadius: 4, columnWidth: '60%'}}
+        yaxis:
+          - {id: l, min: 0, decimals: 1}
+          - {id: t, opposite: true, decimals: 0}
+        series:
+          - entity: sensor.olheizung_heizkennlinie
+            name: Öl
+            unit: L
+            yaxis_id: l
+            type: column
+            color: '#a16207'
+            data_generator: |
+              return (entity.attributes.heiztage || []).map(d => [new Date(d.datum + 'T12:00:00').getTime(), d.oel_l]);
+          - entity: sensor.olheizung_heizkennlinie
+            name: Klima-Wärme
+            unit: kWh
+            yaxis_id: l
+            type: column
+            color: '#0ea5e9'
+            data_generator: |
+              return (entity.attributes.heiztage || []).map(d => [new Date(d.datum + 'T12:00:00').getTime(), d.klima_waerme_kwh || 0]);
+          - entity: sensor.olheizung_heizkennlinie
+            name: Ø außen
+            unit: °C
+            yaxis_id: t
+            type: line
+            color: '#818cf8'
+            stroke_width: 2
+            data_generator: |
+              return (entity.attributes.heiztage || []).map(d => [new Date(d.datum + 'T12:00:00').getTime(), d.aussen_mittel]);
+
+      - type: custom:button-card
+        entity: sensor.olheizung_heizkennlinie
+        grid_options: {columns: full}
+        show_name: false
+        show_icon: false
+        show_state: false
+        tap_action: {action: more-info}
+        styles:
+          card: [{padding: 14px 16px}, {border-radius: 18px}]
+          grid: [{grid-template-areas: '"c"'}, {grid-template-columns: 1fr}]
+          custom_fields:
+            c: [{white-space: normal}, {text-align: left}, {width: 100%}]
+        custom_fields:
+          c: |
+            [[[
+              const a = entity.attributes;
+              const f = (v, d) => { const x = parseFloat(v); return isNaN(x) ? '–' : x.toLocaleString('de-DE', {minimumFractionDigits: d, maximumFractionDigits: d}); };
+              const rows = (a.heiztage || []).slice(-7).reverse();
+              const mx = Math.max(...rows.map(d => d.oel_l || 0), 0.1);
+              const wd = (s) => new Date(s + 'T12:00:00').toLocaleDateString('de-DE', {weekday: 'short', day: '2-digit', month: '2-digit'});
+              const body = rows.map(d => `
+                <div style="display:grid;grid-template-columns:78px 1fr 52px;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid var(--divider-color)">
+                  <div style="font-size:12px;font-weight:600">${wd(d.datum)}${d.vollstaendig === false ? ' <span style="font-weight:400;color:var(--secondary-text-color)">läuft</span>' : ''}</div>
+                  <div>
+                    <div style="height:8px;border-radius:4px;background:rgba(127,127,127,.15);overflow:hidden"><div style="height:100%;width:${(d.oel_l || 0) / mx * 100}%;background:#a16207;border-radius:4px"></div></div>
+                    <div style="font-size:10px;color:var(--secondary-text-color);margin-top:3px">${f(d.brenner_min, 0)} min · ${d.starts} Starts · innen ${f(d.innen_mittel, 1)}° · außen ${f(d.aussen_mittel, 1)}°${d.klima_strom_kwh ? ' · Klima ' + f(d.klima_strom_kwh, 1) + ' kWh' : ''}</div></div>
+                  <div style="text-align:right;font-weight:600;font-size:13px">${f(d.oel_l, 1)} L</div>
+                </div>`).join('');
+              return `<div style="font-size:16px;font-weight:600;margin-bottom:4px">Letzte 7 Tage</div>${body}
+                <div style="font-size:11px;color:var(--secondary-text-color);margin-top:8px">Grundlage der Reichweite: ${a.tage ?? '?'} Heiztage (${a.quelle || ''}). Die Klima als Heizungsersatz verlängert die Reichweite.</div>`;
+            ]]]
+
+  # ══════════════════════════════════════════════════════════
+  # PREIS
+  # ══════════════════════════════════════════════════════════
+  - type: grid
+    cards:
+      - type: heading
+        heading: Heizölpreis
+        icon: mdi:cash-multiple
+      - type: custom:button-card
+        entity: sensor.olheizung_heizolpreis
+        grid_options: {columns: full}
+        show_name: false
+        show_icon: false
+        show_state: false
+        triggers_update: [sensor.olheizung_tankinhalt]
+        tap_action:
+          action: url
+          url_path: '[[[ return entity.attributes.bestellen || "https://www.heizoel24.de" ]]]'
+        styles:
+          card: [{padding: 0}, {border-radius: 18px}, {overflow: hidden}]
+          grid: [{grid-template-areas: '"c"'}, {grid-template-columns: 1fr}]
+          custom_fields:
+            c: [{white-space: normal}, {text-align: left}, {width: 100%}]
+        custom_fields:
+          c: |
+            [[[
+              const a = entity.attributes;
+              const n = (v) => { const x = parseFloat(v); return isNaN(x) ? null : x; };
+              const f = (v, d) => { const x = n(v); return x === null ? '–' : x.toLocaleString('de-DE', {minimumFractionDigits: d, maximumFractionDigits: d}); };
+              const p = n(entity.state);
+              const t = states['sensor.olheizung_tankinhalt']?.attributes || {};
+              const paid = n(states['number.klima_wohnzimmer_olpreis']?.state);
+              const when = a.abgerufen ? new Date(a.abgerufen).toLocaleString('de-DE', {day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'}) : '–';
+              if (p === null || p <= 0) return '<div style="padding:18px">Preis wird noch abgerufen …</div>';
+              return `
+              <div style="padding:18px;background:linear-gradient(135deg, #a1620722 0%, transparent 60%)">
+                <div style="font-size:12px;color:var(--secondary-text-color);text-transform:uppercase;letter-spacing:.06em">Heute in Nienburg</div>
+                <div style="display:flex;align-items:baseline;gap:8px">
+                  <div style="font-size:40px;font-weight:300;line-height:1.1">${f(p, 3)}</div><div style="font-size:16px">€/L</div></div>
+                <div style="font-size:12px;color:var(--secondary-text-color)">${f(a.eur_100l, 2)} € je 100 L · ${f(a.menge_l, 0)} L · ${a.sorte || ''}</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px">
+                  <div style="padding:10px 12px;border-radius:14px;background:rgba(127,127,127,.08)">
+                    <div style="font-size:11px;color:var(--secondary-text-color)">Auffüllen bis 95 %</div>
+                    <div style="font-size:18px;font-weight:600">${f(t.auffuellen_bis_95_prozent_l, 0)} L</div>
+                    <div style="font-size:12px;color:var(--secondary-text-color)">ca. ${f(t.auffuellen_kosten_eur, 0)} €</div></div>
+                  <div style="padding:10px 12px;border-radius:14px;background:rgba(127,127,127,.08)">
+                    <div style="font-size:11px;color:var(--secondary-text-color)">Rechenpreis Klima</div>
+                    <div style="font-size:18px;font-weight:600">${f(paid, 2)} €/L</div>
+                    <div style="font-size:12px;color:var(--secondary-text-color)">${paid !== null ? (p > paid ? 'Tagespreis ' + f((p - paid) * 100, 0) + ' ct höher' : 'Tagespreis günstiger') : ''}</div></div>
+                </div>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px">
+                  <span style="font-size:11px;color:var(--secondary-text-color)">abgerufen ${when} · ${a.quelle || ''}</span>
+                  <span style="padding:6px 12px;border-radius:999px;background:#a16207;color:#fff;font-size:12px;font-weight:600">Angebote ansehen ›</span></div>
+              </div>`;
+            ]]]
+      - type: statistics-graph
+        title: Preisverlauf (90 Tage)
+        grid_options: {columns: full}
+        entities: [sensor.olheizung_heizolpreis]
+        days_to_show: 90
+        period: day
+        stat_types: [mean]
+        chart_type: line
+        hide_legend: true

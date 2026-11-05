@@ -1,0 +1,78 @@
+# ============================================================
+# Karte „Müllabholung“ für die Home-Ansicht (Dashboard dashboard-home)
+# Ersetzt die alte Entities-Karte „Müll Abholung“.
+# Daten: waste_collection_schedule (configuration.yaml), Termine stehen als
+# Attribute "YYYY-MM-DD": "<Tonne>" an sensor.restmull/biomull/papiertonne/wertstofftonne.
+# Benötigt: button-card (HACS).
+# ============================================================
+
+type: custom:button-card
+entity: sensor.wertstofftonne
+show_name: false
+show_icon: false
+show_state: false
+triggers_update:
+  - sensor.restmull
+  - sensor.biomull
+  - sensor.papiertonne
+  - sensor.wertstofftonne
+tap_action: {action: none}
+styles:
+  card: [{padding: 16px}, {border-radius: 18px}]
+  grid: [{grid-template-areas: '"c"'}, {grid-template-columns: 1fr}]
+  custom_fields:
+    c: [{white-space: normal}, {text-align: left}, {width: 100%}]
+custom_fields:
+  c: |
+    [[[
+      const BINS = [
+        ['sensor.restmull', 'Restmüll', '#6b7280', 'mdi:trash-can'],
+        ['sensor.biomull', 'Bio', '#84cc16', 'mdi:leaf'],
+        ['sensor.papiertonne', 'Papier', '#3b82f6', 'mdi:newspaper-variant-outline'],
+        ['sensor.wertstofftonne', 'Gelber Sack', '#eab308', 'mdi:recycle'],
+      ];
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const list = BINS.map(([id, name, col, icon]) => {
+        const at = states[id]?.attributes || {};
+        const dates = Object.keys(at).filter(k => /^\d{4}-\d{2}-\d{2}$/.test(k))
+          .map(k => new Date(k + 'T00:00:00')).filter(d => d >= today).sort((a, b) => a - b);
+        const d = dates[0] || null;
+        const days = d ? Math.round((d - today) / 864e5) : null;
+        const moved = d && /verlegt/i.test(at[d.toISOString().slice(0, 10)] || '');
+        return {name, col, icon, d, days, moved, next: dates[1] || null};
+      }).sort((a, b) => (a.days ?? 999) - (b.days ?? 999));
+      const when = (x) => x.days === null ? 'kein Termin' : x.days === 0 ? 'Heute' : x.days === 1 ? 'Morgen' : 'in ' + x.days + ' Tagen';
+      const date = (d) => d ? d.toLocaleDateString('de-DE', {weekday: 'short', day: '2-digit', month: '2-digit'}) : '–';
+      const first = list[0];
+      const urgent = first && first.days !== null && first.days <= 1;
+      const hero = !first || first.days === null ? '' : `
+        <div style="display:flex;align-items:center;gap:14px;padding:14px;border-radius:16px;
+             background:linear-gradient(135deg, ${first.col}33, ${first.col}0d);${urgent ? 'box-shadow:0 0 0 2px ' + first.col + ';animation:muellpulse 2s ease-in-out infinite' : ''}">
+          <div style="width:52px;height:52px;flex:none;border-radius:16px;display:flex;align-items:center;justify-content:center;background:${first.col}">
+            <ha-icon icon="${first.icon}" style="--mdc-icon-size:30px;color:#fff"></ha-icon></div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:12px;color:var(--secondary-text-color);text-transform:uppercase;letter-spacing:.06em">Als Nächstes</div>
+            <div style="font-size:20px;font-weight:700">${first.name}</div>
+            <div style="font-size:13px;color:var(--secondary-text-color)">${date(first.d)}${first.moved ? ' · verlegt' : ''}</div></div>
+          <div style="text-align:right">
+            <div style="font-size:${first.days <= 1 ? 22 : 34}px;font-weight:${first.days <= 1 ? 700 : 300};line-height:1;color:${urgent ? first.col : 'inherit'}">${first.days <= 1 ? when(first) : first.days}</div>
+            <div style="font-size:11px;color:var(--secondary-text-color)">${first.days <= 1 ? (first.days === 1 ? 'heute Abend rausstellen' : 'rausstellen!') : 'Tage'}</div></div>
+        </div>`;
+      const rest = list.slice(first && first.days !== null ? 1 : 0).map(x => {
+        const pct = x.days === null ? 0 : Math.max(6, 100 - x.days / 28 * 100);
+        return `<div style="display:flex;align-items:center;gap:10px;padding:8px 2px">
+            <div style="width:34px;height:34px;flex:none;border-radius:11px;display:flex;align-items:center;justify-content:center;background:${x.days === null ? 'rgba(127,127,127,.12)' : x.col + '26'}">
+              <ha-icon icon="${x.icon}" style="--mdc-icon-size:19px;color:${x.days === null ? 'var(--secondary-text-color)' : x.col}"></ha-icon></div>
+            <div style="flex:1;min-width:0">
+              <div style="display:flex;justify-content:space-between;font-size:13px">
+                <b>${x.name}</b><span style="color:var(--secondary-text-color)">${x.days === null ? '' : date(x.d) + (x.moved ? ' · verlegt' : '')}</span></div>
+              <div style="height:6px;border-radius:3px;background:rgba(127,127,127,.12);margin-top:5px;overflow:hidden">
+                <div style="height:100%;width:${pct}%;background:${x.col};border-radius:3px"></div></div></div>
+            <div style="width:78px;text-align:right;font-size:13px;font-weight:600;white-space:nowrap">${when(x)}</div>
+          </div>`; }).join('');
+      return `<style>@keyframes muellpulse { 0%,100% { box-shadow:0 0 0 2px ${first?.col || '#999'} } 50% { box-shadow:0 0 0 5px ${first?.col || '#999'}55 } }</style>
+        <div style="font-size:16px;font-weight:600;margin-bottom:12px;text-align:left">
+          <ha-icon icon="mdi:delete-variant" style="--mdc-icon-size:20px;color:var(--secondary-text-color);vertical-align:-4px;margin-right:6px"></ha-icon>Müllabholung</div>
+        ${hero}
+        <div style="margin-top:8px">${rest}</div>`;
+    ]]]

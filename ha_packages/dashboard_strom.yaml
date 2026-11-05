@@ -1,0 +1,431 @@
+# ============================================================
+# Dashboard-Ansicht „Strom“ (Dashboard dashboard-home, path strom)
+# Enthält auch Plan und Prognose (früher eigene Ansicht „Vorhersage Solar“).
+# Einspielen: per Websocket lovelace/config/save (diese Ansicht ersetzen)
+# Benötigt: button-card, apexcharts-card (HACS) und die Karten der Integration
+# (battery-forecast-card, savings-card).
+# ============================================================
+
+title: Strom
+path: strom
+icon: mdi:lightning-bolt
+type: sections
+max_columns: 3
+dense_section_placement: true
+sections:
+
+  # ══════════════════════════════════════════════════════════
+  # JETZT
+  # ══════════════════════════════════════════════════════════
+  - type: grid
+    cards:
+      - type: heading
+        heading: Strom jetzt
+        icon: mdi:transmission-tower
+        badges:
+          - type: entity
+            entity: sensor.electricity_price_holunderweg_3
+            show_icon: true
+            color: amber
+
+      # ---------- Energiefluss ----------
+      - type: custom:button-card
+        entity: sensor.power_holunderweg_3
+        grid_options: {columns: full}
+        show_name: false
+        show_icon: false
+        show_state: false
+        triggers_update:
+          - sensor.power_production_holunderweg_3
+          - sensor.solarproduktion
+          - sensor.ballkonkraftwerk_power
+          - sensor.smartshunt_hq2305uvtaz_battery
+          - sensor.smartshunt_hq2305uvtaz_current
+          - sensor.smartshunt_hq2305uvtaz_voltage
+          - sensor.tesla_wall_connector_gesamtleistung
+          - sensor.electricity_price_holunderweg_3
+        tap_action: {action: more-info}
+        styles:
+          card: [{padding: 0}, {border-radius: 18px}, {overflow: hidden}]
+          grid: [{grid-template-areas: '"c"'}, {grid-template-columns: 1fr}]
+          custom_fields:
+            c: [{white-space: normal}, {text-align: left}, {width: 100%}]
+        custom_fields:
+          c: |
+            [[[
+              const n = (id) => { const x = parseFloat(states[id]?.state); return isNaN(x) ? null : x; };
+              const f = (v, d) => v === null || v === undefined || isNaN(v) ? '–' : Number(v).toLocaleString('de-DE', {minimumFractionDigits: d, maximumFractionDigits: d});
+              const W = (v) => v === null ? '–' : Math.abs(v) >= 1000 ? f(v / 1000, 2) + ' kW' : f(v, 0) + ' W';
+              const imp = n('sensor.power_holunderweg_3') ?? 0, exp = n('sensor.power_production_holunderweg_3') ?? 0;
+              const grid = imp - exp;
+              const solar = n('sensor.solarproduktion') ?? 0;
+              const inv = n('sensor.ballkonkraftwerk_power') ?? 0;
+              const soc = n('sensor.smartshunt_hq2305uvtaz_battery');
+              const batt = (n('sensor.smartshunt_hq2305uvtaz_current') ?? 0) * (n('sensor.smartshunt_hq2305uvtaz_voltage') ?? 0);
+              const car = n('sensor.tesla_wall_connector_gesamtleistung') ?? 0;
+              const house = Math.max(0, grid + inv);
+              const price = n('sensor.electricity_price_holunderweg_3');
+              const node = (icon, c, lab, val, sub, active) => `
+                <div style="display:flex;flex-direction:column;align-items:center;gap:4px;min-width:0">
+                  <div style="width:58px;height:58px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+                       border:3px solid ${active ? c : 'var(--divider-color)'};background:${active ? c + '1f' : 'transparent'};
+                       ${active ? 'box-shadow:0 0 0 6px ' + c + '14' : ''}">
+                    <ha-icon icon="${icon}" style="--mdc-icon-size:26px;color:${active ? c : 'var(--secondary-text-color)'}"></ha-icon></div>
+                  <div style="font-size:15px;font-weight:700;white-space:nowrap">${val}</div>
+                  <div style="font-size:11px;color:var(--secondary-text-color);white-space:nowrap">${lab}${sub ? ' · ' + sub : ''}</div>
+                </div>`;
+              const flow = (on, c, dir) => `<div style="flex:1;height:3px;align-self:center;margin:0 4px 34px;border-radius:2px;
+                   background:${on ? `repeating-linear-gradient(${dir === 'l' ? 270 : 90}deg,${c} 0 8px,transparent 8px 14px)` : 'var(--divider-color)'};
+                   ${on ? 'background-size:28px 3px;animation:flow' + dir + ' 1s linear infinite' : ''}"></div>`;
+              const socCol = soc === null ? '#9ca3af' : soc < 20 ? '#ef4444' : soc < 50 ? '#f59e0b' : '#10b981';
+              const battIcon = soc === null ? 'mdi:battery-unknown' : 'mdi:battery-' + (batt > 15 ? 'charging-' : '') + Math.max(10, Math.min(100, Math.round(soc / 10) * 10)).toString().replace('100', 'high').replace(/^(\d+)$/, '$1');
+              const priceCol = price === null ? '#9ca3af' : price < 0.25 ? '#10b981' : price < 0.4 ? '#f59e0b' : '#ef4444';
+              return `
+              <style>
+                @keyframes flowr { from { background-position: 0 0 } to { background-position: 28px 0 } }
+                @keyframes flowl { from { background-position: 28px 0 } to { background-position: 0 0 } }
+              </style>
+              <div style="padding:18px 14px 14px">
+                <div style="display:flex;align-items:flex-start">
+                  ${node('mdi:solar-power-variant', '#f59e0b', 'Solar', W(solar), '', solar > 5)}
+                  ${flow(solar > 5, '#f59e0b', 'r')}
+                  ${node(battIcon.includes('high') || battIcon.match(/\d/) ? battIcon : 'mdi:battery', socCol, 'Akku', f(soc, 0) + ' %', batt > 15 ? '+' + W(batt) : batt < -15 ? W(batt) : 'ruht', Math.abs(batt) > 15 || soc !== null)}
+                  ${flow(inv > 5, '#10b981', 'r')}
+                  ${node('mdi:home-lightning-bolt', '#3b82f6', 'Haus', W(house), '', true)}
+                  ${flow(Math.abs(grid) > 5, grid >= 0 ? '#ef4444' : '#10b981', grid >= 0 ? 'l' : 'r')}
+                  ${node('mdi:transmission-tower', grid >= 0 ? '#ef4444' : '#10b981', grid >= 0 ? 'Netz' : 'Einspeisung', W(Math.abs(grid)), '', Math.abs(grid) > 5)}
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px">
+                  <div style="padding:8px 10px;border-radius:12px;background:rgba(127,127,127,.08)">
+                    <div style="font-size:11px;color:var(--secondary-text-color)">Wechselrichter</div>
+                    <div style="font-size:15px;font-weight:600">${W(inv)}</div></div>
+                  <div style="padding:8px 10px;border-radius:12px;background:rgba(127,127,127,.08)">
+                    <div style="font-size:11px;color:var(--secondary-text-color)">Strompreis</div>
+                    <div style="font-size:15px;font-weight:600;color:${priceCol}">${f(price * 100, 1)} ct</div></div>
+                  <div style="padding:8px 10px;border-radius:12px;background:${car > 50 ? 'rgba(139,92,246,.15)' : 'rgba(127,127,127,.08)'}">
+                    <div style="font-size:11px;color:var(--secondary-text-color)">Auto lädt</div>
+                    <div style="font-size:15px;font-weight:600;color:${car > 50 ? '#8b5cf6' : 'inherit'}">${car > 50 ? W(car) : 'nein'}</div></div>
+                </div>
+              </div>`;
+            ]]]
+
+      # ---------- Panels ----------
+      - type: custom:button-card
+        entity: sensor.solarproduktion
+        grid_options: {columns: full}
+        show_name: false
+        show_icon: false
+        show_state: false
+        triggers_update:
+          - sensor.victron_mppt_hl_panel_power
+          - sensor.victron_mppt_hr_panel_power
+          - sensor.victron_mppt_vl_panel_power
+          - sensor.victron_mppt_vr_panel_power
+        tap_action: {action: more-info}
+        styles:
+          card: [{padding: 16px}, {border-radius: 18px}]
+          grid: [{grid-template-areas: '"c"'}, {grid-template-columns: 1fr}]
+          custom_fields:
+            c: [{white-space: normal}, {text-align: left}, {width: 100%}]
+        custom_fields:
+          c: |
+            [[[
+              const P = [['vl', 'Vorne links'], ['vr', 'Vorne rechts'], ['hl', 'Hinten links'], ['hr', 'Hinten rechts']];
+              const max = 400;
+              const v = P.map(([k, lab]) => { const x = parseFloat(states['sensor.victron_mppt_' + k + '_panel_power']?.state); return [k, lab, isNaN(x) ? null : x]; });
+              const tot = v.reduce((s, x) => s + (x[2] || 0), 0);
+              const bars = v.map(([k, lab, w]) => `
+                <div style="display:flex;flex-direction:column;align-items:center;gap:4px;flex:1">
+                  <div style="font-size:12px;font-weight:600">${w === null ? '–' : Math.round(w) + ' W'}</div>
+                  <div style="position:relative;width:100%;max-width:56px;height:90px;border-radius:10px;background:rgba(127,127,127,.12);overflow:hidden">
+                    <div style="position:absolute;left:0;right:0;bottom:0;height:${Math.min(100, (w || 0) / max * 100)}%;background:linear-gradient(180deg,#fbbf24,#f59e0b)"></div></div>
+                  <div style="font-size:11px;font-weight:600">${k.toUpperCase()}</div>
+                  <div style="font-size:10px;color:var(--secondary-text-color);white-space:nowrap">${lab}</div></div>`).join('');
+              return `<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+                  <div style="font-size:16px;font-weight:600">Solarpanels</div>
+                  <div style="font-size:13px;color:var(--secondary-text-color)">gesamt <b style="color:var(--primary-text-color)">${Math.round(tot)} W</b></div></div>
+                <div style="display:flex;gap:10px">${bars}</div>
+                <div style="font-size:11px;color:var(--secondary-text-color);margin-top:8px">Balken voll = 400 W je Laderegler</div>`;
+            ]]]
+
+      - type: tile
+        entity: number.ballkonkraftwerk_limit_nonpersistent_absolute
+        name: Einspeise-Limit
+        icon: mdi:speedometer
+        color: green
+        grid_options: {columns: full}
+        features_position: inline
+        features:
+          - {type: numeric-input, style: buttons}
+      - type: tile
+        entity: switch.shellyplus1pm_e86beaeae17c_switch_0
+        name: Einspeisung
+        icon: mdi:transmission-tower-import
+        color: green
+        vertical: true
+        grid_options: {columns: 6, rows: 2}
+        tap_action: {action: toggle}
+        state_content: state
+      - type: tile
+        entity: switch.shellyplus1pm_e86beaeae1a0_switch_0
+        name: Solar-Ladung
+        icon: mdi:battery-charging
+        color: amber
+        vertical: true
+        grid_options: {columns: 6, rows: 2}
+        tap_action: {action: toggle}
+        state_content: state
+
+  # ══════════════════════════════════════════════════════════
+  # HEUTE / VERLAUF
+  # ══════════════════════════════════════════════════════════
+  - type: grid
+    cards:
+      - type: heading
+        heading: Heute und Monat
+        icon: mdi:calendar-today
+      - type: custom:button-card
+        entity: sensor.accumulated_consumption_holunderweg_3
+        grid_options: {columns: full}
+        show_name: false
+        show_icon: false
+        show_state: false
+        triggers_update:
+          - sensor.accumulated_cost_holunderweg_3
+          - sensor.accumulated_production_holunderweg_3
+          - sensor.ballkonkraftwerk_yieldday
+          - sensor.monthly_cost_holunderweg_3
+          - sensor.monthly_net_consumption_holunderweg_3
+        tap_action: {action: more-info}
+        styles:
+          card: [{padding: 16px}, {border-radius: 18px}]
+          grid: [{grid-template-areas: '"c"'}, {grid-template-columns: 1fr}]
+          custom_fields:
+            c: [{white-space: normal}, {text-align: left}, {width: 100%}]
+        custom_fields:
+          c: |
+            [[[
+              const n = (id) => { const x = parseFloat(states[id]?.state); return isNaN(x) ? null : x; };
+              const f = (v, d) => v === null || isNaN(v) ? '–' : Number(v).toLocaleString('de-DE', {minimumFractionDigits: d, maximumFractionDigits: d});
+              const kwh = n('sensor.accumulated_consumption_holunderweg_3'), eur = n('sensor.accumulated_cost_holunderweg_3');
+              const exp = n('sensor.accumulated_production_holunderweg_3');
+              const inv = n('sensor.ballkonkraftwerk_yieldday');
+              const mEur = n('sensor.monthly_cost_holunderweg_3'), mKwh = n('sensor.monthly_net_consumption_holunderweg_3');
+              const avg = kwh && eur ? eur / kwh : null;
+              const tile = (icon, c, lab, v, sub) => `<div style="padding:10px 12px;border-radius:14px;background:rgba(127,127,127,.08)">
+                  <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--secondary-text-color)">
+                    <ha-icon icon="${icon}" style="--mdc-icon-size:16px;color:${c}"></ha-icon>${lab}</div>
+                  <div style="font-size:18px;font-weight:600;margin-top:4px;white-space:nowrap">${v}</div>
+                  <div style="font-size:11px;color:var(--secondary-text-color)">${sub}</div></div>`;
+              return `
+                <div style="display:flex;justify-content:space-between;align-items:flex-end">
+                  <div>
+                    <div style="font-size:12px;color:var(--secondary-text-color);text-transform:uppercase;letter-spacing:.06em">Netzstrom heute</div>
+                    <div style="font-size:34px;font-weight:300;line-height:1.1">${f(eur, 2)} €</div>
+                    <div style="font-size:12px;color:var(--secondary-text-color)">${f(kwh, 1)} kWh · Ø ${f(avg * 100, 1)} ct/kWh</div>
+                  </div>
+                  <div style="text-align:right">
+                    <div style="font-size:12px;color:var(--secondary-text-color)">Monat bisher</div>
+                    <div style="font-size:22px;font-weight:600">${f(mEur, 2)} €</div>
+                    <div style="font-size:12px;color:var(--secondary-text-color)">${f(mKwh, 0)} kWh</div>
+                  </div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px">
+                  ${tile('mdi:home-battery', '#10b981', 'Aus dem Akku ins Haus', f(inv / 1000, 2) + ' kWh', 'Wechselrichter heute')}
+                  ${tile('mdi:transmission-tower-export', '#14b8a6', 'Eingespeist', f(exp, 2) + ' kWh', 'heute ins Netz')}
+                </div>`;
+            ]]]
+      - type: heading
+        heading: Solarertrag
+        heading_style: subtitle
+      - &stat
+        type: statistic
+        entity: sensor.solar_lifetime
+        name: Heute
+        icon: mdi:white-balance-sunny
+        stat_type: change
+        period: {calendar: {period: day}}
+        grid_options: {columns: 4, rows: 2}
+      - <<: *stat
+        name: Gestern
+        period: {calendar: {period: day, offset: -1}}
+      - <<: *stat
+        name: Woche
+        period: {calendar: {period: week}}
+      - <<: *stat
+        name: Letzte Woche
+        period: {calendar: {period: week, offset: -1}}
+      - <<: *stat
+        name: Monat
+        period: {calendar: {period: month}}
+      - <<: *stat
+        name: Letzter Monat
+        period: {calendar: {period: month, offset: -1}}
+
+      - type: heading
+        heading: Verlauf 24 h
+        icon: mdi:chart-line
+      - type: custom:apexcharts-card
+        grid_options: {columns: full}
+        graph_span: 24h
+        header: {show: true, title: Leistung, show_states: true, colorize_states: true}
+        apex_config:
+          chart: {height: 200, toolbar: {show: false}}
+          grid: {strokeDashArray: 4}
+          legend: {show: false}
+          yaxis: {decimalsInFloat: 0}
+        series:
+          - entity: sensor.power_holunderweg_3
+            name: Netz
+            color: '#ef4444'
+            type: area
+            opacity: 0.12
+            stroke_width: 2
+            float_precision: 0
+            group_by: {func: avg, duration: 5min}
+          - entity: sensor.solarproduktion
+            name: Solar
+            color: '#f59e0b'
+            type: area
+            opacity: 0.2
+            stroke_width: 2
+            float_precision: 0
+            group_by: {func: avg, duration: 5min}
+          - entity: sensor.ballkonkraftwerk_power
+            name: Wechselrichter
+            color: '#10b981'
+            stroke_width: 2
+            float_precision: 0
+            group_by: {func: avg, duration: 5min}
+      - type: custom:apexcharts-card
+        grid_options: {columns: full}
+        graph_span: 24h
+        header: {show: true, title: Akku, show_states: true, colorize_states: true}
+        apex_config:
+          chart: {height: 140, toolbar: {show: false}}
+          grid: {strokeDashArray: 4}
+          legend: {show: false}
+        yaxis:
+          - {min: 0, max: 100, decimals: 0}
+        series:
+          - entity: sensor.smartshunt_hq2305uvtaz_battery
+            name: Ladestand
+            color: '#10b981'
+            type: area
+            opacity: 0.2
+            stroke_width: 2
+            float_precision: 0
+            group_by: {func: last, duration: 10min}
+
+  # ══════════════════════════════════════════════════════════
+  # PLAN UND PROGNOSE (ex „Vorhersage Solar“)
+  # ══════════════════════════════════════════════════════════
+  - type: grid
+    cards:
+      - type: heading
+        heading: Plan und Prognose
+        icon: mdi:crystal-ball
+      - type: custom:button-card
+        entity: sensor.tagesplan_vorhersage
+        grid_options: {columns: full}
+        show_name: false
+        show_icon: false
+        show_state: false
+        triggers_update:
+          - sensor.smart_battery_optimizer_geplanter_morgen_ladestand
+          - sensor.smart_battery_optimizer_prognose_heute_laufend
+          - sensor.smart_battery_optimizer_prognose_bilanz_gestern
+        tap_action: {action: more-info}
+        styles:
+          card: [{padding: 16px}, {border-radius: 18px}]
+          grid: [{grid-template-areas: '"c"'}, {grid-template-columns: 1fr}]
+          custom_fields:
+            c: [{white-space: normal}, {text-align: left}, {width: 100%}]
+        custom_fields:
+          c: |
+            [[[
+              const a = entity.attributes;
+              const n = (id) => { const x = parseFloat(states[id]?.state); return isNaN(x) ? null : x; };
+              const f = (v, d) => v === null || v === undefined || isNaN(v) ? '–' : Number(v).toLocaleString('de-DE', {minimumFractionDigits: d, maximumFractionDigits: d});
+              const T = (s) => { if (!s) return '–'; const [d, t] = String(s).split(' '); const D = {Mon: 'Mo', Tue: 'Di', Wed: 'Mi', Thu: 'Do', Fri: 'Fr', Sat: 'Sa', Sun: 'So'}; return (D[d] || d) + ' ' + (t || ''); };
+              const morning = n('sensor.smart_battery_optimizer_geplanter_morgen_ladestand');
+              const today = n('sensor.smart_battery_optimizer_prognose_heute_laufend');
+              const bil = n('sensor.smart_battery_optimizer_prognose_bilanz_gestern');
+              const tile = (icon, c, lab, v, sub) => `<div style="padding:10px 12px;border-radius:14px;background:rgba(127,127,127,.08)">
+                  <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--secondary-text-color)">
+                    <ha-icon icon="${icon}" style="--mdc-icon-size:16px;color:${c}"></ha-icon>${lab}</div>
+                  <div style="font-size:17px;font-weight:600;margin-top:4px;white-space:nowrap">${v}</div>
+                  <div style="font-size:11px;color:var(--secondary-text-color)">${sub}</div></div>`;
+              return `
+                <div style="font-size:12px;color:var(--secondary-text-color);text-transform:uppercase;letter-spacing:.06em">Akku-Plan</div>
+                <div style="font-size:20px;font-weight:600;margin:2px 0 12px">${entity.state}</div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                  ${tile('mdi:white-balance-sunny', '#f59e0b', 'Solar heute', f(today, 1) + ' kWh', 'Rest: ' + f(a.solar_prognose_heute_rest_kwh, 1) + ' kWh')}
+                  ${tile('mdi:weather-partly-cloudy', '#f59e0b', 'Solar morgen', f(a.solar_prognose_morgen_kwh, 1) + ' kWh', bil === null ? '' : 'Prognose gestern ' + (bil > 0 ? '+' : '') + f(bil, 0) + ' %')}
+                  ${tile('mdi:arrow-down-bold-circle', '#10b981', 'Günstigster Strom', f(a.billigster_preis * 100, 1) + ' ct', T(a.billigster_zeitpunkt))}
+                  ${tile('mdi:arrow-up-bold-circle', '#ef4444', 'Teuerster Strom', f(a.teuerster_preis * 100, 1) + ' ct', T(a.teuerster_zeitpunkt))}
+                  ${tile('mdi:battery-clock', '#3b82f6', 'Akku morgen früh', f(morning, 0) + ' %', 'geplant')}
+                  ${tile('mdi:power-plug-battery', '#8b5cf6', 'Netzladen', a.netzladen || '–', f(a.netzladen_geplant_kwh, 1) + ' kWh geplant')}
+                </div>`;
+            ]]]
+      - type: custom:apexcharts-card
+        grid_options: {columns: full}
+        header: {show: true, title: 'Plan: Akku, Solar, Verbrauch, Preis', show_states: false}
+        graph_span: 24h
+        span: {start: minute}
+        now: {show: true, label: Jetzt, color: '#ef4444'}
+        apex_config:
+          chart: {height: 260, toolbar: {show: false}}
+          grid: {strokeDashArray: 4}
+          legend: {show: true, position: bottom}
+          plotOptions: {bar: {columnWidth: '70%', borderRadius: 3}}
+          stroke: {dashArray: [0, 0, 0, 4]}
+        yaxis:
+          - {id: pct, min: 0, max: 100, decimals: 0}
+          - {id: wh, min: 0, decimals: 0, opposite: true}
+          - {id: ct, show: false, min: 0, max: 100}
+        series:
+          - entity: sensor.tagesplan_vorhersage
+            name: Akku
+            unit: '%'
+            yaxis_id: pct
+            type: area
+            color: '#10b981'
+            opacity: 0.18
+            stroke_width: 2
+            data_generator: |
+              return (entity.attributes.hourly_plan || []).map(b => [b.ts, b.battery_pct_end]);
+          - entity: sensor.tagesplan_vorhersage
+            name: Solar
+            unit: Wh
+            yaxis_id: wh
+            type: column
+            color: '#f59e0b'
+            group_by: {func: sum, duration: 1h}
+            data_generator: |
+              return (entity.attributes.hourly_plan || []).map(b => [b.ts, b.solar_wh]);
+          - entity: sensor.tagesplan_vorhersage
+            name: Verbrauch
+            unit: Wh
+            yaxis_id: wh
+            type: column
+            color: '#3b82f6'
+            opacity: 0.6
+            group_by: {func: sum, duration: 1h}
+            data_generator: |
+              return (entity.attributes.hourly_plan || []).map(b => [b.ts, b.consumption_wh]);
+          - entity: sensor.tagesplan_vorhersage
+            name: Preis
+            unit: ct
+            yaxis_id: ct
+            type: line
+            curve: stepline
+            color: '#ef4444'
+            stroke_width: 2
+            opacity: 0.7
+            data_generator: |
+              return (entity.attributes.hourly_plan || []).map(b => [b.ts, Math.round(b.price * 1000) / 10]);
+      - type: custom:battery-forecast-card
+        grid_options: {columns: full}
+      - type: custom:savings-card
+        grid_options: {columns: full}
