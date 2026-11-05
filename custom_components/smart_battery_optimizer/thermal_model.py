@@ -45,6 +45,7 @@ MIN_DIFF_K = 3.0
 MIN_HEAT_KWH = 0.3
 MAX_GAP = timedelta(minutes=25)
 HZ_BIN = 5
+POWER_MIN_RUN_MIN = 5.0  # the power reading lags the ramp-up after a start; skip it
 
 
 def interpolate(curve: list[tuple[float, float]], x: float) -> float:
@@ -114,7 +115,8 @@ class ThermalModel:
         self.k = PRIOR_K
         self.k_n = 0
         self.eff: dict[str, list[float]] = {}  # class lower bound -> [value, n]
-        self.power_hz: dict[str, list[float]] = {}  # Hz bin -> [W, n]
+        # mode (heat / cool) -> Hz bin -> [W, n]; cooling draws differently at the same speed
+        self.power_hz: dict[str, dict[str, list[float]]] = {"heat": {}, "cool": {}}
         self._idle_start: Sample | None = None
         self._heat_start: Sample | None = None
         self._heat_kwh = 0.0
@@ -138,7 +140,10 @@ class ThermalModel:
         self.k = float(d.get("k", PRIOR_K))
         self.k_n = int(d.get("k_n", 0))
         self.eff = {k: list(v) for k, v in d.get("eff", {}).items()}
-        self.power_hz = {k: list(v) for k, v in d.get("power_hz", {}).items()}
+        raw = d.get("power_hz", {}) or {}
+        if raw and all(isinstance(v, list) for v in raw.values()):
+            raw = {"heat": raw}  # stores before 2026-11-05 held heating bins only
+        self.power_hz = {m: {k: list(v) for k, v in (raw.get(m) or {}).items()} for m in ("heat", "cool")}
 
     def reset(self) -> None:
         """Forget learned values, keep the raw samples."""
@@ -163,10 +168,11 @@ class ThermalModel:
     def device_offset(self, mode: str) -> float:
         return self.offset.get(mode, 0.0)
 
-    def power_at_hz(self, hz: float) -> float:
+    def power_at_hz(self, hz: float, mode: str = "heat") -> float:
         if hz <= 0:
             return 0.0
-        pts = sorted((float(b), v[0]) for b, v in self.power_hz.items())
+        bins = self.power_hz.get(mode) or self.power_hz["heat"]
+        pts = sorted((float(b), v[0]) for b, v in bins.items())
         if not pts:
             return hz * PRIOR_W_PER_HZ
         if len(pts) == 1:
@@ -182,9 +188,15 @@ class ThermalModel:
             "auskuehl_messungen": self.k_n,
             "effizienz": {c: round(v[0], 2) for c, v in sorted(self.eff.items(), key=lambda i: int(i[0]))},
             "effizienz_messungen": {c: int(v[1]) for c, v in self.eff.items()},
-            "leistung_je_hz": {b: round(v[0]) for b, v in sorted(self.power_hz.items(), key=lambda i: int(i[0]))},
+            "leistung_je_hz": self._bins("heat", 0),
+            "leistung_je_hz_messungen": self._bins("heat", 1),
+            "leistung_je_hz_kuehlen": self._bins("cool", 0),
+            "leistung_je_hz_kuehlen_messungen": self._bins("cool", 1),
             "datensaetze": len(self.samples),
         }
+
+    def _bins(self, mode: str, idx: int) -> dict:
+        return {b: int(round(v[idx])) for b, v in sorted(self.power_hz[mode].items(), key=lambda i: int(i[0]))}
 
     # --- learning ----------------------------------------------------------
     def add_sample(self, s: Sample) -> None:
@@ -215,12 +227,13 @@ class ThermalModel:
         self.offset_n[mode] = n + 1
 
     def _learn_power(self, s: Sample) -> None:
-        if s.freq_hz <= 0 or s.power_w <= 0:
+        if s.freq_hz <= 0 or s.power_w <= 0 or s.run_min < POWER_MIN_RUN_MIN or s.hvac not in self.power_hz:
             return
+        bins = self.power_hz[s.hvac]
         key = str(int(round(s.freq_hz / HZ_BIN) * HZ_BIN))
-        cur = self.power_hz.get(key)
+        cur = bins.get(key)
         if cur is None:
-            self.power_hz[key] = [float(s.power_w), 1]
+            bins[key] = [float(s.power_w), 1]
         else:
             cur[0] = _ema(cur[0], s.power_w, 0.2)
             cur[1] += 1

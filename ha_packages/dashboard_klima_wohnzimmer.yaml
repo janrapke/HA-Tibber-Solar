@@ -32,6 +32,14 @@ sections:
           entity: climate.152832118046533_climate
         badges:
           - type: entity
+            entity: sensor.klima_wohnzimmer_klima_leistung
+            show_icon: true
+            color: deep-orange
+            visibility:
+              - condition: state
+                entity: climate.152832118046533_climate
+                state_not: 'off'
+          - type: entity
             entity: sensor.electricity_price_holunderweg_3
             show_icon: true
             color: amber
@@ -50,6 +58,8 @@ sections:
           - sensor.temp_wohnzimmer_luftfeuchtigkeit
           - sensor.klima_wohnzimmer_klima_leistung
           - sensor.klima_wohnzimmer_kompressor
+          - sensor.klima_wohnzimmer_klimastrom_heute
+          - sensor.klima_wohnzimmer_klimastrom_kosten_heute
         tap_action:
           action: more-info
           entity: climate.152832118046533_climate
@@ -107,6 +117,22 @@ sections:
                   <ha-icon icon="${icon}" style="--mdc-icon-size:20px;color:${c}"></ha-icon>
                   <div style="line-height:1.15;min-width:0"><div style="font-weight:600;font-size:14px;white-space:nowrap">${val}</div>
                   <div style="font-size:11px;color:var(--secondary-text-color)">${lab}</div></div></div>`;
+              const kwh = n(states['sensor.klima_wohnzimmer_klimastrom_heute']?.state);
+              const eur = n(states['sensor.klima_wohnzimmer_klimastrom_kosten_heute']?.state);
+              const running = ['heat', 'cool', 'dry', 'fan_only', 'heat_cool', 'auto'].includes(hv);
+              const power = !running ? '' : `
+                <div style="margin-top:14px;padding:12px 14px;border-radius:14px;background:${col}1a;display:flex;align-items:center;gap:12px">
+                  <ha-icon icon="mdi:flash" style="--mdc-icon-size:28px;color:${col}"></ha-icon>
+                  <div style="flex:1;min-width:0">
+                    <div style="font-size:11px;color:var(--secondary-text-color);text-transform:uppercase;letter-spacing:.06em">Verbrauch jetzt</div>
+                    <div style="font-size:30px;font-weight:600;line-height:1.1;white-space:nowrap">${f(w, 0)} <span style="font-size:16px;font-weight:500">W</span></div>
+                    <div style="height:6px;border-radius:3px;background:rgba(127,127,127,.18);margin-top:6px;overflow:hidden">
+                      <div style="height:100%;width:${Math.min(100, w / 1800 * 100)}%;background:${col};border-radius:3px"></div></div>
+                  </div>
+                  <div style="text-align:right;font-size:12px;line-height:1.5;color:var(--secondary-text-color);white-space:nowrap">
+                    ${hz > 0 ? `<b style="color:var(--primary-text-color)">${f(hz, 0)} Hz</b> Kompressor` : 'Kompressor steht'}<br>
+                    heute ${f(kwh, 2)} kWh · ${f(eur, 2)} €</div>
+                </div>`;
               const dev = ac && hv !== 'off' && ac.attributes.temperature != null
                 ? `Gerät: Soll ${f(ac.attributes.temperature, 1)} °C · Lüfter ${ac.attributes.fan_mode || '–'}` : '';
               const warn = a.steuerung_aktiv === false
@@ -119,13 +145,14 @@ sections:
                     <ha-icon icon="${ico}" style="--mdc-icon-size:26px;color:${col}"></ha-icon></div>
                   <div style="flex:1;min-width:0">
                     <div style="font-size:12px;color:var(--secondary-text-color);text-transform:uppercase;letter-spacing:.06em">${modus}</div>
-                    <div style="font-size:18px;font-weight:700">${pill}${hz > 0 ? ` <span style="font-weight:500;font-size:14px;color:var(--secondary-text-color)">· ${f(w,0)} W · ${f(hz,0)} Hz</span>` : ''}</div>
+                    <div style="font-size:18px;font-weight:700">${pill}</div>
                   </div>
                   <div style="text-align:right">
                     <div style="font-size:40px;font-weight:300;line-height:1">${f(room, 1)}<span style="font-size:18px;vertical-align:top">°C</span></div>
                     <div style="font-size:11px;color:var(--secondary-text-color)">${a.raumsensor_quelle && a.raumsensor_quelle !== 'raumsensor' ? a.raumsensor_quelle : 'Raum'}</div>
                   </div>
                 </div>
+                ${power}
                 ${bar}
                 <div style="margin-top:12px;font-size:13px;line-height:1.35;color:var(--primary-text-color)">${reason}</div>
                 ${dev ? `<div style="margin-top:4px;font-size:12px;color:var(--secondary-text-color)">${dev}</div>` : ''}
@@ -613,7 +640,7 @@ sections:
         color: brown
 
       - type: heading
-        heading: Gelernt
+        heading: Was die Steuerung gelernt hat
         icon: mdi:school-outline
       - type: custom:button-card
         entity: sensor.klima_wohnzimmer_gelernte_werte
@@ -621,7 +648,12 @@ sections:
         show_name: false
         show_icon: false
         show_state: false
-        triggers_update: [sensor.klima_wohnzimmer_auskuhlzeit_nacht, sensor.klima_wohnzimmer_warmeverlust_tag]
+        triggers_update:
+          - sensor.klima_wohnzimmer_auskuhlzeit_nacht
+          - sensor.klima_wohnzimmer_warmeverlust_tag
+          - sensor.klima_wohnzimmer_entscheidung
+          - sensor.wohnzimmer_temperatur
+          - sensor.openweathermap_temperature
         tap_action: {action: more-info}
         styles:
           card: [{padding: 16px}, {border-radius: 18px}]
@@ -632,29 +664,82 @@ sections:
           c: |
             [[[
               const a = entity.attributes;
+              const d = states['sensor.klima_wohnzimmer_entscheidung']?.attributes || {};
               const n = (v) => { const x = parseFloat(v); return isNaN(x) ? null : x; };
-              const f = (v, d) => { const x = n(v); return x === null ? '–' : x.toLocaleString('de-DE', {minimumFractionDigits: d, maximumFractionDigits: d}); };
-              const cool = n(states['sensor.klima_wohnzimmer_auskuhlzeit_nacht']?.state);
+              const f = (v, k) => { const x = n(v); return x === null ? '–' : x.toLocaleString('de-DE', {minimumFractionDigits: k, maximumFractionDigits: k}); };
+              const room = n(states['sensor.wohnzimmer_temperatur']?.state) ?? n(d.raumtemperatur);
+              const out = n(states['sensor.openweathermap_temperature']?.state) ?? n(d.aussentemperatur);
+              const goal = n(d.zieltemperatur_raum) ?? 21;
+              const diff = room !== null && out !== null ? room - out : null;
+              const nm = a.versatz_messungen || {};
+              const k = n(a.auskuehlrate_k_pro_h_pro_k);
+              const tau = n(states['sensor.klima_wohnzimmer_auskuhlzeit_nacht']?.state) ?? (k ? 1 / k : null);
               const loss = n(states['sensor.klima_wohnzimmer_warmeverlust_tag']?.state);
-              const kv = (lab, v, sub) => `<div style="padding:10px 12px;border-radius:14px;background:rgba(127,127,127,.08)">
-                  <div style="font-size:11px;color:var(--secondary-text-color)">${lab}</div>
-                  <div style="font-size:16px;font-weight:600;margin-top:2px">${v}</div>
-                  <div style="font-size:11px;color:var(--secondary-text-color)">${sub}</div></div>`;
-              const hz = Object.entries(a.leistung_je_hz || {}).map(([k, v]) => [Number(k), Number(v)]).sort((x, y) => x[0] - y[0]);
-              const hmax = Math.max(...hz.map(x => x[1]), 1);
-              const bars = hz.map(([k, v]) => `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
-                  <div style="font-size:10px;color:var(--secondary-text-color)">${v}</div>
-                  <div style="width:100%;max-width:28px;height:${Math.round(v / hmax * 64)}px;border-radius:6px 6px 2px 2px;
-                       background:linear-gradient(180deg,#f97316,#f59e0b)"></div>
-                  <div style="font-size:10px;color:var(--secondary-text-color)">${k} Hz</div></div>`).join('');
+              const cop = n(d.effizienz);
+              const item = (icon, c, title, text, foot) => `
+                <div style="display:flex;gap:12px;padding:12px;border-radius:14px;background:rgba(127,127,127,.07);margin-bottom:8px">
+                  <div style="width:36px;height:36px;flex:none;border-radius:12px;display:flex;align-items:center;justify-content:center;background:${c}22">
+                    <ha-icon icon="${icon}" style="--mdc-icon-size:20px;color:${c}"></ha-icon></div>
+                  <div style="min-width:0">
+                    <div style="font-weight:600;font-size:14px">${title}</div>
+                    <div style="font-size:13px;line-height:1.4;margin-top:2px">${text}</div>
+                    ${foot ? `<div style="font-size:11px;color:var(--secondary-text-color);margin-top:4px">${foot}</div>` : ''}
+                  </div></div>`;
+              // 1) device sensor offset
+              const offH = n(a.versatz_heizen_k), offC = n(a.versatz_kuehlen_k);
+              let t1 = (nm.heat || 0) > 0
+                ? `Der Fühler sitzt oben im Gerät in der warmen Luft und zeigt beim <b>Heizen ${f(offH, 0)} °C zu viel</b>. Damit es im Raum ${f(goal, 0)} °C werden, stellt die App am Gerät etwa <b>${f(goal + offH, 0)} °C</b> ein.`
+                : 'Beim <b>Heizen</b> noch nicht gemessen.';
+              t1 += (nm.cool || 0) > 0
+                ? ` Beim <b>Kühlen</b> liegt er ${f(Math.abs(offC), 1)} °C ${offC >= 0 ? 'zu hoch' : 'zu tief'}.`
+                : ' Beim <b>Kühlen</b> noch nicht gemessen – das kommt im Sommer.';
+              // 2) cooling down
+              let t2 = 'Noch keine ruhige Nacht gemessen.';
+              if (tau) {
+                const now = diff !== null && diff > 1;
+                const dd = now ? diff : 15;
+                const perH = dd / tau, night = dd * (1 - Math.exp(-8 / tau));
+                t2 = `Ohne Heizung verliert das Wohnzimmer ${now ? `jetzt (${f(dd, 0)} °C wärmer als draußen)` : 'bei 15 °C Unterschied nach draußen'} etwa <b>${f(perH, 1)} °C pro Stunde</b>, über eine Nacht von 8 Stunden rund <b>${f(night, 1)} °C</b>.`;
+              }
+              // 3) heat loss
+              let t3 = 'Noch nicht gemessen. Dafür braucht es einen ganzen Tag, an dem nur die Klima heizt und die Heizkörper aus bleiben.';
+              if (loss !== null) {
+                const need = diff !== null && diff > 0 ? loss * diff : null;
+                t3 = `Pro Grad Unterschied nach draußen gehen <b>${f(loss, 0)} W</b> Wärme verloren.` + (need !== null
+                  ? ` Gerade (${f(diff, 0)} °C Unterschied) braucht der Raum also etwa <b>${f(need, 0)} W Wärme</b>${cop ? `, das sind mit der Klima rund ${f(need / cop, 0)} W Strom` : ''}.` : '');
+              }
+              // 4) power per compressor speed, heating and cooling apart
+              const chart = (vals, cnt, c1, c2, empty) => {
+                const pts = Object.entries(vals || {}).map(([h, v]) => [Number(h), Number(v), cnt && cnt[h] != null ? Number(cnt[h]) : null]).sort((x, y) => x[0] - y[0]);
+                if (!pts.length) return `<div style="font-size:12px;color:var(--secondary-text-color);padding:6px 0 10px">${empty}</div>`;
+                const mx = Math.max(...pts.map(x => x[1]), 1);
+                return `<div style="display:flex;align-items:flex-end;gap:6px;height:108px;margin-bottom:6px">` + pts.map(([h, v, m]) => {
+                  const weak = m !== null && m < 3;
+                  const fill = weak ? `repeating-linear-gradient(45deg,${c1} 0 4px,transparent 4px 8px);border:1px dashed ${c1};box-sizing:border-box`
+                                    : `linear-gradient(180deg,${c1},${c2})`;
+                  return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;opacity:${weak ? .45 : 1}">
+                    <div style="font-size:10px;color:var(--secondary-text-color);white-space:nowrap">${v} W</div>
+                    <div style="width:100%;max-width:30px;height:${Math.round(v / mx * 60)}px;border-radius:6px 6px 2px 2px;background:${fill}"></div>
+                    <div style="font-size:10px;font-weight:600">${h} Hz</div>
+                    <div style="font-size:9px;color:var(--secondary-text-color)">${m === null ? '' : m + '×'}</div></div>`; }).join('') + `</div>`;
+              };
+              const t4 = `
+                <div style="font-size:13px;line-height:1.4;margin:6px 0 10px">Hz sagt, wie schnell der Kompressor dreht. Schneller heißt mehr Leistung und mehr Strom.
+                  Blasse, gestreifte Balken haben erst 1–2 Messungen und sind noch unsicher.</div>
+                <div style="font-size:12px;font-weight:600;color:#f97316;margin-bottom:4px"><ha-icon icon="mdi:fire" style="--mdc-icon-size:14px"></ha-icon> Heizen</div>
+                ${chart(a.leistung_je_hz, a.leistung_je_hz_messungen, '#f97316', '#f59e0b', 'Noch keine Messungen.')}
+                <div style="font-size:12px;font-weight:600;color:#0ea5e9;margin:8px 0 4px"><ha-icon icon="mdi:snowflake" style="--mdc-icon-size:14px"></ha-icon> Kühlen</div>
+                ${chart(a.leistung_je_hz_kuehlen, a.leistung_je_hz_kuehlen_messungen, '#0ea5e9', '#38bdf8', 'Noch keine Messungen – kommt, sobald die Klima im Sommer kühlt.')}`;
               return `
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-                  ${kv('Sensorversatz Heizen', f(a.versatz_heizen_k, 1) + ' K', (a.versatz_messungen?.heat ?? 0) + ' Messungen')}
-                  ${kv('Auskühlzeit Nacht', cool === null ? 'noch offen' : f(cool, 0) + ' h', 'Zeitkonstante des Raums')}
-                  ${kv('Auskühlrate', f(a.auskuehlrate_k_pro_h_pro_k, 4), 'K/h je K Differenz · ' + (a.auskuehl_messungen ?? 0) + ' Phasen')}
-                  ${kv('Wärmeverlust', loss === null ? 'noch offen' : f(loss, 0) + ' W/K', 'nur reine Klima-Tage')}
+                ${item('mdi:thermometer-alert', '#ef4444', 'Gerät misst zu warm', t1, `${nm.heat || 0} Messungen beim Heizen · ${nm.cool || 0} beim Kühlen`)}
+                ${item('mdi:home-thermometer-outline', '#3b82f6', 'So schnell kühlt der Raum aus', t2, tau ? `aus ${a.auskuehl_messungen ?? '?'} ruhigen Phasen gelernt` : '')}
+                ${item('mdi:home-export-outline', '#8b5cf6', 'Wärmeverlust des Raums', t3, '')}
+                <div style="padding:12px;border-radius:14px;background:rgba(127,127,127,.07)">
+                  <div style="display:flex;gap:12px;align-items:center">
+                    <div style="width:36px;height:36px;flex:none;border-radius:12px;display:flex;align-items:center;justify-content:center;background:#f59e0b22">
+                      <ha-icon icon="mdi:flash" style="--mdc-icon-size:20px;color:#f59e0b"></ha-icon></div>
+                    <div style="font-weight:600;font-size:14px">Stromverbrauch je Drehzahl</div></div>
+                  ${t4}
                 </div>
-                ${hz.length ? `<div style="font-size:12px;color:var(--secondary-text-color);margin:14px 0 6px">Leistung je Kompressor-Drehzahl (W)</div>
-                  <div style="display:flex;align-items:flex-end;gap:6px;height:100px">${bars}</div>` : ''}
-                <div style="font-size:11px;color:var(--secondary-text-color);margin-top:10px">${f(a.datensaetze, 0)} Datensätze</div>`;
+                <div style="font-size:11px;color:var(--secondary-text-color);margin-top:8px">${f(a.datensaetze, 0)} Messpunkte (alle 15 min)</div>`;
             ]]]

@@ -91,12 +91,42 @@ def test_power_per_hz():
     m = tm.ThermalModel()
     assert m.power_at_hz(30) == 30 * tm.PRIOR_W_PER_HZ
     for i in range(10):
-        m.add_sample(sample(2 * i, 21.0, hvac="heat", power=810, hz=30))
-        m.add_sample(sample(2 * i + 1, 21.0, hvac="heat", power=1600, hz=56))
+        m.add_sample(sample(2 * i, 21.0, hvac="heat", power=810, hz=30, run=30))
+        m.add_sample(sample(2 * i + 1, 21.0, hvac="heat", power=1600, hz=56, run=30))
     assert abs(m.power_at_hz(30) - 810) < 1
     assert abs(m.power_at_hz(55) - 1600) < 1
     assert 810 < m.power_at_hz(40) < 1600
     assert m.power_at_hz(0) == 0.0
+    assert m.summary()["leistung_je_hz_messungen"] == {"30": 10, "55": 10}
+
+
+def test_power_per_hz_skips_ramp_up():
+    m = tm.ThermalModel()
+    # 1 min after start the reading lags the compressor (seen live: 69 Hz with 1190 W)
+    m.add_sample(sample(0, 21.0, hvac="heat", power=1190, hz=69, run=1))
+    assert m.power_hz == {"heat": {}, "cool": {}}
+    m.add_sample(sample(1, 21.0, hvac="heat", power=1500, hz=56, run=13))
+    assert m.summary()["leistung_je_hz"] == {"55": 1500}
+
+
+def test_power_per_hz_split_heat_and_cool():
+    m = tm.ThermalModel()
+    m.add_sample(sample(0, 25.0, hvac="cool", power=700, hz=40, run=30))
+    m.add_sample(sample(1, 21.0, hvac="heat", power=1100, hz=40, run=30))
+    m.add_sample(sample(2, 21.0, hvac="fan_only", power=50, hz=40, run=30))
+    assert m.summary()["leistung_je_hz"] == {"40": 1100}
+    assert m.summary()["leistung_je_hz_kuehlen"] == {"40": 700}
+    assert abs(m.power_at_hz(40, "cool") - 700) < 1
+    assert abs(m.power_at_hz(40) - 1100) < 1
+
+
+def test_old_flat_power_store_counts_as_heating():
+    m = tm.ThermalModel()
+    m.load_dict({"v": 1, "power_hz": {"40": [1094.0, 31]}})
+    assert m.power_hz == {"heat": {"40": [1094.0, 31]}, "cool": {}}
+    m2 = tm.ThermalModel()
+    m2.load_dict(m.to_dict())
+    assert m2.power_hz == m.power_hz
 
 
 def test_roundtrip_and_raw_window():
