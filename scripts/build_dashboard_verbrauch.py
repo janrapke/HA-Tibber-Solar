@@ -42,10 +42,14 @@ DEVICES = [
     ('Pool außen (?)', 'pool', 'sensor.antela_smart_plug_leistung', 'sensor.antela_smart_plug_energie_gesamt'),
     ('Hydo Paprika (?)', 'klaeren', 'sensor.tasmota_energy_power_2', 'sensor.tasmota_energy_total_2'),
     ('Monitor Kamera Keller (?)', 'klaeren', 'sensor.wlan_steckdose_2_leistung', 'sensor.monitor_kamera_keller_energie_gesamt'),
-    ('Steckdose 4 (?)', 'klaeren', 'sensor.antela_smart_steckdose_4_leistung', 'sensor.antela_smart_steckdose_4_energie_gesamt'),
 ]
 
+# House load of the optimizer: grid - export + inverters (Hoymiles, Ecoflow plug), but WITHOUT wallbox
+# and AC (left out on purpose so they do not distort the learned load). Add them back for the real total.
 TOTAL = 'sensor.calculated_house_consumption'
+ADD_BACK = ['sensor.tesla_wall_connector_gesamtleistung', 'sensor.klima_wohnzimmer_klima_leistung']
+# Ecoflow feeds in through this plug: a source, not a consumer (energy dashboard: solar)
+ECOFLOW_ENERGY = 'sensor.antela_smart_steckdose_4_energie_gesamt'
 BASE = 'sensor.grundlast'
 PHASES = [('L1', 'sensor.tibber_locl_0100240700ff'), ('L2', 'sensor.tibber_locl_0100380700ff'), ('L3', 'sensor.tibber_locl_01004c0700ff')]
 
@@ -64,7 +68,7 @@ BTN = {'show_name': False, 'show_icon': False, 'show_state': False, 'triggers_up
 
 now_card = dict(BTN, type='custom:button-card', entity=TOTAL, grid_options={'columns': 'full'},
                 tap_action={'action': 'more-info'}, custom_fields={'c': '[[[' + HELP + r"""
-  const total = Math.max(0, n('""" + TOTAL + r"""') ?? 0);
+  const total = Math.max(0, (n('""" + TOTAL + r"""') ?? 0) + """ + json.dumps(ADD_BACK) + r""".reduce((a, id) => a + Math.max(0, n(id) ?? 0), 0));
   const base = n('""" + BASE + r"""');
   const devs = DEV.map(d => ({...d, w: n(d.p), off: ['unavailable', 'unknown', undefined].includes(states[d.p]?.state)}));
   const byCat = {};
@@ -133,7 +137,7 @@ stack = {'type': 'custom:apexcharts-card', 'grid_options': {'columns': 'full'}, 
                      'group_by': {'func': 'avg', 'duration': '10min', 'fill': 'zero'}}
                     for n, c, p, _ in DEVICES if c not in ('pool', 'klaeren')]}
 week = {'type': 'custom:apexcharts-card', 'grid_options': {'columns': 'full'}, 'graph_span': '7d',
-        'header': {'show': True, 'title': 'Hausverbrauch 7 Tage und Grundlast', 'show_states': True, 'colorize_states': True},
+        'header': {'show': True, 'title': 'Haus ohne Auto und Klima, 7 Tage', 'show_states': True, 'colorize_states': True},
         'apex_config': {'chart': {'height': 200, 'toolbar': {'show': False}}, 'grid': {'strokeDashArray': 4}, 'legend': {'show': False}},
         'series': [{'entity': TOTAL, 'name': 'Haus', 'color': '#3b82f6', 'type': 'area', 'opacity': 0.15, 'stroke_width': 1,
                     'float_precision': 0, 'group_by': {'func': 'avg', 'duration': '30min'}},

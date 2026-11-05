@@ -74,9 +74,5 @@
  {
   "stat_consumption": "sensor.monitor_kamera_keller_energie_gesamt",
   "name": "Monitor Kamera Keller (?)"
- },
- {
-  "stat_consumption": "sensor.antela_smart_steckdose_4_energie_gesamt",
-  "name": "Steckdose 4 (?)"
  }
 ]

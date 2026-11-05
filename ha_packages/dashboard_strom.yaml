@@ -45,6 +45,7 @@ sections:
           - sensor.tesla_wall_connector_gesamtleistung
           - sensor.electricity_price_holunderweg_3
           - sensor.ef_hw7576_inverter_power
+          - sensor.antela_smart_steckdose_4_leistung
           - sensor.ef_hw7576_pv_1_power
           - sensor.ef_hw7576_pv_2_power
         tap_action: {action: more-info}
@@ -63,7 +64,7 @@ sections:
               const grid = imp - exp;
               // Ecoflow is only reachable while the sun shines: unavailable counts as 0
               const efPv = (n('sensor.ef_hw7576_pv_1_power') ?? 0) + (n('sensor.ef_hw7576_pv_2_power') ?? 0);
-              const efInv = n('sensor.ef_hw7576_inverter_power') ?? 0;
+              const efInv = n('sensor.antela_smart_steckdose_4_leistung') ?? n('sensor.ef_hw7576_inverter_power') ?? 0;
               const solar = (n('sensor.solarproduktion') ?? 0) + efPv;
               const inv = (n('sensor.ballkonkraftwerk_power') ?? 0) + efInv;
               const soc = n('sensor.smartshunt_hq2305uvtaz_battery');
@@ -167,6 +168,7 @@ sections:
           - sensor.ef_hw7576_pv_2_power
           - sensor.ef_hw7576_battery_level
           - sensor.ef_hw7576_battery_power
+          - sensor.antela_smart_steckdose_4_leistung
         tap_action: {action: more-info}
         styles:
           card: [{padding: 16px}, {border-radius: 18px}]
@@ -179,7 +181,8 @@ sections:
               const n = (id) => { const x = parseFloat(states[id]?.state); return isNaN(x) ? 0 : x; };
               const up = !['unavailable', 'unknown', undefined].includes(entity?.state);
               const pv1 = n('sensor.ef_hw7576_pv_1_power'), pv2 = n('sensor.ef_hw7576_pv_2_power');
-              const out = n('sensor.ef_hw7576_inverter_power'), soc = n('sensor.ef_hw7576_battery_level');
+              const plug = parseFloat(states['sensor.antela_smart_steckdose_4_leistung']?.state);
+              const out = isNaN(plug) ? n('sensor.ef_hw7576_inverter_power') : plug, soc = n('sensor.ef_hw7576_battery_level');
               const bp = n('sensor.ef_hw7576_battery_power');
               const col = up ? '#f59e0b' : '#9ca3af';
               const val = (lab, v) => `<div style="padding:8px 10px;border-radius:12px;background:rgba(127,127,127,.08)">
@@ -191,10 +194,10 @@ sections:
                     <ha-icon icon="${up ? 'mdi:solar-panel' : 'mdi:weather-night'}" style="--mdc-icon-size:22px;color:${col}"></ha-icon></div>
                   <div style="flex:1">
                     <div style="font-size:16px;font-weight:600">Ecoflow</div>
-                    <div style="font-size:12px;color:var(--secondary-text-color)">${up ? 'aktiv' : 'schläft – meldet sich nur bei Sonne'}</div></div>
+                    <div style="font-size:12px;color:var(--secondary-text-color)">${up ? 'aktiv' : out > 0 ? 'speist ein · Ecoflow-Daten gerade nicht erreichbar' : 'schläft – meldet sich nur bei Sonne'}</div></div>
                   <div style="text-align:right">
                     <div style="font-size:24px;font-weight:500;line-height:1">${Math.round(out)} <span style="font-size:13px">W</span></div>
-                    <div style="font-size:11px;color:var(--secondary-text-color)">ins Haus</div></div>
+                    <div style="font-size:11px;color:var(--secondary-text-color)">ins Haus (Steckdose)</div></div>
                 </div>
                 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:12px">
                   ${val('PV 1', Math.round(pv1) + ' W')}${val('PV 2', Math.round(pv2) + ' W')}
