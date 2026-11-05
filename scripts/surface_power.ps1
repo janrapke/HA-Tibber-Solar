@@ -47,7 +47,8 @@ try {
   # 4) plus what goes into the battery, then the charger loss
   $dc = $own + [math]::Max(0, $bat.ChargeRate / 1000.0)
   $eff = if ($dc -lt 10) { 0.80 } elseif ($dc -lt 25) { 0.85 } else { 0.88 }
-  [math]::Round($dc / $eff, 1)
+  # dot as decimal separator: Home Assistant does not read "37,7" as a number
+  ([math]::Round($dc / $eff, 1)).ToString([Globalization.CultureInfo]::InvariantCulture)
 } catch {
   '0'
 }
