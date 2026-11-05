@@ -12,7 +12,7 @@
   "name": "Ölheizung Brenner (≈300 W)"
  },
  {
-  "stat_consumption": "sensor.tk_kuehltruhe_energie_gesamt",
+  "stat_consumption": "sensor.tk_kuehltruhe_strom",
   "name": "TK-Kühltruhe"
  },
  {
@@ -34,6 +34,10 @@
  {
   "stat_consumption": "sensor.licht_wohnzimmer_vitrine_strom",
   "name": "Licht Wohnzimmer Vitrine (≈8 W)"
+ },
+ {
+  "stat_consumption": "sensor.aussen_ambiente_licht_strom",
+  "name": "Außen Ambiente Licht (≈32 W)"
  },
  {
   "stat_consumption": "sensor.licht_wohnzimmer_energie_gesamt",

@@ -34,13 +34,15 @@ DEVICES = [
     # sensor.olbrenner_strom (Riemann integral) were created in the UI
     ('Ölheizung Brenner (≈300 W)', 'heizung', 'sensor.olbrenner_leistung', 'sensor.olbrenner_strom'),
     # former plug "Monitor Kamera Keller", since 06.11.2026 on the chest freezer (history cleared, must stay on)
-    ('TK-Kühltruhe', 'kuehl', 'sensor.tk_kuehltruhe_leistung', 'sensor.tk_kuehltruhe_energie_gesamt'),
+    ('TK-Kühltruhe', 'kuehl', 'sensor.tk_kuehltruhe_leistung', 'sensor.tk_kuehltruhe_strom'),
     ('Spülmaschine', 'spuel', 'sensor.tasmota_energy_power', 'sensor.tasmota_energy_total'),
     ('Waschmaschine', 'wasch', 'sensor.waschmaschiene_energy_power', 'sensor.miner_energy_total'),
     ('Licht Außen Garage', 'licht', 'sensor.shellydimmer2_08f9e04436dc_power', 'sensor.shellydimmer2_08f9e04436dc_energy'),
     ('Licht Außen Einfahrt', 'licht', 'sensor.shellydimmer2_4cebd6edf59d_power', 'sensor.shellydimmer2_4cebd6edf59d_energy'),
     # Shelly Plus 1 without metering; 8 W measured 06.11.2026 (3 on/off cycles at the house load, 4-12 W)
     ('Licht Wohnzimmer Vitrine (≈8 W)', 'licht', 'sensor.licht_wohnzimmer_vitrine_leistung', 'sensor.licht_wohnzimmer_vitrine_strom'),
+    # Shelly Plus 1 without metering, light columns in the bed; 32 W measured 06.11.2026 (3 cycles, 26-36 W)
+    ('Außen Ambiente Licht (≈32 W)', 'licht', 'sensor.aussen_ambiente_licht_leistung', 'sensor.aussen_ambiente_licht_strom'),
     ('Licht Wohnzimmer', 'licht', 'sensor.licht_wohnzimmer_leistung', 'sensor.licht_wohnzimmer_energie_gesamt'),
     ('Licht Bücherregal', 'licht', 'sensor.antela_smart_steckdose_leistung', 'sensor.antela_smart_steckdose_energie_gesamt'),
     # plug formerly on the bunk bed light, since 06.11.2026: TV with Teufel box and everything around it
