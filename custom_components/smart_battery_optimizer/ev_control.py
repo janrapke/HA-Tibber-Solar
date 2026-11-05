@@ -10,6 +10,12 @@ within seconds, the BLE link only after up to two minutes. So on "car connected"
 Connector the BLE link is pulled up at once (refresh button) and the control runs immediately,
 without waiting for the minute cycle. While BLE is away the plan uses the Tibber charge level,
 so it is ready before the car is plugged in.
+
+Safety net against unplanned charging (the car has a schedule 00:00-01:00, but starts on its own
+e.g. when plugged in within six hours after it): the Wall Connector is the truth for "power flows",
+independent of BLE. While it charges outside plan / instant / surplus the watchdog checks every
+15 s: stop over BLE (repeated every minute), no BLE link -> refresh, after 2 min also wake,
+after 3 min a phone notification that the stop does not work.
 """
 from __future__ import annotations
 
@@ -19,7 +25,7 @@ from datetime import datetime, time, timedelta
 import logging
 
 from homeassistant.core import callback
-from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
 from homeassistant.helpers.storage import Store
 import homeassistant.util.dt as dt_util
 
@@ -46,7 +52,14 @@ E_SOC_TIBBER = "sensor.reskey_ladezustand"           # Tibber (Tesla cloud), als
 E_PLUG_TIBBER = "binary_sensor.reskey_stecker"
 E_WC_CAR = "binary_sensor.tesla_wall_connector_fahrzeug_verbunden"
 E_WC_STATUS = "sensor.tesla_wall_connector_status"
+E_WC_POWER = "sensor.tesla_wall_connector_gesamtleistung"
+NOTIFY = "mobile_app_sm_s938b"
+NOTIFY_ID = f"{DOMAIN}_ev_unplanned"
 REFRESH_GAP = timedelta(seconds=20)
+WATCH_EVERY = timedelta(seconds=15)
+WAKE_AFTER = timedelta(minutes=2)
+ALERT_AFTER = timedelta(minutes=3)
+WC_CHARGING_W = 800
 E_ASLEEP = f"binary_sensor.{CAR}_asleep"
 E_SEAT = f"select.aussen_{CAR}_front_left_seat_climate"
 E_WHEEL = f"switch.aussen_{CAR}_steering_wheel_heater"
@@ -90,6 +103,11 @@ class EvChargeController:
         self._lock = asyncio.Lock()
         self._refresh_at: datetime | None = None
         self._unsub = None
+        self._unsub_watch = None
+        self._unplanned_since: datetime | None = None
+        self._unplanned_woke = False
+        self._alerted = False
+        self.watch_status = "ok"
         # preheating state
         self.pre_status = "aus"
         self._holidays: set = set()
@@ -108,11 +126,20 @@ class EvChargeController:
             self.s["pre_per_k"] = PREHEAT_MIN_PER_K
         self._unsub = async_track_state_change_event(
             self.hass, [E_WC_CAR, E_WC_STATUS, E_PLUG_TIBBER, E_LINK, E_PLUG, E_CHARGING], self._on_car_event)
+        self._unsub_watch = async_track_time_interval(self.hass, self._watch, WATCH_EVERY)
 
     def async_stop(self) -> None:
-        if self._unsub:
-            self._unsub()
-            self._unsub = None
+        for name in ("_unsub", "_unsub_watch"):
+            unsub = getattr(self, name)
+            if unsub:
+                unsub()
+                setattr(self, name, None)
+
+    @callback
+    def _watch(self, _now) -> None:
+        """Between the minute cycles: look again while power flows that nobody asked for."""
+        if self._last_result and self.s["active"] and self.mode == "aus" and self._wc_charging():
+            self.hass.async_create_task(self.async_update(dt_util.utcnow(), self._last_result, quick=True))
 
     @callback
     def _on_car_event(self, event) -> None:
@@ -122,6 +149,11 @@ class EvChargeController:
             return
         eid = event.data.get("entity_id")
         now = dt_util.utcnow()
+        if eid in (E_WC_CAR, E_PLUG_TIBBER) and new.state == "on" and old is not None and old.state == "off"                 and not self.s["active"]:
+            # switched off and forgotten: a new plug-in hands the car back to the control
+            _LOGGER.info("Tesla plugged in while the control was off - switching it on again")
+            self.hass.async_create_task(self.async_set("active", True))
+            self.s["active"] = True
         if eid in (E_WC_CAR, E_PLUG_TIBBER, E_WC_STATUS) and new.state in ("on", "charging"):
             self._last_cmd = None   # a fresh plug-in must not wait for the command gap
             if self.s["active"] and self._state(E_LINK) != "on" and (
@@ -196,6 +228,46 @@ class EvChargeController:
         self.soc_source = "tibber" if soc is not None else None
         return soc
 
+    def _wc_charging(self) -> bool:
+        """Power flows into the car per Wall Connector. Not while the car climates (that also draws)."""
+        if self._state(E_CLIMATE) not in (None, "off") or self._pre_started is not None:
+            return False
+        return self._state(E_WC_STATUS) == "charging" or (self._float(E_WC_POWER) or 0.0) > WC_CHARGING_W
+
+    async def _guard(self, now: datetime, target_amps: int, link: bool) -> None:
+        """Escalate while the car charges although nothing is planned."""
+        if not (self.s["active"] and target_amps == 0 and self._wc_charging()):
+            if self._unplanned_since is not None:
+                _LOGGER.info("Tesla: unplanned charging ended")
+            if self._alerted:
+                await self._try("persistent_notification", "dismiss", None, notification_id=NOTIFY_ID)
+            self._unplanned_since, self._unplanned_woke, self._alerted = None, False, False
+            self.watch_status = "ok"
+            return
+        if self._unplanned_since is None:
+            self._unplanned_since = now
+            self._last_cmd = None   # stop right away, not after the command gap
+            _LOGGER.warning("Tesla charges although not planned (%s W) - stopping", self._float(E_WC_POWER))
+        since = now - self._unplanned_since
+        self.watch_status = "stoppe" if link else "keine Verbindung"
+        if not link:
+            if self._refresh_at is None or now - self._refresh_at >= REFRESH_GAP:
+                self._refresh_at = now
+                await self._try("button", "press", E_REFRESH)
+            if since >= WAKE_AFTER and not self._unplanned_woke:
+                self._unplanned_woke = True
+                await self._try("button", "press", E_WAKE)
+        if since >= ALERT_AFTER and not self._alerted:
+            self._alerted = True
+            self.watch_status = "Stoppen klappt nicht"
+            kw = (self._float(E_WC_POWER) or 0.0) / 1000
+            msg = (f"Das Auto lädt seit {int(since.total_seconds() // 60)} min ungeplant ({kw:.1f} kW). "
+                   f"Stoppen über Bluetooth klappt nicht ({'verbunden' if link else 'keine Verbindung'}). "
+                   "Bitte in der Tesla-App stoppen.")
+            await self._try("persistent_notification", "create", None, title="Tesla lädt ungeplant",
+                            message=msg, notification_id=NOTIFY_ID)
+            await self._try("notify", NOTIFY, None, title="Tesla lädt ungeplant", message=msg)
+
     def _plugged(self) -> bool:
         return "on" in (self._state(E_PLUG), self._state(E_WC_CAR), self._state(E_PLUG_TIBBER))
 
@@ -243,8 +315,13 @@ class EvChargeController:
                 self.reason = self.plan.note if self.plan else "kein Ladestand"
         if not plugged:
             self.reason = "nicht angesteckt – " + self.reason
-        if self.s["active"] and plugged and self._state(E_LINK) == "on":
+        link = self._state(E_LINK) == "on"
+        if self.s["active"] and plugged and link:
             await self._execute(now, target_amps, travel)
+        try:
+            await self._guard(now, target_amps, link)
+        except Exception:  # noqa: BLE001 - the guard must never break the loop
+            _LOGGER.exception("Tesla charge guard failed")
         if quick:
             self._changed()
             return
@@ -353,12 +430,13 @@ class EvChargeController:
         try:
             await self._call(domain, service, entity_id, **data)
         except Exception as err:  # noqa: BLE001 - BLE may drop
-            _LOGGER.warning("Tesla preheat command failed: %s", err)
+            _LOGGER.warning("Tesla command %s.%s failed: %s", domain, service, err)
 
     async def _execute(self, now: datetime, amps: int, travel) -> None:
         if self._last_cmd and now - self._last_cmd < CMD_GAP:
             return
-        charging = self._state(E_CHARGING) == "on"
+        # BLE state can lag behind; the Wall Connector shows real power
+        charging = self._state(E_CHARGING) == "on" or (not amps and self._wc_charging())
         want_limit = 100 if travel and self.s["travel_target"] > 80 else max(50, int(self.s["max_target"]))
         if self.s["now_on"]:
             want_limit = max(want_limit, int(self.s["now_target"]))
@@ -389,7 +467,8 @@ class EvChargeController:
 
     async def _call(self, domain, service, entity_id, **data) -> None:
         _LOGGER.info("Tesla: %s.%s %s %s", domain, service, entity_id, data or "")
-        await self.hass.services.async_call(domain, service, {"entity_id": entity_id, **data}, blocking=True)
+        payload = {"entity_id": entity_id, **data} if entity_id else data
+        await self.hass.services.async_call(domain, service, payload, blocking=True)
 
     # ------------------------------------------------------------------ views
     def attributes(self) -> dict:
@@ -404,7 +483,7 @@ class EvChargeController:
             "kwh": p.kwh if p else None, "kosten_eur": p.cost_eur if p else None,
             "viertelstunden": [{"start": t.strftime("%a %H:%M"), "preis": round(v[0], 3), "grund": v[1]} for t, v in slots],
             "fenster": _windows(slots),
-            "ladestand_quelle": self.soc_source,
+            "ladestand_quelle": self.soc_source, "waechter": self.watch_status,
             "referenz_tage": 28, "referenz_preise": len(self.reference),
             "vorklima": {"status": self.pre_status, **self.pre_next},
         }
