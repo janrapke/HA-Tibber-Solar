@@ -439,6 +439,12 @@ class EvChargeController:
     async def _execute(self, now: datetime, amps: int, travel) -> None:
         if self._last_cmd and now - self._last_cmd < CMD_GAP:
             return
+        if self.hass.states.get(E_CHARGING) is None or self.hass.states.get(E_CHARGING).state == "unavailable":
+            # BLE link up but no car data yet (after a restart / idle backoff): commands would go nowhere
+            if self._refresh_at is None or now - self._refresh_at >= REFRESH_GAP:
+                self._refresh_at = now
+                await self._try("button", "press", E_REFRESH)
+            return
         # BLE state can lag behind; the Wall Connector shows real power
         charging = self._state(E_CHARGING) == "on" or (not amps and self._wc_charging())
         want_limit = 100 if travel and self.s["travel_target"] > 80 else max(50, int(self.s["max_target"]))
