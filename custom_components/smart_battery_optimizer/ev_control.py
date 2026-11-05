@@ -138,7 +138,7 @@ class EvChargeController:
     @callback
     def _watch(self, _now) -> None:
         """Between the minute cycles: look again while power flows that nobody asked for."""
-        if self._last_result and self.s["active"] and self.mode == "aus" and self._wc_charging():
+        if self._last_result and self.s["active"] and self._wc_charging():
             self.hass.async_create_task(self.async_update(dt_util.utcnow(), self._last_result, quick=True))
 
     @callback
@@ -168,6 +168,11 @@ class EvChargeController:
         self.s[key] = value
         await self.store.async_save(self.s)
         self._changed()
+        if key in ("active", "now_on", "now_target", "travel_on", "travel_at", "travel_target", "max_target",
+                   "min_target") and self._last_result and not self._lock.locked():
+            # a changed wish (e.g. instant charging off) acts now, not at the next minute
+            self._last_cmd = None
+            self.hass.async_create_task(self.async_update(dt_util.utcnow(), self._last_result, quick=True))
 
     def _changed(self) -> None:
         for cb in list(self.listeners):
@@ -246,7 +251,6 @@ class EvChargeController:
             return
         if self._unplanned_since is None:
             self._unplanned_since = now
-            self._last_cmd = None   # stop right away, not after the command gap
             _LOGGER.warning("Tesla charges although not planned (%s W) - stopping", self._float(E_WC_POWER))
         since = now - self._unplanned_since
         self.watch_status = "stoppe" if link else "keine Verbindung"
