@@ -1,483 +1,660 @@
 # ============================================================
-# Dashboard: Klima Wohnzimmer
-# Als neue View in dein Dashboard einfügen:
-# HA → Dashboard → ⋮ → Raw Config Editor → unter views: einfügen
+# Dashboard-Ansicht „Klima“ (Dashboard dashboard-home, path klima-wohnzimmer)
+#
+# Zeigt beide Klimaanlagen:
+#  - Wohnzimmer (Midea, gesteuert von der Integration smart_battery_optimizer,
+#    Entitäten select/switch/number/sensor.klima_wohnzimmer_*)
+#  - Büro/Gästezimmer (Tuya climate.air_conditioner, Automation „Klima Büro“)
+#
+# Einspielen: per Websocket lovelace/config/save (Ansicht ersetzen)
+# oder HA → Dashboard → ⋮ → Raw-Konfiguration → unter views: einfügen.
+# Benötigt: button-card, mushroom, apexcharts-card (HACS).
 # ============================================================
 
-- title: Klima WZ
-  path: klima-wohnzimmer
-  icon: mdi:air-conditioner
-  type: masonry
-  badges: []
-  cards:
+title: Klima
+path: klima-wohnzimmer
+icon: mdi:air-conditioner
+type: sections
+max_columns: 3
+dense_section_placement: true
+sections:
 
-    # ════════════════════════════════════════════════════════
-    # STATUS
-    # ════════════════════════════════════════════════════════
+  # ══════════════════════════════════════════════════════════
+  # WOHNZIMMER – Status und Bedienung
+  # ══════════════════════════════════════════════════════════
+  - type: grid
+    cards:
+      - type: heading
+        heading: Klima Wohnzimmer
+        icon: mdi:sofa-outline
+        tap_action:
+          action: more-info
+          entity: climate.152832118046533_climate
+        badges:
+          - type: entity
+            entity: sensor.electricity_price_holunderweg_3
+            show_icon: true
+            color: amber
 
-    - type: custom:mushroom-template-card
-      primary: >
-        {% set s = states('climate.152832118046533_climate') %}
-        {% if s == 'cool' %}Kühlt aktiv
-        {% elif s == 'heat' %}Heizt aktiv
-        {% else %}Klimaanlage aus{% endif %}
-      secondary: >
-        {{ states('sensor.wohnzimmer_temperatur') | float(0) | round(1) }}°C innen ·
-        {{ states('sensor.openweathermap_temperature') | float(0) | round(1) }}°C außen ·
-        {{ states('sensor.temp_wohnzimmer_luftfeuchtigkeit') | int(0) }}% rF
-      icon: mdi:air-conditioner
-      icon_color: >
-        {% set s = states('climate.152832118046533_climate') %}
-        {% if s == 'cool' %}blue{% elif s == 'heat' %}deep-orange{% else %}grey{% endif %}
-      badge_icon: >
-        {% if is_state('input_boolean.klima_wz_heizung_ersatz_aktiv', 'on') %}mdi:heat-wave
-        {% elif is_state('input_boolean.klima_wohnzimmer_battery_modus', 'on') %}mdi:battery-high
-        {% else %}{% endif %}
-      badge_color: >
-        {% if is_state('input_boolean.klima_wz_heizung_ersatz_aktiv', 'on') %}orange
-        {% elif is_state('input_boolean.klima_wohnzimmer_battery_modus', 'on') %}green
-        {% else %}{% endif %}
-      tap_action:
-        action: more-info
-        entity: climate.152832118046533_climate
+      # ---------- Hero ----------
+      - type: custom:button-card
+        entity: sensor.klima_wohnzimmer_entscheidung
+        grid_options: {columns: full}
+        show_name: false
+        show_icon: false
+        show_state: false
+        triggers_update:
+          - climate.152832118046533_climate
+          - sensor.wohnzimmer_temperatur
+          - sensor.openweathermap_temperature
+          - sensor.temp_wohnzimmer_luftfeuchtigkeit
+          - sensor.klima_wohnzimmer_klima_leistung
+          - sensor.klima_wohnzimmer_kompressor
+        tap_action:
+          action: more-info
+          entity: climate.152832118046533_climate
+        styles:
+          card:
+            - padding: 0
+            - border-radius: 18px
+            - overflow: hidden
+          grid:
+            - grid-template-areas: '"c"'
+            - grid-template-columns: 1fr
+          custom_fields:
+            c: [{white-space: normal}, {text-align: left}, {width: 100%}]
+        custom_fields:
+          c: |
+            [[[
+              const a = entity ? entity.attributes : {};
+              const ac = states['climate.152832118046533_climate'];
+              const n = (v) => { const x = parseFloat(v); return isNaN(x) ? null : x; };
+              const f = (v, d) => { const x = n(v); return x === null ? '–' : x.toLocaleString('de-DE', {minimumFractionDigits: d, maximumFractionDigits: d}); };
+              const room = n(states['sensor.wohnzimmer_temperatur']?.state) ?? n(a.raumtemperatur);
+              const goal = n(a.zieltemperatur_raum);
+              const out = n(states['sensor.openweathermap_temperature']?.state);
+              const hum = n(states['sensor.temp_wohnzimmer_luftfeuchtigkeit']?.state);
+              const w = n(states['sensor.klima_wohnzimmer_klima_leistung']?.state) ?? 0;
+              const hz = n(states['sensor.klima_wohnzimmer_kompressor']?.state) ?? 0;
+              const hv = ac ? ac.state : 'unavailable';
+              let pill, col, ico;
+              if (hv === 'unavailable' || hv === 'unknown') { pill = 'Nicht erreichbar'; col = '#9ca3af'; ico = 'mdi:wifi-off'; }
+              else if (hv === 'heat') { pill = hz > 0 ? 'Heizt' : 'Heizbereit'; col = hz > 0 ? '#f97316' : '#f59e0b'; ico = 'mdi:fire'; }
+              else if (hv === 'cool') { pill = hz > 0 ? 'Kühlt' : 'Kühlbereit'; col = '#0ea5e9'; ico = 'mdi:snowflake'; }
+              else if (hv === 'dry') { pill = 'Entfeuchtet'; col = '#14b8a6'; ico = 'mdi:water-percent'; }
+              else if (hv === 'fan_only') { pill = 'Lüftet'; col = '#14b8a6'; ico = 'mdi:fan'; }
+              else if (hv === 'off') { pill = 'Aus'; col = '#9ca3af'; ico = 'mdi:power-standby'; }
+              else { pill = hv; col = '#8b5cf6'; ico = 'mdi:air-conditioner'; }
+              const L = {sicherheit:'Sicherheit', manuell_an:'Manuell an', manuell_aus:'Manuell aus', ersatz:'Ersetzt die Heizung',
+                         ersatz_pause:'Pause – Ziel erreicht', ueberschuss:'Heizt mit Solarüberschuss', heizen:'Automatik Heizen',
+                         kuehlen:'Automatik Kühlen', nachlauf:'Nachlauf', aus:'Bereit', keine_steuerung:'Steuerung aus',
+                         aufwaermen:'Aufwärmen', start:'Startet'};
+              const modus = L[a.modus] || a.modus || '–';
+              const reason = String(a.begruendung || entity?.state || '').replace(/^Beobachten:\s*/, '');
+              // Temperaturband 15–26 °C
+              const lo = 15, hi = 26, pos = (t) => Math.max(0, Math.min(100, (t - lo) / (hi - lo) * 100));
+              const bar = room === null ? '' : `
+                <div style="position:relative;height:8px;border-radius:4px;margin:14px 0 6px;
+                     background:linear-gradient(90deg,#3b82f6 0%,#22c55e 45%,#f59e0b 75%,#ef4444 100%);opacity:.9">
+                  ${goal !== null ? `<div title="Ziel" style="position:absolute;left:${pos(goal)}%;top:-4px;width:2px;height:16px;background:var(--primary-text-color);border-radius:1px"></div>` : ''}
+                  <div style="position:absolute;left:calc(${pos(room)}% - 8px);top:-4px;width:16px;height:16px;border-radius:50%;
+                       background:var(--card-background-color);border:3px solid ${col};box-sizing:border-box"></div>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--secondary-text-color)">
+                  <span>${lo} °C</span><span>${goal !== null ? 'Ziel ' + f(goal, 1) + ' °C' : ''}</span><span>${hi} °C</span></div>`;
+              const stat = (icon, val, lab, c) => `
+                <div style="display:flex;align-items:center;gap:6px;padding:8px;border-radius:12px;background:rgba(127,127,127,.08)">
+                  <ha-icon icon="${icon}" style="--mdc-icon-size:20px;color:${c}"></ha-icon>
+                  <div style="line-height:1.15;min-width:0"><div style="font-weight:600;font-size:14px;white-space:nowrap">${val}</div>
+                  <div style="font-size:11px;color:var(--secondary-text-color)">${lab}</div></div></div>`;
+              const dev = ac && hv !== 'off' && ac.attributes.temperature != null
+                ? `Gerät: Soll ${f(ac.attributes.temperature, 1)} °C · Lüfter ${ac.attributes.fan_mode || '–'}` : '';
+              const warn = a.steuerung_aktiv === false
+                ? `<div style="margin-top:10px;padding:8px 10px;border-radius:10px;background:rgba(239,68,68,.12);color:#ef4444;font-size:12px;font-weight:600">
+                     <ha-icon icon="mdi:robot-off" style="--mdc-icon-size:16px"></ha-icon> Steuerung aus – die App beobachtet nur</div>` : '';
+              return `
+              <div style="padding:18px 18px 16px;background:linear-gradient(135deg, ${col}26 0%, transparent 60%)">
+                <div style="display:flex;align-items:center;gap:12px">
+                  <div style="width:44px;height:44px;border-radius:14px;display:flex;align-items:center;justify-content:center;background:${col}2e">
+                    <ha-icon icon="${ico}" style="--mdc-icon-size:26px;color:${col}"></ha-icon></div>
+                  <div style="flex:1;min-width:0">
+                    <div style="font-size:12px;color:var(--secondary-text-color);text-transform:uppercase;letter-spacing:.06em">${modus}</div>
+                    <div style="font-size:18px;font-weight:700">${pill}${hz > 0 ? ` <span style="font-weight:500;font-size:14px;color:var(--secondary-text-color)">· ${f(w,0)} W · ${f(hz,0)} Hz</span>` : ''}</div>
+                  </div>
+                  <div style="text-align:right">
+                    <div style="font-size:40px;font-weight:300;line-height:1">${f(room, 1)}<span style="font-size:18px;vertical-align:top">°C</span></div>
+                    <div style="font-size:11px;color:var(--secondary-text-color)">${a.raumsensor_quelle && a.raumsensor_quelle !== 'raumsensor' ? a.raumsensor_quelle : 'Raum'}</div>
+                  </div>
+                </div>
+                ${bar}
+                <div style="margin-top:12px;font-size:13px;line-height:1.35;color:var(--primary-text-color)">${reason}</div>
+                ${dev ? `<div style="margin-top:4px;font-size:12px;color:var(--secondary-text-color)">${dev}</div>` : ''}
+                ${warn}
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px">
+                  ${stat('mdi:thermometer-lines', f(out, 1) + ' °C', 'Außen', '#818cf8')}
+                  ${stat('mdi:water-percent', f(hum, 0) + ' %', 'Luftfeuchte', '#14b8a6')}
+                  ${stat('mdi:radiator', a.heizkoerper === 'aus' ? 'Aus' : 'An', 'Heizkörper', a.heizkoerper === 'aus' ? '#9ca3af' : '#f97316')}
+                </div>
+              </div>`;
+            ]]]
 
-    - type: horizontal-stack
-      cards:
-        - type: custom:mushroom-template-card
-          primary: "{{ states('sensor.wohnzimmer_temperatur') | float(0) | round(1) }}°C"
-          secondary: Innen
-          icon: mdi:thermometer
-          icon_color: >
-            {% set t = states('sensor.wohnzimmer_temperatur') | float(0) %}
-            {% if t > 25 %}red{% elif t > 22 %}orange{% elif t < 18 %}blue{% else %}green{% endif %}
-          fill_container: true
-        - type: custom:mushroom-template-card
-          primary: "{{ states('sensor.temp_wohnzimmer_luftfeuchtigkeit') | int(0) }}%"
-          secondary: Luftfeuchte
-          icon: mdi:water-percent
-          icon_color: teal
-          fill_container: true
-        - type: custom:mushroom-template-card
-          primary: "{{ states('sensor.openweathermap_temperature') | float(0) | round(1) }}°C"
-          secondary: Außen
-          icon: mdi:thermometer-lines
-          icon_color: >
-            {% set t = states('sensor.openweathermap_temperature') | float(0) %}
-            {% if t > 25 %}red{% elif t > 18 %}orange{% elif t < 5 %}blue{% else %}green{% endif %}
-          fill_container: true
+      # ---------- Betriebsmodus ----------
+      - type: heading
+        heading: Betriebsmodus
+        heading_style: subtitle
+      - &mode_btn
+        type: custom:button-card
+        section_mode: true
+        entity: select.klima_wohnzimmer_betriebsmodus
+        grid_options: {columns: 3, rows: 2}
+        name: Auto
+        icon: mdi:robot-outline
+        size: 28px
+        show_state: false
+        tap_action:
+          action: call-service
+          service: select.select_option
+          service_data:
+            entity_id: select.klima_wohnzimmer_betriebsmodus
+            option: auto
+        variables:
+          opt: auto
+          col: '#10b981'
+        styles:
+          card:
+            - border-radius: 16px
+            - padding: 10px 4px
+            - border: '[[[ return entity.state === variables.opt ? "2px solid " + variables.col : "2px solid transparent" ]]]'
+            - background: '[[[ return entity.state === variables.opt ? variables.col + "22" : "var(--ha-card-background, var(--card-background-color))" ]]]'
+          icon:
+            - color: '[[[ return entity.state === variables.opt ? variables.col : "var(--secondary-text-color)" ]]]'
+          name:
+            - font-size: 12px
+            - font-weight: 700
+            - letter-spacing: 0.04em
+            - color: '[[[ return entity.state === variables.opt ? variables.col : "var(--primary-text-color)" ]]]'
+      - <<: *mode_btn
+        name: Ein
+        icon: mdi:power
+        tap_action:
+          action: call-service
+          service: select.select_option
+          service_data: {entity_id: select.klima_wohnzimmer_betriebsmodus, option: manuell_an}
+        variables: {opt: manuell_an, col: '#3b82f6'}
+      - <<: *mode_btn
+        name: Aus
+        icon: mdi:power-off
+        tap_action:
+          action: call-service
+          service: select.select_option
+          service_data: {entity_id: select.klima_wohnzimmer_betriebsmodus, option: manuell_aus}
+        variables: {opt: manuell_aus, col: '#ef4444'}
+      - <<: *mode_btn
+        name: Aufwärmen
+        icon: mdi:fire-circle
+        tap_action:
+          action: call-service
+          service: select.select_option
+          service_data: {entity_id: select.klima_wohnzimmer_betriebsmodus, option: aufwaermen}
+        variables: {opt: aufwaermen, col: '#f97316'}
 
-    - type: horizontal-stack
-      cards:
-        - type: custom:mushroom-template-card
-          primary: "{{ (states('sensor.electricity_price_holunderweg_3') | float(0) * 100) | round(1) }} ct"
-          secondary: Strompreis/kWh
-          icon: mdi:lightning-bolt
-          icon_color: >
-            {% set p = states('sensor.electricity_price_holunderweg_3') | float(0) %}
-            {% if p < 0.20 %}green{% elif p < 0.30 %}amber{% else %}red{% endif %}
-          fill_container: true
-        - type: custom:mushroom-template-card
-          primary: "{{ states('sensor.smartshunt_hq2305uvtaz_battery') | int(0) }}%"
-          secondary: Akku
-          icon: >
-            {% set b = states('sensor.smartshunt_hq2305uvtaz_battery') | int(0) %}
-            {% if b >= 80 %}mdi:battery-high{% elif b >= 40 %}mdi:battery-medium{% else %}mdi:battery-low{% endif %}
-          icon_color: >
-            {% set b = states('sensor.smartshunt_hq2305uvtaz_battery') | int(0) %}
-            {% if b >= 80 %}green{% elif b >= 40 %}amber{% else %}red{% endif %}
-          fill_container: true
+      # ---------- Schalter ----------
+      - type: tile
+        entity: switch.klima_wohnzimmer_steuerung_aktiv
+        name: Steuerung
+        icon: mdi:robot
+        color: green
+        vertical: true
+        grid_options: {columns: 4, rows: 2}
+        tap_action: {action: toggle}
+        state_content: state
+      - type: tile
+        entity: switch.klima_wohnzimmer_heizung_ersetzen
+        name: Heizung ersetzen
+        icon: mdi:heat-wave
+        color: deep-orange
+        vertical: true
+        grid_options: {columns: 4, rows: 2}
+        tap_action: {action: toggle}
+        state_content: state
+      - type: tile
+        entity: switch.klima_wohnzimmer_uberschuss_nutzen
+        name: Überschuss
+        icon: mdi:solar-power-variant
+        color: amber
+        vertical: true
+        grid_options: {columns: 4, rows: 2}
+        tap_action: {action: toggle}
+        state_content: state
 
-    # ════════════════════════════════════════════════════════
-    # BETRIEBSMODUS
-    # ════════════════════════════════════════════════════════
+      # ---------- Warum? Preis gegen Öl ----------
+      - type: custom:button-card
+        entity: sensor.klima_wohnzimmer_entscheidung
+        grid_options: {columns: full}
+        show_name: false
+        show_icon: false
+        show_state: false
+        triggers_update: [sensor.electricity_price_holunderweg_3]
+        tap_action: {action: more-info}
+        styles:
+          card: [{padding: 16px}, {border-radius: 18px}]
+          grid: [{grid-template-areas: '"c"'}, {grid-template-columns: 1fr}]
+          custom_fields:
+            c: [{white-space: normal}, {text-align: left}, {width: 100%}]
+        custom_fields:
+          c: |
+            [[[
+              const a = entity.attributes;
+              const n = (v) => { const x = parseFloat(v); return isNaN(x) ? null : x; };
+              const f = (v, d) => { const x = n(v); return x === null ? '–' : x.toLocaleString('de-DE', {minimumFractionDigits: d, maximumFractionDigits: d}); };
+              const price = n(states['sensor.electricity_price_holunderweg_3']?.state);
+              const lim = n(a.grenzpreis);
+              const ka = n(a.kosten_klima_kwh_waerme), ko = n(a.kosten_oel_kwh_waerme);
+              const cheap = price !== null && lim !== null && price < lim;
+              const max = Math.max(price || 0, lim || 0, 0.01) * 1.15;
+              const bar = (v, c) => `<div style="height:10px;border-radius:5px;background:rgba(127,127,127,.15);overflow:hidden">
+                   <div style="height:100%;width:${Math.min(100, (v || 0) / max * 100)}%;background:${c};border-radius:5px"></div></div>`;
+              const kmax = Math.max(ka || 0, ko || 0, 0.01) * 1.15;
+              const kbar = (v, c) => `<div style="height:10px;border-radius:5px;background:rgba(127,127,127,.15);overflow:hidden">
+                   <div style="height:100%;width:${Math.min(100, (v || 0) / kmax * 100)}%;background:${c};border-radius:5px"></div></div>`;
+              const row = (lab, val, b) => `<div style="display:grid;grid-template-columns:110px 1fr 74px;align-items:center;gap:10px;margin:6px 0">
+                   <span style="font-size:12px;color:var(--secondary-text-color)">${lab}</span>${b}<span style="text-align:right;font-weight:600;font-size:13px">${val}</span></div>`;
+              const valves = a.heizkoerper_ventilfuehler || {};
+              const vlist = Object.entries(valves).map(([k, v]) => {
+                const warm = String(v).startsWith('warm');
+                return `<span style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:999px;font-size:12px;
+                          background:${warm ? 'rgba(249,115,22,.15)' : 'rgba(127,127,127,.1)'};color:${warm ? '#f97316' : 'var(--secondary-text-color)'}">
+                          <ha-icon icon="mdi:radiator" style="--mdc-icon-size:14px"></ha-icon>${k}</span>`; }).join(' ');
+              return `
+                <div style="display:flex;align-items:center;justify-content:space-between">
+                  <div style="font-size:16px;font-weight:600">Klima oder Öl?</div>
+                  <div style="padding:4px 10px;border-radius:999px;font-size:12px;font-weight:700;
+                       background:${cheap ? 'rgba(16,185,129,.15)' : 'rgba(127,127,127,.12)'};color:${cheap ? '#10b981' : 'var(--secondary-text-color)'}">
+                       ${cheap ? 'Klima günstiger' : 'Öl günstiger'}</div>
+                </div>
+                <div style="font-size:11px;color:var(--secondary-text-color);margin:2px 0 8px">Strompreis gegen die Grenze, ab der die Klima billiger heizt als der Ölkessel</div>
+                ${row('Strompreis jetzt', f(price, 3) + ' €', bar(price, cheap ? '#10b981' : '#f59e0b'))}
+                ${row('Grenzpreis', f(lim, 3) + ' €', bar(lim, '#818cf8'))}
+                <div style="height:1px;background:var(--divider-color);margin:12px 0"></div>
+                ${row('Wärme mit Klima', f(ka * 100, 1) + ' ct', kbar(ka, '#0ea5e9'))}
+                ${row('Wärme mit Öl', f(ko * 100, 1) + ' ct', kbar(ko, '#a16207'))}
+                <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--secondary-text-color);margin-top:4px">
+                  <span>pro kWh Wärme</span><span>Effizienz (COP) bei ${f(a.aussentemperatur, 1)} °C: <b>${f(a.effizienz, 2)}</b></span></div>
+                ${vlist ? `<div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:6px">${vlist}</div>` : ''}`;
+            ]]]
 
-    - type: custom:mushroom-title-card
-      title: Betriebsmodus
+  # ══════════════════════════════════════════════════════════
+  # VERLAUF UND KOSTEN
+  # ══════════════════════════════════════════════════════════
+  - type: grid
+    cards:
+      - type: heading
+        heading: Kosten und Ersparnis
+        icon: mdi:piggy-bank-outline
 
-    - type: horizontal-stack
-      cards:
-        - type: custom:button-card
-          entity: input_select.klima_wohnzimmer_schalter
-          name: AUTO
-          icon: mdi:autorenew
-          tap_action:
-            action: call-service
-            service: input_select.select_option
-            service_data:
-              entity_id: input_select.klima_wohnzimmer_schalter
-              option: auto
-          state:
-            - value: auto
-              styles:
-                card:
-                  - background-color: rgba(16, 185, 129, 0.15)
-                  - border: 2px solid "#10b981"
-                icon:
-                  - color: "#10b981"
-                name:
-                  - color: "#10b981"
-          styles:
-            card:
-              - border-radius: 12px
-              - padding: 14px 8px
-              - background-color: var(--card-background-color)
-              - border: 2px solid var(--divider-color)
-              - transition: all 0.2s
-            name:
-              - font-size: 12px
-              - font-weight: 700
-              - letter-spacing: 0.08em
-            icon:
-              - width: 26px
+      - type: custom:button-card
+        entity: sensor.klima_wohnzimmer_ersparnis_monat
+        grid_options: {columns: full}
+        show_name: false
+        show_icon: false
+        show_state: false
+        triggers_update:
+          - sensor.klima_wohnzimmer_heizen_kosten_monat
+          - sensor.klima_wohnzimmer_ol_hatte_gekostet_monat
+          - sensor.klima_wohnzimmer_klimastrom_heute
+          - sensor.klima_wohnzimmer_klimastrom_kosten_heute
+          - sensor.klima_wohnzimmer_klimastrom_monat
+          - sensor.klima_wohnzimmer_klimastrom_kosten_monat
+          - sensor.klima_wohnzimmer_ersparnis_heute
+          - sensor.klima_wohnzimmer_ersetztes_ol_monat
+        tap_action: {action: more-info}
+        styles:
+          card: [{padding: 16px}, {border-radius: 18px}]
+          grid: [{grid-template-areas: '"c"'}, {grid-template-columns: 1fr}]
+          custom_fields:
+            c: [{white-space: normal}, {text-align: left}, {width: 100%}]
+        custom_fields:
+          c: |
+            [[[
+              const s = (id) => { const x = parseFloat(states['sensor.klima_wohnzimmer_' + id]?.state); return isNaN(x) ? null : x; };
+              const f = (v, d) => v === null ? '–' : v.toLocaleString('de-DE', {minimumFractionDigits: d, maximumFractionDigits: d});
+              const save = s('ersparnis_monat'), el = s('heizen_kosten_monat'), oil = s('ol_hatte_gekostet_monat');
+              const max = Math.max(el || 0, oil || 0, 0.01);
+              const pos = (save || 0) >= 0, sc = pos ? '#10b981' : '#ef4444';
+              const bar = (lab, v, c) => `<div style="margin:8px 0">
+                  <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+                    <span style="color:var(--secondary-text-color)">${lab}</span><b>${f(v, 2)} €</b></div>
+                  <div style="height:12px;border-radius:6px;background:rgba(127,127,127,.15);overflow:hidden">
+                    <div style="height:100%;width:${(v || 0) / max * 100}%;background:${c};border-radius:6px"></div></div></div>`;
+              const tile = (lab, v1, v2, icon, c) => `
+                  <div style="padding:10px 12px;border-radius:14px;background:rgba(127,127,127,.08)">
+                    <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--secondary-text-color)">
+                      <ha-icon icon="${icon}" style="--mdc-icon-size:16px;color:${c}"></ha-icon>${lab}</div>
+                    <div style="font-size:16px;font-weight:600;margin-top:4px">${v1}</div>
+                    <div style="font-size:12px;color:var(--secondary-text-color)">${v2}</div></div>`;
+              return `
+                <div style="display:flex;align-items:flex-end;justify-content:space-between">
+                  <div>
+                    <div style="font-size:12px;color:var(--secondary-text-color);text-transform:uppercase;letter-spacing:.06em">Ersparnis diesen Monat</div>
+                    <div style="font-size:34px;font-weight:300;color:${sc};line-height:1.1">${pos ? '+' : ''}${f(save, 2)} €</div>
+                  </div>
+                  <div style="text-align:right;font-size:12px;color:var(--secondary-text-color)">heute ${f(s('ersparnis_heute'), 2)} €<br>
+                    ${f(s('ersetztes_ol_monat'), 1)} L Öl ersetzt</div>
+                </div>
+                <div style="font-size:11px;color:var(--secondary-text-color);margin:10px 0 2px">Heizen diesen Monat</div>
+                ${bar('Strom für die Klima', el, '#0ea5e9')}
+                ${bar('Öl hätte gekostet', oil, '#a16207')}
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px">
+                  ${tile('Klimastrom heute', f(s('klimastrom_heute'), 2) + ' kWh', f(s('klimastrom_kosten_heute'), 2) + ' €', 'mdi:calendar-today', '#f59e0b')}
+                  ${tile('Klimastrom Monat', f(s('klimastrom_monat'), 1) + ' kWh', f(s('klimastrom_kosten_monat'), 2) + ' €', 'mdi:calendar-month', '#8b5cf6')}
+                </div>
+                <div style="font-size:11px;color:var(--secondary-text-color);margin-top:10px">Strom zum jeweiligen Tibber-Preis, Öl mit
+                  ${f(parseFloat(states['number.klima_wohnzimmer_olpreis']?.state), 2)} €/L und
+                  ${f(parseFloat(states['number.klima_wohnzimmer_kesselwirkungsgrad']?.state), 0)} % Kesselwirkungsgrad. Kühlen zählt nur beim Strom.</div>`;
+            ]]]
 
-        - type: custom:button-card
-          entity: input_select.klima_wohnzimmer_schalter
-          name: EIN
-          icon: mdi:power
-          tap_action:
-            action: call-service
-            service: input_select.select_option
-            service_data:
-              entity_id: input_select.klima_wohnzimmer_schalter
-              option: manuell_an
-          state:
-            - value: manuell_an
-              styles:
-                card:
-                  - background-color: rgba(59, 130, 246, 0.15)
-                  - border: 2px solid "#3b82f6"
-                icon:
-                  - color: "#3b82f6"
-                name:
-                  - color: "#3b82f6"
-          styles:
-            card:
-              - border-radius: 12px
-              - padding: 14px 8px
-              - background-color: var(--card-background-color)
-              - border: 2px solid var(--divider-color)
-              - transition: all 0.2s
-            name:
-              - font-size: 12px
-              - font-weight: 700
-              - letter-spacing: 0.08em
-            icon:
-              - width: 26px
-
-        - type: custom:button-card
-          entity: input_select.klima_wohnzimmer_schalter
-          name: AUS
-          icon: mdi:power-off
-          tap_action:
-            action: call-service
-            service: input_select.select_option
-            service_data:
-              entity_id: input_select.klima_wohnzimmer_schalter
-              option: manuell_aus
-          state:
-            - value: manuell_aus
-              styles:
-                card:
-                  - background-color: rgba(239, 68, 68, 0.15)
-                  - border: 2px solid "#ef4444"
-                icon:
-                  - color: "#ef4444"
-                name:
-                  - color: "#ef4444"
-          styles:
-            card:
-              - border-radius: 12px
-              - padding: 14px 8px
-              - background-color: var(--card-background-color)
-              - border: 2px solid var(--divider-color)
-              - transition: all 0.2s
-            name:
-              - font-size: 12px
-              - font-weight: 700
-              - letter-spacing: 0.08em
-            icon:
-              - width: 26px
-
-    - type: horizontal-stack
-      cards:
-        - type: custom:button-card
-          entity: input_select.klima_wohnzimmer_manuell_modus
-          name: KÜHLEN
-          icon: mdi:snowflake
-          tap_action:
-            action: call-service
-            service: input_select.select_option
-            service_data:
-              entity_id: input_select.klima_wohnzimmer_manuell_modus
-              option: kühlen
-          state:
-            - value: kühlen
-              styles:
-                card:
-                  - background-color: rgba(14, 165, 233, 0.15)
-                  - border: 2px solid "#0ea5e9"
-                icon:
-                  - color: "#0ea5e9"
-                name:
-                  - color: "#0ea5e9"
-          styles:
-            card:
-              - border-radius: 12px
-              - padding: 12px 8px
-              - background-color: var(--card-background-color)
-              - border: 2px solid var(--divider-color)
-              - transition: all 0.2s
-            name:
-              - font-size: 11px
-              - font-weight: 700
-              - letter-spacing: 0.08em
-            icon:
-              - width: 22px
-
-        - type: custom:button-card
-          entity: input_select.klima_wohnzimmer_manuell_modus
-          name: HEIZEN
-          icon: mdi:fire
-          tap_action:
-            action: call-service
-            service: input_select.select_option
-            service_data:
-              entity_id: input_select.klima_wohnzimmer_manuell_modus
-              option: heizen
-          state:
-            - value: heizen
-              styles:
-                card:
-                  - background-color: rgba(249, 115, 22, 0.15)
-                  - border: 2px solid "#f97316"
-                icon:
-                  - color: "#f97316"
-                name:
-                  - color: "#f97316"
-          styles:
-            card:
-              - border-radius: 12px
-              - padding: 12px 8px
-              - background-color: var(--card-background-color)
-              - border: 2px solid var(--divider-color)
-              - transition: all 0.2s
-            name:
-              - font-size: 11px
-              - font-weight: 700
-              - letter-spacing: 0.08em
-            icon:
-              - width: 22px
-
-    - type: custom:mushroom-chips-card
-      chips:
-        - type: entity
-          entity: input_boolean.anwesnedheit_irgendjemand
-          name: Zuhause
-          icon: mdi:account-check
-          tap_action:
-            action: none
-        - type: entity
-          entity: input_boolean.anwesenheit_wohnbereich
-          name: Im Wohnbereich
-          icon: mdi:sofa-outline
-          tap_action:
-            action: none
-        - type: entity
-          entity: input_boolean.klima_wohnzimmer_battery_modus
-          name: Batterie-Modus
-          icon: mdi:battery-high
-          tap_action:
-            action: none
-
-    # ════════════════════════════════════════════════════════
-    # AUTO-MODUS
-    # ════════════════════════════════════════════════════════
-
-    - type: custom:mushroom-title-card
-      title: Auto-Modus
-      subtitle: Strompreisschwellen
-
-    - type: entities
-      show_header_toggle: false
-      entities:
-        - entity: sensor.electricity_price_holunderweg_3
-          name: Aktueller Strompreis
-          icon: mdi:lightning-bolt
-        - type: custom:slider-entity-row
-          entity: input_number.klima_wz_preis_kuehlen_max
-          name: Max. Preis Kühlen
-          icon: mdi:snowflake
-          min: 0.05
-          max: 0.60
-          step: 0.01
-        - type: custom:slider-entity-row
-          entity: input_number.klima_wz_preis_heizen_auto_max
-          name: Max. Preis Heizen (Auto)
-          icon: mdi:fire
-          min: 0.05
-          max: 0.60
-          step: 0.01
-
-    # ════════════════════════════════════════════════════════
-    # HEIZUNG ERSETZEN
-    # ════════════════════════════════════════════════════════
-
-    - type: custom:mushroom-title-card
-      title: Heizung Ersetzen
-      subtitle: Klimaanlage ersetzt Heizkörper bei günstigem Strom
-
-    - type: horizontal-stack
-      cards:
-        - type: custom:mushroom-entity-card
-          entity: input_boolean.klima_wz_heizung_ersatz_schalter
-          name: Aktivieren
-          icon: mdi:heat-wave
-          tap_action:
-            action: toggle
-          fill_container: true
-        - type: custom:mushroom-template-card
-          primary: >
-            {% if is_state('input_boolean.klima_wz_heizung_ersatz_aktiv', 'on') %}
-              Aktiv
-            {% else %}
-              Inaktiv
-            {% endif %}
-          secondary: Status
-          icon: >
-            {% if is_state('input_boolean.klima_wz_heizung_ersatz_aktiv', 'on') %}
-              mdi:check-circle
-            {% else %}
-              mdi:circle-off-outline
-            {% endif %}
-          icon_color: >
-            {% if is_state('input_boolean.klima_wz_heizung_ersatz_aktiv', 'on') %}
-              green
-            {% else %}
-              grey
-            {% endif %}
-          fill_container: true
-
-    - type: entities
-      title: Schwellenwerte
-      show_header_toggle: false
-      entities:
-        - entity: sensor.electricity_price_holunderweg_3
-          name: Aktueller Preis
-          icon: mdi:lightning-bolt
-        - type: custom:slider-entity-row
-          entity: input_number.klima_wz_preis_heizen_ersatz_max
-          name: Max. Preis (Ersetzen)
-          icon: mdi:currency-eur
-          min: 0.05
-          max: 0.60
-          step: 0.01
-        - entity: sensor.openweathermap_temperature
-          name: Aktuelle Außentemp
-          icon: mdi:thermometer-lines
-        - type: custom:slider-entity-row
-          entity: input_number.klima_wz_heizung_ersatz_aussentemp_max
-          name: Max. Außentemp (Heizen)
-          icon: mdi:thermometer-chevron-up
-          min: 0
-          max: 25
-          step: 1
-
-    - type: entities
-      title: Zieltemperaturen
-      show_header_toggle: false
-      entities:
-        - type: custom:slider-entity-row
-          entity: input_number.klima_wz_heizung_ersatz_temp_im_raum
-          name: Im Wohnbereich
-          icon: mdi:sofa-thermometer
-          min: 16
-          max: 25
-          step: 0.5
-        - type: custom:slider-entity-row
-          entity: input_number.klima_wz_heizung_ersatz_temp_zuhause
-          name: Zuhause, nicht im WZ
-          icon: mdi:home-thermometer
-          min: 14
-          max: 24
-          step: 0.5
-        - type: custom:slider-entity-row
-          entity: input_number.klima_wz_heizung_ersatz_temp_niemand
-          name: Niemand zuhause
-          icon: mdi:home-thermometer-outline
-          min: 10
-          max: 20
-          step: 0.5
-
-    - type: entities
-      title: Thermostat-Status
-      show_header_toggle: false
-      entities:
-        - entity: climate.bt_wohnzimmer_bt_wohnzimmer
-          name: BT Wohnzimmer
-        - entity: climate.bt_esszimmer_bt_esszimmer
-          name: BT Esszimmer
-        - entity: climate.bt_kuche_bt_kuche
-          name: BT Küche
-
-    # ════════════════════════════════════════════════════════
-    # VERLAUF
-    # ════════════════════════════════════════════════════════
-
-    - type: custom:mushroom-title-card
-      title: Verlauf
-      subtitle: Letzte 24 Stunden
-
-    - type: custom:apexcharts-card
-      header:
-        show: true
-        title: Temperatur
-        show_states: true
-        colorize_states: true
-      graph_span: 24h
-      apex_config:
-        chart:
-          height: 180
-          toolbar:
-            show: false
-        grid:
-          strokeDashArray: 4
+      - type: heading
+        heading: Verlauf 24 h
+        icon: mdi:chart-line
+      - type: custom:apexcharts-card
+        grid_options: {columns: full}
+        graph_span: 24h
+        header: {show: true, title: Temperatur, show_states: true, colorize_states: true}
+        apex_config:
+          chart: {height: 200, toolbar: {show: false}}
+          grid: {strokeDashArray: 4}
+          legend: {show: false}
+          yaxis: {decimalsInFloat: 1}
+        series:
+          - entity: sensor.wohnzimmer_temperatur
+            name: Raum
+            float_precision: 1
+            color: '#f59e0b'
+            type: area
+            opacity: 0.15
+            stroke_width: 2
+            group_by: {func: avg, duration: 10min}
+          - entity: sensor.klima_wohnzimmer_entscheidung
+            attribute: zieltemperatur_raum
+            name: Ziel
+            float_precision: 1
+            color: '#10b981'
+            stroke_width: 2
+            curve: stepline
+            group_by: {func: last, duration: 10min}
+          - entity: sensor.openweathermap_temperature
+            name: Außen
+            color: '#818cf8'
+            float_precision: 1
+            stroke_width: 2
+            group_by: {func: avg, duration: 10min}
+      - type: custom:apexcharts-card
+        grid_options: {columns: full}
+        graph_span: 24h
+        header: {show: true, title: Klima-Leistung, show_states: true, colorize_states: true}
+        apex_config:
+          chart: {height: 170, toolbar: {show: false}}
+          grid: {strokeDashArray: 4}
+          legend: {show: false}
         yaxis:
-          decimalsInFloat: 1
-      series:
-        - entity: sensor.wohnzimmer_temperatur
-          name: Innen
-          color: "#f59e0b"
-          stroke_width: 2
-          type: area
-          opacity: 0.12
-          fill_raw: last
-        - entity: sensor.openweathermap_temperature
-          name: Außen
-          color: "#818cf8"
-          stroke_width: 2
-          fill_raw: last
+          - {id: w, min: 0, decimals: 0}
+          - {id: hz, min: 0, opposite: true, decimals: 0}
+        series:
+          - entity: sensor.klima_wohnzimmer_klima_leistung
+            name: Leistung
+            float_precision: 0
+            yaxis_id: w
+            color: '#f97316'
+            type: area
+            opacity: 0.2
+            stroke_width: 2
+            curve: stepline
+            group_by: {func: avg, duration: 5min}
+          - entity: sensor.klima_wohnzimmer_kompressor
+            name: Kompressor
+            float_precision: 0
+            yaxis_id: hz
+            color: '#8b5cf6'
+            stroke_width: 1
+            curve: stepline
+            group_by: {func: avg, duration: 5min}
+      - type: custom:apexcharts-card
+        grid_options: {columns: full}
+        graph_span: 24h
+        header: {show: true, title: Strompreis und Grenze, show_states: true, colorize_states: true}
+        apex_config:
+          chart: {height: 150, toolbar: {show: false}}
+          grid: {strokeDashArray: 4}
+          legend: {show: false}
+          yaxis: {decimalsInFloat: 2}
+        series:
+          - entity: sensor.electricity_price_holunderweg_3
+            name: Preis
+            float_precision: 3
+            unit: €
+            color: '#f59e0b'
+            type: area
+            opacity: 0.15
+            stroke_width: 2
+            curve: stepline
+          - entity: sensor.klima_wohnzimmer_entscheidung
+            attribute: grenzpreis
+            name: Grenze
+            float_precision: 3
+            unit: €
+            color: '#10b981'
+            stroke_width: 2
+            curve: stepline
+            group_by: {func: last, duration: 15min}
 
-    - type: custom:apexcharts-card
-      header:
-        show: true
-        title: Strompreis
-        show_states: true
-        colorize_states: true
-      graph_span: 24h
-      apex_config:
-        chart:
-          height: 150
-          toolbar:
-            show: false
-        grid:
-          strokeDashArray: 4
-        yaxis:
-          decimalsInFloat: 3
-      series:
-        - entity: sensor.electricity_price_holunderweg_3
-          name: €/kWh
-          color: "#34d399"
-          stroke_width: 2
-          type: area
-          opacity: 0.15
-          fill_raw: last
+  # ══════════════════════════════════════════════════════════
+  # EINSTELLUNGEN, LERNWERTE, BÜRO
+  # ══════════════════════════════════════════════════════════
+  - type: grid
+    cards:
+      - type: heading
+        heading: Klima Büro
+        icon: mdi:desk
+        tap_action:
+          action: more-info
+          entity: climate.air_conditioner
+      - type: custom:button-card
+        entity: climate.air_conditioner
+        grid_options: {columns: full}
+        show_name: false
+        show_icon: false
+        show_state: false
+        triggers_update:
+          - sensor.temperature_gastezimmer_temperatur
+          - sensor.temperature_gastezimmer_luftfeuchtigkeit
+          - binary_sensor.192_168_178_23
+          - input_boolean.klima_buro_dauerhaft
+          - automation.klima_buro
+        tap_action: {action: more-info}
+        styles:
+          card: [{padding: 0}, {border-radius: 18px}, {overflow: hidden}]
+          grid: [{grid-template-areas: '"c"'}, {grid-template-columns: 1fr}]
+          custom_fields:
+            c: [{white-space: normal}, {text-align: left}, {width: 100%}]
+        custom_fields:
+          c: |
+            [[[
+              const n = (v) => { const x = parseFloat(v); return isNaN(x) ? null : x; };
+              const f = (v, d) => { const x = n(v); return x === null ? '–' : x.toLocaleString('de-DE', {minimumFractionDigits: d, maximumFractionDigits: d}); };
+              const hv = entity.state;
+              const M = {cool: ['Kühlt', '#0ea5e9', 'mdi:snowflake'], heat: ['Heizt', '#f97316', 'mdi:fire'], dry: ['Entfeuchtet', '#14b8a6', 'mdi:water-percent'],
+                         fan_only: ['Lüftet', '#14b8a6', 'mdi:fan'], heat_cool: ['Auto', '#8b5cf6', 'mdi:thermostat-auto'], off: ['Aus', '#9ca3af', 'mdi:power-standby']};
+              const [pill, col, ico] = M[hv] || ['Nicht erreichbar', '#9ca3af', 'mdi:wifi-off'];
+              const room = states['sensor.temperature_gastezimmer_temperatur']?.state;
+              const hum = states['sensor.temperature_gastezimmer_luftfeuchtigkeit']?.state;
+              const pc = states['binary_sensor.192_168_178_23']?.state === 'on';
+              const perm = states['input_boolean.klima_buro_dauerhaft']?.state === 'on';
+              const auto = states['automation.klima_buro']?.state === 'on';
+              const why = !auto ? 'Automatik aus – nur Handbetrieb'
+                        : (pc || perm) ? `${perm ? 'Dauerhaft an' : 'Gaming-PC läuft'}: kühlt ab 24,5 °C auf 23 °C, heizt unter 19,5 °C auf 20 °C`
+                        : 'Wartet: läuft nur, wenn der Gaming-PC an ist oder „Dauerhaft“ gesetzt ist';
+              const chip = (on, icon, lab, c) => `<span style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:999px;font-size:12px;
+                   background:${on ? c + '22' : 'rgba(127,127,127,.1)'};color:${on ? c : 'var(--secondary-text-color)'}">
+                   <ha-icon icon="${icon}" style="--mdc-icon-size:14px"></ha-icon>${lab}</span>`;
+              return `
+              <div style="padding:18px;background:linear-gradient(135deg, ${col}26 0%, transparent 60%)">
+                <div style="display:flex;align-items:center;gap:12px">
+                  <div style="width:44px;height:44px;border-radius:14px;display:flex;align-items:center;justify-content:center;background:${col}2e">
+                    <ha-icon icon="${ico}" style="--mdc-icon-size:26px;color:${col}"></ha-icon></div>
+                  <div style="flex:1">
+                    <div style="font-size:12px;color:var(--secondary-text-color);text-transform:uppercase;letter-spacing:.06em">Büro · Gästezimmer</div>
+                    <div style="font-size:18px;font-weight:700">${pill}${hv !== 'off' && entity.attributes.temperature != null ? ` <span style="font-weight:500;font-size:14px;color:var(--secondary-text-color)">auf ${f(entity.attributes.temperature, 1)} °C</span>` : ''}</div>
+                  </div>
+                  <div style="text-align:right">
+                    <div style="font-size:40px;font-weight:300;line-height:1">${f(room, 1)}<span style="font-size:18px;vertical-align:top">°C</span></div>
+                    <div style="font-size:11px;color:var(--secondary-text-color)">${f(hum, 0)} % rF</div>
+                  </div>
+                </div>
+                <div style="margin-top:12px;font-size:13px;line-height:1.35">${why}</div>
+                <div style="margin-top:12px;display:flex;flex-wrap:wrap;gap:6px">
+                  ${chip(auto, 'mdi:robot', 'Automatik', '#10b981')}
+                  ${chip(pc, 'mdi:desktop-tower-monitor', pc ? 'PC an' : 'PC aus', '#3b82f6')}
+                  ${chip(perm, 'mdi:pin', 'Dauerhaft', '#f59e0b')}
+                </div>
+              </div>`;
+            ]]]
+      - type: tile
+        entity: climate.air_conditioner
+        name: Büro-Klima
+        grid_options: {columns: full}
+        features_position: bottom
+        features:
+          - type: climate-hvac-modes
+            hvac_modes: ['off', cool, heat, dry, fan_only]
+          - type: target-temperature
+      - type: tile
+        entity: input_boolean.klima_buro_dauerhaft
+        name: Dauerhaft
+        icon: mdi:pin
+        color: amber
+        vertical: true
+        grid_options: {columns: 6, rows: 2}
+        tap_action: {action: toggle}
+      - type: tile
+        entity: automation.klima_buro
+        name: Automatik
+        icon: mdi:robot
+        color: green
+        vertical: true
+        grid_options: {columns: 6, rows: 2}
+        tap_action: {action: toggle}
+        state_content: state
+
+      - type: heading
+        heading: Zieltemperaturen Wohnzimmer
+        icon: mdi:thermometer-check
+      - &num
+        type: tile
+        entity: number.klima_wohnzimmer_zieltemperatur_im_raum
+        name: Im Wohnbereich
+        icon: mdi:sofa-outline
+        color: deep-orange
+        grid_options: {columns: 6, rows: 2}
+        features_position: bottom
+        features:
+          - {type: numeric-input, style: buttons}
+      - <<: *num
+        entity: number.klima_wohnzimmer_zieltemperatur_zuhause
+        name: Zuhause
+        icon: mdi:home-thermometer
+      - <<: *num
+        entity: number.klima_wohnzimmer_zieltemperatur_nacht
+        name: Nacht
+        icon: mdi:weather-night
+        color: indigo
+      - <<: *num
+        entity: number.klima_wohnzimmer_zieltemperatur_nacht_fernseher
+        name: Nacht, TV an
+        icon: mdi:television
+        color: indigo
+      - <<: *num
+        entity: number.klima_wohnzimmer_zieltemperatur_niemand
+        name: Niemand da
+        icon: mdi:home-export-outline
+        color: blue-grey
+
+      - type: heading
+        heading: Grenzen und Preise
+        icon: mdi:tune-variant
+      - <<: *num
+        entity: number.klima_wohnzimmer_max_preis_kuhlen
+        name: Max. Preis Kühlen
+        icon: mdi:snowflake
+        color: light-blue
+      - <<: *num
+        entity: number.klima_wohnzimmer_boost_preis
+        name: Boost unter
+        icon: mdi:fan-plus
+        color: green
+      - <<: *num
+        entity: number.klima_wohnzimmer_max_aussentemperatur_ersatz
+        name: Ersatz bis außen
+        icon: mdi:thermometer-chevron-up
+        color: deep-orange
+      - <<: *num
+        entity: number.klima_wohnzimmer_uberschuss_soc_schwelle
+        name: Überschuss ab Akku
+        icon: mdi:battery-arrow-up
+        color: amber
+      - <<: *num
+        entity: number.klima_wohnzimmer_olpreis
+        name: Ölpreis
+        icon: mdi:oil
+        color: brown
+      - <<: *num
+        entity: number.klima_wohnzimmer_kesselwirkungsgrad
+        name: Kesselwirkungsgrad
+        icon: mdi:water-boiler
+        color: brown
+
+      - type: heading
+        heading: Gelernt
+        icon: mdi:school-outline
+      - type: custom:button-card
+        entity: sensor.klima_wohnzimmer_gelernte_werte
+        grid_options: {columns: full}
+        show_name: false
+        show_icon: false
+        show_state: false
+        triggers_update: [sensor.klima_wohnzimmer_auskuhlzeit_nacht, sensor.klima_wohnzimmer_warmeverlust_tag]
+        tap_action: {action: more-info}
+        styles:
+          card: [{padding: 16px}, {border-radius: 18px}]
+          grid: [{grid-template-areas: '"c"'}, {grid-template-columns: 1fr}]
+          custom_fields:
+            c: [{white-space: normal}, {text-align: left}, {width: 100%}]
+        custom_fields:
+          c: |
+            [[[
+              const a = entity.attributes;
+              const n = (v) => { const x = parseFloat(v); return isNaN(x) ? null : x; };
+              const f = (v, d) => { const x = n(v); return x === null ? '–' : x.toLocaleString('de-DE', {minimumFractionDigits: d, maximumFractionDigits: d}); };
+              const cool = n(states['sensor.klima_wohnzimmer_auskuhlzeit_nacht']?.state);
+              const loss = n(states['sensor.klima_wohnzimmer_warmeverlust_tag']?.state);
+              const kv = (lab, v, sub) => `<div style="padding:10px 12px;border-radius:14px;background:rgba(127,127,127,.08)">
+                  <div style="font-size:11px;color:var(--secondary-text-color)">${lab}</div>
+                  <div style="font-size:16px;font-weight:600;margin-top:2px">${v}</div>
+                  <div style="font-size:11px;color:var(--secondary-text-color)">${sub}</div></div>`;
+              const hz = Object.entries(a.leistung_je_hz || {}).map(([k, v]) => [Number(k), Number(v)]).sort((x, y) => x[0] - y[0]);
+              const hmax = Math.max(...hz.map(x => x[1]), 1);
+              const bars = hz.map(([k, v]) => `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+                  <div style="font-size:10px;color:var(--secondary-text-color)">${v}</div>
+                  <div style="width:100%;max-width:28px;height:${Math.round(v / hmax * 64)}px;border-radius:6px 6px 2px 2px;
+                       background:linear-gradient(180deg,#f97316,#f59e0b)"></div>
+                  <div style="font-size:10px;color:var(--secondary-text-color)">${k} Hz</div></div>`).join('');
+              return `
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                  ${kv('Sensorversatz Heizen', f(a.versatz_heizen_k, 1) + ' K', (a.versatz_messungen?.heat ?? 0) + ' Messungen')}
+                  ${kv('Auskühlzeit Nacht', cool === null ? 'noch offen' : f(cool, 0) + ' h', 'Zeitkonstante des Raums')}
+                  ${kv('Auskühlrate', f(a.auskuehlrate_k_pro_h_pro_k, 4), 'K/h je K Differenz · ' + (a.auskuehl_messungen ?? 0) + ' Phasen')}
+                  ${kv('Wärmeverlust', loss === null ? 'noch offen' : f(loss, 0) + ' W/K', 'nur reine Klima-Tage')}
+                </div>
+                ${hz.length ? `<div style="font-size:12px;color:var(--secondary-text-color);margin:14px 0 6px">Leistung je Kompressor-Drehzahl (W)</div>
+                  <div style="display:flex;align-items:flex-end;gap:6px;height:100px">${bars}</div>` : ''}
+                <div style="font-size:11px;color:var(--secondary-text-color);margin-top:10px">${f(a.datensaetze, 0)} Datensätze</div>`;
+            ]]]
