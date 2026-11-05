@@ -44,6 +44,8 @@ DEVICES = [
     ('Licht LED Keller (?)', 'licht', 'sensor.licht_schrank_esszimmer_leistung', 'sensor.licht_led_keller_energie_gesamt'),
     # no plug: HASS.Agent runs scripts/surface_power.ps1 every 60 s (estimate, 0 away from home / on battery);
     # UI helpers sensor.surface_netzbezug (0 when stale > 3 min) and sensor.surface_strom (kWh)
+    # no plug: DLNA renderer of the basement TV reachable = on; ~120 W from 23 on/off load steps (26.10.-05.11.2026)
+    ('Fernseher Keller (≈120 W)', 'tv', 'sensor.fernseher_keller_leistung', 'sensor.fernseher_keller_strom'),
     ('Surface (geschätzt)', 'computer', 'sensor.surface_netzbezug', 'sensor.surface_strom'),
     ('Akku laden (Netz)', 'akku', 'sensor.shellyplus1pm_e86beaeae1a0_switch_0_power', 'sensor.shellyplus1pm_e86beaeae1a0_switch_0_energy'),
     ('Hydrotower Erdbeere (?)', 'pool', 'sensor.pool_warmepumpe_leistung', 'sensor.pool_warmepumpe_energie_gesamt'),

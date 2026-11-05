@@ -41,24 +41,25 @@ sections:
         , \"c\": \"licht\", \"p\": \"sensor.shellydimmer2_08f9e04436dc_power\"}, {\"n\": \"Licht außen 2\", \"c\": \"licht\", \"p\": \"sensor.shellydimmer2_4cebd6edf59d_power\"}, {\"n\": \"Licht Wohnzimmer\"\
         , \"c\": \"licht\", \"p\": \"sensor.licht_wohnzimmer_leistung\"}, {\"n\": \"Licht Bücherregal\", \"c\": \"licht\", \"p\": \"sensor.antela_smart_steckdose_leistung\"}, {\"n\": \"Fernseher Wohnzimmer\"\
         , \"c\": \"tv\", \"p\": \"sensor.kinderzimmer_hochbett_licht_leistung\"}, {\"n\": \"Licht Keller Lasercutter\", \"c\": \"licht\", \"p\": \"sensor.licht_keller_lasercutter_leistung\"}, {\"n\": \"\
-        Licht LED Keller (?)\", \"c\": \"licht\", \"p\": \"sensor.licht_schrank_esszimmer_leistung\"}, {\"n\": \"Surface (geschätzt)\", \"c\": \"computer\", \"p\": \"sensor.surface_netzbezug\"}, {\"n\"\
-        : \"Akku laden (Netz)\", \"c\": \"akku\", \"p\": \"sensor.shellyplus1pm_e86beaeae1a0_switch_0_power\"}, {\"n\": \"Hydrotower Erdbeere (?)\", \"c\": \"pool\", \"p\": \"sensor.pool_warmepumpe_leistung\"\
-        }, {\"n\": \"Hydrotower Salat (?)\", \"c\": \"pool\", \"p\": \"sensor.poolpumpe_leistung\"}, {\"n\": \"Pool-Pumpe (?)\", \"c\": \"pool\", \"p\": \"sensor.steckdose_pool_pumpe_leistung\"}, {\"n\"\
-        : \"Pool-Pumpe Dach (?)\", \"c\": \"pool\", \"p\": \"sensor.steckdose_pool_pumpe_dach_leistung\"}, {\"n\": \"Pool außen (?)\", \"c\": \"pool\", \"p\": \"sensor.antela_smart_plug_leistung\"}, {\"\
-        n\": \"Hydo Paprika (?)\", \"c\": \"klaeren\", \"p\": \"sensor.tasmota_energy_power_2\"}, {\"n\": \"Monitor Kamera Keller (?)\", \"c\": \"klaeren\", \"p\": \"sensor.wlan_steckdose_2_leistung\"}],\
-        \ CAT = {\"auto\": {\"l\": \"Auto\", \"col\": \"#8b5cf6\", \"i\": \"mdi:car-electric\"}, \"klima\": {\"l\": \"Klima\", \"col\": \"#0ea5e9\", \"i\": \"mdi:air-conditioner\"}, \"heizung\": {\"l\"\
-        : \"Heizung\", \"col\": \"#ef4444\", \"i\": \"mdi:fire\"}, \"spuel\": {\"l\": \"Spülmaschine\", \"col\": \"#3b82f6\", \"i\": \"mdi:dishwasher\"}, \"wasch\": {\"l\": \"Waschmaschine\", \"col\": \"\
-        #06b6d4\", \"i\": \"mdi:washing-machine\"}, \"licht\": {\"l\": \"Licht\", \"col\": \"#f59e0b\", \"i\": \"mdi:lightbulb-on-outline\"}, \"tv\": {\"l\": \"TV & Unterhaltung\", \"col\": \"#ec4899\"\
-        , \"i\": \"mdi:television\"}, \"computer\": {\"l\": \"Computer\", \"col\": \"#6366f1\", \"i\": \"mdi:laptop\"}, \"akku\": {\"l\": \"Akku laden\", \"col\": \"#10b981\", \"i\": \"mdi:battery-charging\"\
-        }, \"pool\": {\"l\": \"Pool & Hydro\", \"col\": \"#14b8a6\", \"i\": \"mdi:pool\"}, \"klaeren\": {\"l\": \"Zu klären\", \"col\": \"#a855f7\", \"i\": \"mdi:help-circle-outline\"}};\n\n  const total\
-        \ = Math.max(0, (n('sensor.calculated_house_consumption') ?? 0) + [\"sensor.tesla_wall_connector_gesamtleistung\", \"sensor.klima_wohnzimmer_klima_leistung\"].reduce((a, id) => a + Math.max(0, n(id)\
-        \ ?? 0), 0));\n  const base = n('sensor.grundlast');\n  const devs = DEV.map(d => ({...d, w: n(d.p), off: ['unavailable', 'unknown', undefined].includes(states[d.p]?.state)}));\n  const byCat =\
-        \ {};\n  devs.forEach(d => { if (d.w > 0) byCat[d.c] = (byCat[d.c] || 0) + d.w; });\n  const measured = Object.values(byCat).reduce((a, b) => a + b, 0);\n  const rest = Math.max(0, total - measured);\n\
-        \  const baseShare = base === null ? 0 : Math.min(rest, base);\n  const segs = Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([c, w]) => [CAT[c].l, w, CAT[c].col])\n    .concat([['Grundlast',\
-        \ baseShare, '#64748b'], ['Nicht zugeordnet', rest - baseShare, 'rgba(127,127,127,.35)']]);\n  const sum = Math.max(total, measured, 1);\n  const bar = segs.filter(s => s[1] > 0).map(s => `<div\
-        \ title=\"${s[0]}: ${W(s[1])}\" style=\"width:${s[1] / sum * 100}%;background:${s[2]}\"></div>`).join('');\n  const legend = segs.filter(s => s[1] > 0.5).map(s => `<span style=\"display:inline-flex;align-items:center;gap:5px;margin:0\
-        \ 10px 4px 0;font-size:12px\">\n      <span style=\"width:10px;height:10px;border-radius:3px;background:${s[2]}\"></span>${s[0]} <b>${W(s[1])}</b></span>`).join('');\n  const run = devs.filter(d\
-        \ => d.w > 1).sort((a, b) => b.w - a.w);\n  const rows = run.map(d => { const c = CAT[d.c]; return `<div style=\"display:flex;align-items:center;gap:10px;padding:6px 0\">\n      <div style=\"width:30px;height:30px;flex:none;border-radius:10px;display:flex;align-items:center;justify-content:center;background:${c.col}22\"\
+        Licht LED Keller (?)\", \"c\": \"licht\", \"p\": \"sensor.licht_schrank_esszimmer_leistung\"}, {\"n\": \"Fernseher Keller (≈120 W)\", \"c\": \"tv\", \"p\": \"sensor.fernseher_keller_leistung\"},\
+        \ {\"n\": \"Surface (geschätzt)\", \"c\": \"computer\", \"p\": \"sensor.surface_netzbezug\"}, {\"n\": \"Akku laden (Netz)\", \"c\": \"akku\", \"p\": \"sensor.shellyplus1pm_e86beaeae1a0_switch_0_power\"\
+        }, {\"n\": \"Hydrotower Erdbeere (?)\", \"c\": \"pool\", \"p\": \"sensor.pool_warmepumpe_leistung\"}, {\"n\": \"Hydrotower Salat (?)\", \"c\": \"pool\", \"p\": \"sensor.poolpumpe_leistung\"}, {\"\
+        n\": \"Pool-Pumpe (?)\", \"c\": \"pool\", \"p\": \"sensor.steckdose_pool_pumpe_leistung\"}, {\"n\": \"Pool-Pumpe Dach (?)\", \"c\": \"pool\", \"p\": \"sensor.steckdose_pool_pumpe_dach_leistung\"\
+        }, {\"n\": \"Pool außen (?)\", \"c\": \"pool\", \"p\": \"sensor.antela_smart_plug_leistung\"}, {\"n\": \"Hydo Paprika (?)\", \"c\": \"klaeren\", \"p\": \"sensor.tasmota_energy_power_2\"}, {\"n\"\
+        : \"Monitor Kamera Keller (?)\", \"c\": \"klaeren\", \"p\": \"sensor.wlan_steckdose_2_leistung\"}], CAT = {\"auto\": {\"l\": \"Auto\", \"col\": \"#8b5cf6\", \"i\": \"mdi:car-electric\"}, \"klima\"\
+        : {\"l\": \"Klima\", \"col\": \"#0ea5e9\", \"i\": \"mdi:air-conditioner\"}, \"heizung\": {\"l\": \"Heizung\", \"col\": \"#ef4444\", \"i\": \"mdi:fire\"}, \"spuel\": {\"l\": \"Spülmaschine\", \"\
+        col\": \"#3b82f6\", \"i\": \"mdi:dishwasher\"}, \"wasch\": {\"l\": \"Waschmaschine\", \"col\": \"#06b6d4\", \"i\": \"mdi:washing-machine\"}, \"licht\": {\"l\": \"Licht\", \"col\": \"#f59e0b\", \"\
+        i\": \"mdi:lightbulb-on-outline\"}, \"tv\": {\"l\": \"TV & Unterhaltung\", \"col\": \"#ec4899\", \"i\": \"mdi:television\"}, \"computer\": {\"l\": \"Computer\", \"col\": \"#6366f1\", \"i\": \"mdi:laptop\"\
+        }, \"akku\": {\"l\": \"Akku laden\", \"col\": \"#10b981\", \"i\": \"mdi:battery-charging\"}, \"pool\": {\"l\": \"Pool & Hydro\", \"col\": \"#14b8a6\", \"i\": \"mdi:pool\"}, \"klaeren\": {\"l\":\
+        \ \"Zu klären\", \"col\": \"#a855f7\", \"i\": \"mdi:help-circle-outline\"}};\n\n  const total = Math.max(0, (n('sensor.calculated_house_consumption') ?? 0) + [\"sensor.tesla_wall_connector_gesamtleistung\"\
+        , \"sensor.klima_wohnzimmer_klima_leistung\"].reduce((a, id) => a + Math.max(0, n(id) ?? 0), 0));\n  const base = n('sensor.grundlast');\n  const devs = DEV.map(d => ({...d, w: n(d.p), off: ['unavailable',\
+        \ 'unknown', undefined].includes(states[d.p]?.state)}));\n  const byCat = {};\n  devs.forEach(d => { if (d.w > 0) byCat[d.c] = (byCat[d.c] || 0) + d.w; });\n  const measured = Object.values(byCat).reduce((a,\
+        \ b) => a + b, 0);\n  const rest = Math.max(0, total - measured);\n  const baseShare = base === null ? 0 : Math.min(rest, base);\n  const segs = Object.entries(byCat).sort((a, b) => b[1] - a[1]).map(([c,\
+        \ w]) => [CAT[c].l, w, CAT[c].col])\n    .concat([['Grundlast', baseShare, '#64748b'], ['Nicht zugeordnet', rest - baseShare, 'rgba(127,127,127,.35)']]);\n  const sum = Math.max(total, measured,\
+        \ 1);\n  const bar = segs.filter(s => s[1] > 0).map(s => `<div title=\"${s[0]}: ${W(s[1])}\" style=\"width:${s[1] / sum * 100}%;background:${s[2]}\"></div>`).join('');\n  const legend = segs.filter(s\
+        \ => s[1] > 0.5).map(s => `<span style=\"display:inline-flex;align-items:center;gap:5px;margin:0 10px 4px 0;font-size:12px\">\n      <span style=\"width:10px;height:10px;border-radius:3px;background:${s[2]}\"\
+        ></span>${s[0]} <b>${W(s[1])}</b></span>`).join('');\n  const run = devs.filter(d => d.w > 1).sort((a, b) => b.w - a.w);\n  const rows = run.map(d => { const c = CAT[d.c]; return `<div style=\"\
+        display:flex;align-items:center;gap:10px;padding:6px 0\">\n      <div style=\"width:30px;height:30px;flex:none;border-radius:10px;display:flex;align-items:center;justify-content:center;background:${c.col}22\"\
         >\n        <ha-icon icon=\"${c.i}\" style=\"--mdc-icon-size:17px;color:${c.col}\"></ha-icon></div>\n      <div style=\"flex:1;min-width:0\"><div style=\"font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis\"\
         >${d.n}</div>\n        <div style=\"height:4px;border-radius:2px;background:rgba(127,127,127,.12);margin-top:4px;overflow:hidden\">\n          <div style=\"height:100%;width:${Math.min(100, d.w\
         \ / sum * 100)}%;background:${c.col}\"></div></div></div>\n      <div style=\"width:70px;text-align:right;font-size:13px;font-weight:600\">${W(d.w)}</div></div>`; }).join('');\n  const offline =\
@@ -204,6 +205,16 @@ sections:
     - entity: sensor.licht_schrank_esszimmer_leistung
       name: Licht LED Keller (?)
       color: '#f59e0b'
+      type: area
+      opacity: 0.55
+      float_precision: 0
+      group_by:
+        func: avg
+        duration: 10min
+        fill: zero
+    - entity: sensor.fernseher_keller_leistung
+      name: Fernseher Keller (≈120 W)
+      color: '#ec4899'
       type: area
       opacity: 0.55
       float_precision: 0
