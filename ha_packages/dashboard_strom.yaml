@@ -294,30 +294,76 @@ sections:
             ]]]
       - type: heading
         heading: Solarertrag
-        heading_style: subtitle
-      - &stat
-        type: statistic
-        entity: sensor.solar_lifetime
-        name: Heute
         icon: mdi:white-balance-sunny
-        stat_type: change
-        period: {calendar: {period: day}}
-        grid_options: {columns: 4, rows: 2}
-      - <<: *stat
-        name: Gestern
-        period: {calendar: {period: day, offset: -1}}
-      - <<: *stat
-        name: Woche
-        period: {calendar: {period: week}}
-      - <<: *stat
-        name: Letzte Woche
-        period: {calendar: {period: week, offset: -1}}
-      - <<: *stat
-        name: Monat
-        period: {calendar: {period: month}}
-      - <<: *stat
-        name: Letzter Monat
-        period: {calendar: {period: month, offset: -1}}
+      # ---------- Solarertrag: Panels (4 Victron), Ecoflow (Einspeise-Steckdose), gesamt ----------
+      # Werte aus der Langzeitstatistik (recorder/statistic_during_period), alle 5 min neu geladen.
+      - type: custom:button-card
+        entity: sensor.solarproduktion
+        grid_options: {columns: full}
+        show_name: false
+        show_icon: false
+        show_state: false
+        triggers_update: all
+        tap_action: {action: none}
+        styles:
+          card: [{padding: 16px}, {border-radius: 18px}]
+          grid: [{grid-template-areas: '"c"'}, {grid-template-columns: 1fr}]
+          custom_fields:
+            c: [{white-space: normal}, {text-align: left}, {width: 100%}]
+        custom_fields:
+          c: |
+            [[[
+              const PANELS = ['sensor.victron_mppt_hl_total_kwh', 'sensor.victron_mppt_hr_total_kwh',
+                              'sensor.victron_mppt_vl_total_kwh', 'sensor.victron_mppt_vr_total_kwh'];
+              const ECO = 'sensor.antela_smart_steckdose_4_energie_gesamt';
+              const P = [
+                ['Heute', {calendar: {period: 'day'}}],
+                ['Gestern', {calendar: {period: 'day', offset: -1}}],
+                ['Diese Woche', {calendar: {period: 'week'}}],
+                ['Letzte Woche', {calendar: {period: 'week', offset: -1}}],
+                ['Dieser Monat', {calendar: {period: 'month'}}],
+                ['Letzter Monat', {calendar: {period: 'month', offset: -1}}],
+                ['Letzte 7 Tage', {rolling_window: {duration: {days: 7}}}],
+                ['Letzte 30 Tage', {rolling_window: {duration: {days: 30}}}],
+              ];
+              const card = this;
+              const cache = window.__solarYield || (window.__solarYield = {t: 0, busy: false, rows: null});
+              if (!cache.busy && Date.now() - cache.t > 300000) {
+                cache.busy = true;
+                const one = (id, per) => hass.callWS({type: 'recorder/statistic_during_period', statistic_id: id, types: ['change'], ...per})
+                  .then(r => Math.max(0, r?.change ?? 0)).catch(() => 0);
+                Promise.all(P.map(([lab, per]) => Promise.all([Promise.all(PANELS.map(id => one(id, per))), one(ECO, per)])
+                  .then(([pv, eco]) => ({lab, pv: pv.reduce((a, b) => a + b, 0), eco}))))
+                  .then(rows => { cache.rows = rows; cache.t = Date.now(); })
+                  .finally(() => { cache.busy = false; card.update ? card.update() : card.requestUpdate && card.requestUpdate(); });
+              }
+              const f = (v) => v === null || v === undefined ? '–' : v.toLocaleString('de-DE', {minimumFractionDigits: v < 10 ? 2 : 1, maximumFractionDigits: v < 10 ? 2 : 1});
+              if (!cache.rows) return '<div style="padding:8px 0;color:var(--secondary-text-color)">Lade Solarertrag …</div>';
+              const groups = [[0, 1], [2, 3], [4, 5], [6, 7]];
+              const block = (idx) => {
+                const rows = idx.map(i => cache.rows[i]);
+                const mx = Math.max(...rows.map(r => r.pv + r.eco), 0.01);
+                return rows.map(r => {
+                  const tot = r.pv + r.eco;
+                  return `<div style="padding:7px 0">
+                    <div style="display:grid;grid-template-columns:1fr 46px 46px 52px;gap:6px;align-items:baseline">
+                      <div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.lab}</div>
+                      <div style="text-align:right;font-size:12px;color:#d97706">${f(r.pv)}</div>
+                      <div style="text-align:right;font-size:12px;color:#65a30d">${f(r.eco)}</div>
+                      <div style="text-align:right;font-size:14px;font-weight:700">${f(tot)}</div></div>
+                    <div style="display:flex;height:6px;border-radius:3px;overflow:hidden;background:rgba(127,127,127,.12);margin-top:4px">
+                      <div style="width:${r.pv / mx * 100}%;background:#f59e0b"></div>
+                      <div style="width:${r.eco / mx * 100}%;background:#84cc16"></div></div></div>`; }).join('');
+              };
+              const head = `<div style="display:grid;grid-template-columns:1fr 46px 46px 52px;gap:6px;font-size:11px;color:var(--secondary-text-color);padding-bottom:4px;border-bottom:1px solid var(--divider-color)">
+                  <span>kWh</span>
+                  <span style="text-align:right"><span style="color:#f59e0b">■</span> Panels</span>
+                  <span style="text-align:right"><span style="color:#84cc16">■</span> Eco</span>
+                  <span style="text-align:right">Gesamt</span></div>`;
+              const sep = '<div style="height:1px;background:var(--divider-color);margin:2px 0"></div>';
+              return head + groups.map(block).join(sep) +
+                `<div style="font-size:11px;color:var(--secondary-text-color);margin-top:8px">Panels = 4 Victron-Laderegler (in den Akku) · Ecoflow = Einspeise-Steckdose (ins Haus) · aktualisiert alle 5 min</div>`;
+            ]]]
 
       - type: heading
         heading: Verlauf 24 h
