@@ -8,6 +8,10 @@
   "name": "Klima Wohnzimmer"
  },
  {
+  "stat_consumption": "sensor.olbrenner_strom",
+  "name": "Ölheizung Brenner (≈300 W)"
+ },
+ {
   "stat_consumption": "sensor.tasmota_energy_total",
   "name": "Spülmaschine"
  },

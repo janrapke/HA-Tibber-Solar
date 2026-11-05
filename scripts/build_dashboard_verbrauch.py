@@ -13,6 +13,7 @@ OUT = pathlib.Path(__file__).resolve().parents[1] / 'ha_packages'
 CATS = {
     'auto': ('Auto', '#8b5cf6', 'mdi:car-electric'),
     'klima': ('Klima', '#0ea5e9', 'mdi:air-conditioner'),
+    'heizung': ('Heizung', '#ef4444', 'mdi:fire'),
     'spuel': ('Spülmaschine', '#3b82f6', 'mdi:dishwasher'),
     'wasch': ('Waschmaschine', '#06b6d4', 'mdi:washing-machine'),
     'licht': ('Licht', '#f59e0b', 'mdi:lightbulb-on-outline'),
@@ -26,6 +27,10 @@ CATS = {
 DEVICES = [
     ('Tesla Wallbox', 'auto', 'sensor.tesla_wall_connector_gesamtleistung', 'sensor.tesla_wall_connector_energie'),
     ('Klima Wohnzimmer', 'klima', 'sensor.klima_wohnzimmer_klima_leistung', 'sensor.klima_wohnzimmer_klimastrom_gesamt'),
+    # no plug: the burner adds ~300 W while it runs (load step measured 27.10.2026: +295 / -298 W);
+    # helpers sensor.olbrenner_leistung (template on binary_sensor.olheizung_brenner_lauft) and
+    # sensor.olbrenner_strom (Riemann integral) were created in the UI
+    ('Ölheizung Brenner (≈300 W)', 'heizung', 'sensor.olbrenner_leistung', 'sensor.olbrenner_strom'),
     ('Spülmaschine', 'spuel', 'sensor.tasmota_energy_power', 'sensor.tasmota_energy_total'),
     ('Waschmaschine', 'wasch', 'sensor.waschmaschiene_energy_power', 'sensor.miner_energy_total'),
     ('Licht außen 1', 'licht', 'sensor.shellydimmer2_08f9e04436dc_power', 'sensor.shellydimmer2_08f9e04436dc_energy'),
