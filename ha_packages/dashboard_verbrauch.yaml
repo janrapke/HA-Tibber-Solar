@@ -41,14 +41,15 @@ sections:
         , \"c\": \"licht\", \"p\": \"sensor.shellydimmer2_08f9e04436dc_power\"}, {\"n\": \"Licht außen 2\", \"c\": \"licht\", \"p\": \"sensor.shellydimmer2_4cebd6edf59d_power\"}, {\"n\": \"Licht Wohnzimmer\"\
         , \"c\": \"licht\", \"p\": \"sensor.licht_wohnzimmer_leistung\"}, {\"n\": \"Licht Bücherregal\", \"c\": \"licht\", \"p\": \"sensor.antela_smart_steckdose_leistung\"}, {\"n\": \"Fernseher Wohnzimmer\"\
         , \"c\": \"tv\", \"p\": \"sensor.kinderzimmer_hochbett_licht_leistung\"}, {\"n\": \"Licht Keller Lasercutter\", \"c\": \"licht\", \"p\": \"sensor.licht_keller_lasercutter_leistung\"}, {\"n\": \"\
-        Licht LED Keller (?)\", \"c\": \"licht\", \"p\": \"sensor.licht_schrank_esszimmer_leistung\"}, {\"n\": \"Akku laden (Netz)\", \"c\": \"akku\", \"p\": \"sensor.shellyplus1pm_e86beaeae1a0_switch_0_power\"\
-        }, {\"n\": \"Hydrotower Erdbeere (?)\", \"c\": \"pool\", \"p\": \"sensor.pool_warmepumpe_leistung\"}, {\"n\": \"Hydrotower Salat (?)\", \"c\": \"pool\", \"p\": \"sensor.poolpumpe_leistung\"}, {\"\
-        n\": \"Pool-Pumpe (?)\", \"c\": \"pool\", \"p\": \"sensor.steckdose_pool_pumpe_leistung\"}, {\"n\": \"Pool-Pumpe Dach (?)\", \"c\": \"pool\", \"p\": \"sensor.steckdose_pool_pumpe_dach_leistung\"\
-        }, {\"n\": \"Pool außen (?)\", \"c\": \"pool\", \"p\": \"sensor.antela_smart_plug_leistung\"}, {\"n\": \"Hydo Paprika (?)\", \"c\": \"klaeren\", \"p\": \"sensor.tasmota_energy_power_2\"}, {\"n\"\
-        : \"Monitor Kamera Keller (?)\", \"c\": \"klaeren\", \"p\": \"sensor.wlan_steckdose_2_leistung\"}], CAT = {\"auto\": {\"l\": \"Auto\", \"col\": \"#8b5cf6\", \"i\": \"mdi:car-electric\"}, \"klima\"\
-        : {\"l\": \"Klima\", \"col\": \"#0ea5e9\", \"i\": \"mdi:air-conditioner\"}, \"heizung\": {\"l\": \"Heizung\", \"col\": \"#ef4444\", \"i\": \"mdi:fire\"}, \"spuel\": {\"l\": \"Spülmaschine\", \"\
-        col\": \"#3b82f6\", \"i\": \"mdi:dishwasher\"}, \"wasch\": {\"l\": \"Waschmaschine\", \"col\": \"#06b6d4\", \"i\": \"mdi:washing-machine\"}, \"licht\": {\"l\": \"Licht\", \"col\": \"#f59e0b\", \"\
-        i\": \"mdi:lightbulb-on-outline\"}, \"tv\": {\"l\": \"TV & Unterhaltung\", \"col\": \"#ec4899\", \"i\": \"mdi:television\"}, \"akku\": {\"l\": \"Akku laden\", \"col\": \"#10b981\", \"i\": \"mdi:battery-charging\"\
+        Licht LED Keller (?)\", \"c\": \"licht\", \"p\": \"sensor.licht_schrank_esszimmer_leistung\"}, {\"n\": \"Surface (geschätzt)\", \"c\": \"computer\", \"p\": \"sensor.surface_netzbezug\"}, {\"n\"\
+        : \"Akku laden (Netz)\", \"c\": \"akku\", \"p\": \"sensor.shellyplus1pm_e86beaeae1a0_switch_0_power\"}, {\"n\": \"Hydrotower Erdbeere (?)\", \"c\": \"pool\", \"p\": \"sensor.pool_warmepumpe_leistung\"\
+        }, {\"n\": \"Hydrotower Salat (?)\", \"c\": \"pool\", \"p\": \"sensor.poolpumpe_leistung\"}, {\"n\": \"Pool-Pumpe (?)\", \"c\": \"pool\", \"p\": \"sensor.steckdose_pool_pumpe_leistung\"}, {\"n\"\
+        : \"Pool-Pumpe Dach (?)\", \"c\": \"pool\", \"p\": \"sensor.steckdose_pool_pumpe_dach_leistung\"}, {\"n\": \"Pool außen (?)\", \"c\": \"pool\", \"p\": \"sensor.antela_smart_plug_leistung\"}, {\"\
+        n\": \"Hydo Paprika (?)\", \"c\": \"klaeren\", \"p\": \"sensor.tasmota_energy_power_2\"}, {\"n\": \"Monitor Kamera Keller (?)\", \"c\": \"klaeren\", \"p\": \"sensor.wlan_steckdose_2_leistung\"}],\
+        \ CAT = {\"auto\": {\"l\": \"Auto\", \"col\": \"#8b5cf6\", \"i\": \"mdi:car-electric\"}, \"klima\": {\"l\": \"Klima\", \"col\": \"#0ea5e9\", \"i\": \"mdi:air-conditioner\"}, \"heizung\": {\"l\"\
+        : \"Heizung\", \"col\": \"#ef4444\", \"i\": \"mdi:fire\"}, \"spuel\": {\"l\": \"Spülmaschine\", \"col\": \"#3b82f6\", \"i\": \"mdi:dishwasher\"}, \"wasch\": {\"l\": \"Waschmaschine\", \"col\": \"\
+        #06b6d4\", \"i\": \"mdi:washing-machine\"}, \"licht\": {\"l\": \"Licht\", \"col\": \"#f59e0b\", \"i\": \"mdi:lightbulb-on-outline\"}, \"tv\": {\"l\": \"TV & Unterhaltung\", \"col\": \"#ec4899\"\
+        , \"i\": \"mdi:television\"}, \"computer\": {\"l\": \"Computer\", \"col\": \"#6366f1\", \"i\": \"mdi:laptop\"}, \"akku\": {\"l\": \"Akku laden\", \"col\": \"#10b981\", \"i\": \"mdi:battery-charging\"\
         }, \"pool\": {\"l\": \"Pool & Hydro\", \"col\": \"#14b8a6\", \"i\": \"mdi:pool\"}, \"klaeren\": {\"l\": \"Zu klären\", \"col\": \"#a855f7\", \"i\": \"mdi:help-circle-outline\"}};\n\n  const total\
         \ = Math.max(0, (n('sensor.calculated_house_consumption') ?? 0) + [\"sensor.tesla_wall_connector_gesamtleistung\", \"sensor.klima_wohnzimmer_klima_leistung\"].reduce((a, id) => a + Math.max(0, n(id)\
         \ ?? 0), 0));\n  const base = n('sensor.grundlast');\n  const devs = DEV.map(d => ({...d, w: n(d.p), off: ['unavailable', 'unknown', undefined].includes(states[d.p]?.state)}));\n  const byCat =\
@@ -203,6 +204,16 @@ sections:
     - entity: sensor.licht_schrank_esszimmer_leistung
       name: Licht LED Keller (?)
       color: '#f59e0b'
+      type: area
+      opacity: 0.55
+      float_precision: 0
+      group_by:
+        func: avg
+        duration: 10min
+        fill: zero
+    - entity: sensor.surface_netzbezug
+      name: Surface (geschätzt)
+      color: '#6366f1'
       type: area
       opacity: 0.55
       float_precision: 0

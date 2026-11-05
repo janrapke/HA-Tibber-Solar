@@ -18,6 +18,7 @@ CATS = {
     'wasch': ('Waschmaschine', '#06b6d4', 'mdi:washing-machine'),
     'licht': ('Licht', '#f59e0b', 'mdi:lightbulb-on-outline'),
     'tv': ('TV & Unterhaltung', '#ec4899', 'mdi:television'),
+    'computer': ('Computer', '#6366f1', 'mdi:laptop'),
     'akku': ('Akku laden', '#10b981', 'mdi:battery-charging'),
     'pool': ('Pool & Hydro', '#14b8a6', 'mdi:pool'),
     'klaeren': ('Zu klären', '#a855f7', 'mdi:help-circle-outline'),
@@ -41,6 +42,9 @@ DEVICES = [
     ('Fernseher Wohnzimmer', 'tv', 'sensor.kinderzimmer_hochbett_licht_leistung', 'sensor.kinderzimmer_hochbett_licht_energie_gesamt'),
     ('Licht Keller Lasercutter', 'licht', 'sensor.licht_keller_lasercutter_leistung', 'sensor.licht_keller_lasercutter_energie_gesamt'),
     ('Licht LED Keller (?)', 'licht', 'sensor.licht_schrank_esszimmer_leistung', 'sensor.licht_led_keller_energie_gesamt'),
+    # no plug: HASS.Agent runs scripts/surface_power.ps1 every 60 s (estimate, 0 away from home / on battery);
+    # UI helpers sensor.surface_netzbezug (0 when stale > 3 min) and sensor.surface_strom (kWh)
+    ('Surface (geschätzt)', 'computer', 'sensor.surface_netzbezug', 'sensor.surface_strom'),
     ('Akku laden (Netz)', 'akku', 'sensor.shellyplus1pm_e86beaeae1a0_switch_0_power', 'sensor.shellyplus1pm_e86beaeae1a0_switch_0_energy'),
     ('Hydrotower Erdbeere (?)', 'pool', 'sensor.pool_warmepumpe_leistung', 'sensor.pool_warmepumpe_energie_gesamt'),
     ('Hydrotower Salat (?)', 'pool', 'sensor.poolpumpe_leistung', 'sensor.poolpumpe_energie_gesamt'),

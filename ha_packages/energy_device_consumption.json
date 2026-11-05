@@ -48,6 +48,10 @@
   "name": "Licht LED Keller (?)"
  },
  {
+  "stat_consumption": "sensor.surface_strom",
+  "name": "Surface (geschätzt)"
+ },
+ {
   "stat_consumption": "sensor.shellyplus1pm_e86beaeae1a0_switch_0_energy",
   "name": "Akku laden (Netz)"
  },
