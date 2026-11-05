@@ -44,6 +44,9 @@ sections:
           - sensor.smartshunt_hq2305uvtaz_voltage
           - sensor.tesla_wall_connector_gesamtleistung
           - sensor.electricity_price_holunderweg_3
+          - sensor.ef_hw7576_inverter_power
+          - sensor.ef_hw7576_pv_1_power
+          - sensor.ef_hw7576_pv_2_power
         tap_action: {action: more-info}
         styles:
           card: [{padding: 0}, {border-radius: 18px}, {overflow: hidden}]
@@ -58,8 +61,11 @@ sections:
               const W = (v) => v === null ? '–' : Math.abs(v) >= 1000 ? f(v / 1000, 2) + ' kW' : f(v, 0) + ' W';
               const imp = n('sensor.power_holunderweg_3') ?? 0, exp = n('sensor.power_production_holunderweg_3') ?? 0;
               const grid = imp - exp;
-              const solar = n('sensor.solarproduktion') ?? 0;
-              const inv = n('sensor.ballkonkraftwerk_power') ?? 0;
+              // Ecoflow is only reachable while the sun shines: unavailable counts as 0
+              const efPv = (n('sensor.ef_hw7576_pv_1_power') ?? 0) + (n('sensor.ef_hw7576_pv_2_power') ?? 0);
+              const efInv = n('sensor.ef_hw7576_inverter_power') ?? 0;
+              const solar = (n('sensor.solarproduktion') ?? 0) + efPv;
+              const inv = (n('sensor.ballkonkraftwerk_power') ?? 0) + efInv;
               const soc = n('sensor.smartshunt_hq2305uvtaz_battery');
               const batt = (n('sensor.smartshunt_hq2305uvtaz_current') ?? 0) * (n('sensor.smartshunt_hq2305uvtaz_voltage') ?? 0);
               const car = n('sensor.tesla_wall_connector_gesamtleistung') ?? 0;
@@ -98,7 +104,8 @@ sections:
                 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px">
                   <div style="padding:8px 10px;border-radius:12px;background:rgba(127,127,127,.08)">
                     <div style="font-size:11px;color:var(--secondary-text-color)">Wechselrichter</div>
-                    <div style="font-size:15px;font-weight:600">${W(inv)}</div></div>
+                    <div style="font-size:15px;font-weight:600">${W(inv)}</div>
+                    ${efInv > 0 ? `<div style="font-size:10px;color:var(--secondary-text-color)">davon Ecoflow ${W(efInv)}</div>` : ''}</div>
                   <div style="padding:8px 10px;border-radius:12px;background:rgba(127,127,127,.08)">
                     <div style="font-size:11px;color:var(--secondary-text-color)">Strompreis</div>
                     <div style="font-size:15px;font-weight:600;color:${priceCol}">${f(price * 100, 1)} ct</div></div>
@@ -146,6 +153,53 @@ sections:
                   <div style="font-size:13px;color:var(--secondary-text-color)">gesamt <b style="color:var(--primary-text-color)">${Math.round(tot)} W</b></div></div>
                 <div style="display:flex;gap:10px">${bars}</div>
                 <div style="font-size:11px;color:var(--secondary-text-color);margin-top:8px">Balken voll = 400 W je Laderegler</div>`;
+            ]]]
+
+      # ---------- Ecoflow (nur bei Sonne erreichbar) ----------
+      - type: custom:button-card
+        entity: sensor.ef_hw7576_inverter_power
+        grid_options: {columns: full}
+        show_name: false
+        show_icon: false
+        show_state: false
+        triggers_update:
+          - sensor.ef_hw7576_pv_1_power
+          - sensor.ef_hw7576_pv_2_power
+          - sensor.ef_hw7576_battery_level
+          - sensor.ef_hw7576_battery_power
+        tap_action: {action: more-info}
+        styles:
+          card: [{padding: 16px}, {border-radius: 18px}]
+          grid: [{grid-template-areas: '"c"'}, {grid-template-columns: 1fr}]
+          custom_fields:
+            c: [{white-space: normal}, {text-align: left}, {width: 100%}]
+        custom_fields:
+          c: |
+            [[[
+              const n = (id) => { const x = parseFloat(states[id]?.state); return isNaN(x) ? 0 : x; };
+              const up = !['unavailable', 'unknown', undefined].includes(entity?.state);
+              const pv1 = n('sensor.ef_hw7576_pv_1_power'), pv2 = n('sensor.ef_hw7576_pv_2_power');
+              const out = n('sensor.ef_hw7576_inverter_power'), soc = n('sensor.ef_hw7576_battery_level');
+              const bp = n('sensor.ef_hw7576_battery_power');
+              const col = up ? '#f59e0b' : '#9ca3af';
+              const val = (lab, v) => `<div style="padding:8px 10px;border-radius:12px;background:rgba(127,127,127,.08)">
+                  <div style="font-size:11px;color:var(--secondary-text-color)">${lab}</div>
+                  <div style="font-size:15px;font-weight:600;white-space:nowrap">${v}</div></div>`;
+              return `
+                <div style="display:flex;align-items:center;gap:12px">
+                  <div style="width:40px;height:40px;border-radius:13px;display:flex;align-items:center;justify-content:center;background:${col}2e">
+                    <ha-icon icon="${up ? 'mdi:solar-panel' : 'mdi:weather-night'}" style="--mdc-icon-size:22px;color:${col}"></ha-icon></div>
+                  <div style="flex:1">
+                    <div style="font-size:16px;font-weight:600">Ecoflow</div>
+                    <div style="font-size:12px;color:var(--secondary-text-color)">${up ? 'aktiv' : 'schläft – meldet sich nur bei Sonne'}</div></div>
+                  <div style="text-align:right">
+                    <div style="font-size:24px;font-weight:500;line-height:1">${Math.round(out)} <span style="font-size:13px">W</span></div>
+                    <div style="font-size:11px;color:var(--secondary-text-color)">ins Haus</div></div>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:12px">
+                  ${val('PV 1', Math.round(pv1) + ' W')}${val('PV 2', Math.round(pv2) + ' W')}
+                  ${val('Akku', Math.round(soc) + ' %')}${val('Akku-Leistung', Math.round(bp) + ' W')}
+                </div>`;
             ]]]
 
       - type: tile

@@ -1,0 +1,111 @@
+# GENERIERT von scripts/build_dashboard_rooms.py (Raumliste). Vorlage „raum“: dashboard_button_templates.yaml
+type: grid
+columns: 2
+square: false
+cards:
+- type: custom:button-card
+  template: raum
+  variables:
+    name: Badezimmer
+    icon: mdi:shower
+    temp: sensor.h5179_f06f_temperature
+    hum: sensor.h5179_f06f_humidity
+    bts:
+    - climate.bt_bad
+    valves:
+    - climate.fritz_smart_thermo_302_1
+    k: input_number.heizung_warm_k_badezimmer
+- type: custom:button-card
+  template: raum
+  variables:
+    name: Flur
+    icon: mdi:door
+    temp: sensor.temperatursensor_flur_temperatur
+    hum: sensor.temperatursensor_flur_luftfeuchtigkeit
+    bts:
+    - climate.bt_flur_bt_flur
+    valves:
+    - climate.heizung_flur
+    k: input_number.heizung_warm_k_flur
+- type: custom:button-card
+  template: raum
+  variables:
+    name: Wohnzimmer
+    icon: mdi:sofa-outline
+    temp: sensor.wohnzimmer_temperatur
+    hum: sensor.temp_wohnzimmer_luftfeuchtigkeit
+    bts:
+    - climate.bt_wohnzimmer_bt_wohnzimmer
+    - climate.bt_esszimmer_bt_esszimmer
+    valves:
+    - climate.wohnzimmer
+    - climate.esszimmer
+    k: input_number.heizung_warm_k_wohnzimmer
+    ac: climate.152832118046533_climate
+    ac_hz: sensor.klima_wohnzimmer_kompressor
+- type: custom:button-card
+  template: raum
+  variables:
+    name: Küche
+    icon: mdi:fridge-outline
+    temp: sensor.temperatursensor_kuche_temperatur
+    hum: sensor.temperatursensor_kuche_luftfeuchtigkeit
+    bts:
+    - climate.bt_kuche_bt_kuche
+    valves:
+    - climate.kuche
+    k: input_number.heizung_warm_k_kuche
+    off_flag: automation.heizung_kuche_dauerhaft_aus_halten
+- type: custom:button-card
+  template: raum
+  variables:
+    name: Schlafzimmer
+    icon: mdi:bed-outline
+    temp: sensor.temperature_schalfzimmer_temperatur
+    hum: sensor.temperature_schalfzimmer_luftfeuchtigkeit
+    bts:
+    - climate.bt_schlafzimmer_bt_schlafzimmer
+    valves:
+    - climate.produktion_2
+    k: input_number.heizung_warm_k_schlafzimmer
+- type: custom:button-card
+  template: raum
+  variables:
+    name: Gästezimmer
+    icon: mdi:desk
+    temp: sensor.temperature_gastezimmer_temperatur
+    hum: sensor.temperature_gastezimmer_luftfeuchtigkeit
+    bts:
+    - climate.bt_gastezimmer_bt_gastezimmer
+    valves:
+    - climate.produktion_4
+    k: input_number.heizung_warm_k_gastezimmer
+    ac: climate.air_conditioner
+- type: custom:button-card
+  template: raum
+  variables:
+    name: Kinderzimmer
+    icon: mdi:teddy-bear
+    temp: sensor.temperature_kinderzimmer_temperatur
+    hum: sensor.temperature_kinderzimmer_luftfeuchtigkeit
+    bts:
+    - climate.bt_kinderzimmer_bt_kinderzimmer
+    valves:
+    - climate.produktion_1
+    k: input_number.heizung_warm_k_kinderzimmer
+- type: custom:button-card
+  template: raum
+  variables:
+    name: Keller
+    icon: mdi:briefcase-outline
+    temp: sensor.temperatursensor_keller_temperatur
+    hum: sensor.temperatursensor_keller_luftfeuchtigkeit
+    note: Thermostat manuell
+- type: custom:button-card
+  template: raum
+  variables:
+    name: Keller Bällebad
+    icon: mdi:baby-face-outline
+    temp: sensor.temperature_humidity_sensor_16_temperatur
+    hum: sensor.temperature_humidity_sensor_16_luftfeuchtigkeit
+    note: Thermostat manuell

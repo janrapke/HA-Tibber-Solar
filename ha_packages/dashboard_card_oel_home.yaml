@@ -1,0 +1,55 @@
+# Kachel „Öl“ für die Home-Ansicht (Dashboard dashboard-home). Tippen öffnet die Ansicht Öl & Heizung.
+type: custom:button-card
+entity: sensor.olheizung_tankinhalt
+show_name: false
+show_icon: false
+show_state: false
+triggers_update:
+  - sensor.olheizung_ol_nutzbar
+  - sensor.olheizung_ol_reicht_bis_neutral
+  - sensor.olheizung_ol_heute
+  - binary_sensor.olheizung_brenner_lauft
+tap_action:
+  action: navigate
+  navigation_path: /dashboard-home/oel-heizung
+styles:
+  card: [{padding: 0}, {border-radius: 18px}, {overflow: hidden}]
+  grid: [{grid-template-areas: '"c"'}, {grid-template-columns: 1fr}]
+  custom_fields:
+    c: [{white-space: normal}, {text-align: left}, {width: 100%}]
+custom_fields:
+  c: |
+    [[[
+      const a = entity.attributes;
+      const n = (x) => { const y = parseFloat(x); return isNaN(y) ? null : y; };
+      const f = (x, d) => x === null || isNaN(x) ? '–' : Number(x).toLocaleString('de-DE', {minimumFractionDigits: d, maximumFractionDigits: d});
+      const tot = n(entity.state) ?? 0, cap = n(a.kapazitaet_l) ?? 6000, res = n(a.reserve_l) ?? 0;
+      const use = n(states['sensor.olheizung_ol_nutzbar']?.state) ?? Math.max(0, tot - res);
+      const col = use < 200 ? '#ef4444' : use < 500 ? '#f59e0b' : '#10b981';
+      const d = Date.parse(states['sensor.olheizung_ol_reicht_bis_neutral']?.state);
+      const days = isNaN(d) ? null : Math.round((d - Date.now()) / 864e5);
+      const today = n(states['sensor.olheizung_ol_heute']?.state);
+      const on = states['binary_sensor.olheizung_brenner_lauft']?.state === 'on';
+      const pT = Math.min(100, tot / cap * 100), pR = Math.min(100, res / cap * 100);
+      return `
+      <div style="padding:14px 16px;background:linear-gradient(135deg, ${col}1f 0%, transparent 65%)">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:40px;height:40px;flex:none;border-radius:13px;display:flex;align-items:center;justify-content:center;background:${on ? '#f973162e' : '#a162072e'}">
+            <ha-icon icon="${on ? 'mdi:fire' : 'mdi:oil'}" style="--mdc-icon-size:22px;color:${on ? '#f97316' : '#a16207'}"></ha-icon></div>
+          <div style="flex:1;min-width:0">
+            <div style="font-size:11px;color:var(--secondary-text-color);text-transform:uppercase;letter-spacing:.06em">Heizöl${on ? ' · Brenner läuft' : ''}</div>
+            <div style="font-size:22px;font-weight:600;line-height:1.15;color:${col}">${f(use, 0)} L <span style="font-size:13px;font-weight:500;color:var(--secondary-text-color)">nutzbar</span></div>
+          </div>
+          <div style="text-align:right;flex:none">
+            <div style="font-size:15px;font-weight:600">${isNaN(d) ? '–' : new Date(d).toLocaleDateString('de-DE', {day: '2-digit', month: 'short'})}</div>
+            <div style="font-size:11px;color:var(--secondary-text-color)">${days === null ? 'reicht bis' : 'noch ' + days + ' Tage'}</div>
+          </div>
+        </div>
+        <div style="position:relative;height:10px;border-radius:5px;background:rgba(127,127,127,.15);margin-top:12px;overflow:hidden">
+          <div style="position:absolute;left:0;top:0;bottom:0;width:${pT}%;background:${col};border-radius:5px"></div>
+          <div style="position:absolute;left:0;top:0;bottom:0;width:${pR}%;background:repeating-linear-gradient(45deg,#ef4444 0 4px,#ef444488 4px 8px)"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--secondary-text-color);margin-top:4px">
+          <span>${f(tot, 0)} L im Tank · <span style="color:#ef4444">${f(res, 0)} L Reserve</span></span><span>heute ${f(today, 1)} L</span></div>
+      </div>`;
+    ]]]

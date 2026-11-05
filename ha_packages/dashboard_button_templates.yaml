@@ -1,0 +1,110 @@
+# ============================================================
+# button_card_templates für das Dashboard dashboard-home (oberste Ebene der Konfiguration).
+# „raum“: Raumkachel mit Temperatur, Ziel, Luftfeuchte und Heizstatus.
+#   variables:
+#     name, icon, temp, hum         Anzeige und Sensoren
+#     bts: [climate...]             Better-Thermostat(e): Ziel und „Thermostat fordert Wärme“
+#                                   (fehlende/deaktivierte Entitäten werden ignoriert)
+#     valves: [climate...]          echte Ventile: „Heizkörper warm“, wenn Ventilfühler ≥ k über Raum
+#     k: input_number...            Schwelle für „warm“ (Standard 1,5 K)
+#     ac: climate...                Klima im Raum, ac_hz: Kompressor-Sensor (optional)
+#     note: Text                    fester Hinweis (z. B. „Thermostat manuell“)
+#     off_flag: entity              wenn „on“ → „Heizkörper dauerhaft aus“
+#     big: true                     größere Variante für die Heizungs-Ansicht
+# ============================================================
+
+raum:
+  show_name: false
+  show_icon: false
+  show_state: false
+  variables:
+    name: Raum
+    icon: mdi:home
+    temp: null
+    hum: null
+    bts: []
+    valves: []
+    k: null
+    ac: null
+    ac_hz: null
+    note: ''
+    off_flag: null
+    big: false
+  triggers_update: all
+  tap_action:
+    action: more-info
+    entity: '[[[ return variables.temp ]]]'
+  hold_action:
+    action: more-info
+    entity: '[[[ return (variables.bts || []).find(b => states[b]) || variables.temp ]]]'
+  styles:
+    card: [{padding: 0}, {border-radius: 16px}, {overflow: hidden}, {height: 100%}]
+    grid: [{grid-template-areas: '"c"'}, {grid-template-columns: 1fr}]
+    custom_fields:
+      c: [{white-space: normal}, {text-align: left}, {width: 100%}, {height: 100%}]
+  custom_fields:
+    c: |
+      [[[
+        const v = variables;
+        const n = (x) => { const y = parseFloat(x); return isNaN(y) ? null : y; };
+        const f = (x, d) => x === null || x === undefined || isNaN(x) ? '–' : Number(x).toLocaleString('de-DE', {minimumFractionDigits: d, maximumFractionDigits: d});
+        const t = n(states[v.temp]?.state);
+        const h = v.hum ? n(states[v.hum]?.state) : null;
+        const bts = (v.bts || []).map(b => states[b]).filter(s => s && s.state !== 'unavailable');
+        const bt = bts[0];
+        const target = bt && bt.state !== 'off' ? n(bt.attributes.temperature) : null;
+        const sys = bts.some(s => s.attributes.hvac_action === 'heating');
+        const k = n(states[v.k]?.state) ?? 1.5;
+        const warm = t !== null && (v.valves || []).some(id => { const vt = n(states[id]?.attributes?.current_temperature); return vt !== null && vt - t >= k; });
+        const acS = v.ac ? states[v.ac] : null;
+        const acHeat = acS && ['heat', 'cool'].includes(acS.state) && (!v.ac_hz || (n(states[v.ac_hz]?.state) ?? 0) > 0);
+        const offHeld = v.off_flag && states[v.off_flag]?.state === 'on';
+        const tc = t === null ? '#9ca3af' : t < 17 ? '#3b82f6' : t < 19 ? '#06b6d4' : t <= 22.5 ? '#10b981' : '#f97316';
+        let st, sc, si;
+        if (warm) { st = 'Heizkörper warm'; sc = '#f97316'; si = 'mdi:radiator'; }
+        else if (acHeat) { st = acS.state === 'cool' ? 'Klima kühlt' : 'Klima heizt'; sc = acS.state === 'cool' ? '#0ea5e9' : '#f97316'; si = 'mdi:air-conditioner'; }
+        else if (sys) { st = 'fordert Wärme'; sc = '#f59e0b'; si = 'mdi:fire'; }
+        else if (offHeld) { st = 'Heizkörper dauerhaft aus'; sc = '#9ca3af'; si = 'mdi:radiator-off'; }
+        else if (v.note) { st = v.note; sc = '#9ca3af'; si = 'mdi:hand-back-right-outline'; }
+        else if (bt && bt.state === 'off') { st = 'Thermostat aus'; sc = '#9ca3af'; si = 'mdi:power'; }
+        else { st = 'Heizung ruht'; sc = '#9ca3af'; si = 'mdi:radiator-disabled'; }
+        const active = warm || acHeat || sys;
+        const big = !!v.big;
+        const gap = target !== null && t !== null ? t - target : null;
+        const bar = target === null || t === null ? '' : `
+          <div style="height:4px;border-radius:2px;background:rgba(127,127,127,.15);margin-top:${big ? 12 : 8}px;overflow:hidden">
+            <div style="height:100%;width:${Math.max(4, Math.min(100, (t - (target - 4)) / 5 * 100))}%;background:${gap < -0.3 ? '#f59e0b' : '#10b981'};border-radius:2px"></div></div>`;
+        const tline = `${target !== null ? 'Ziel ' + f(target, 1) + '°' : ''}${target !== null && h !== null ? ' · ' : ''}${h !== null ? f(h, 0) + ' %' : ''}`;
+        if (!big) return `
+          <div style="height:100%;box-sizing:border-box;padding:12px;
+               background:${active ? `linear-gradient(135deg, ${sc}24 0%, transparent 70%)` : 'transparent'}">
+            <div style="display:flex;align-items:flex-start;justify-content:space-between">
+              <div style="width:34px;height:34px;border-radius:11px;display:flex;align-items:center;justify-content:center;
+                   background:${active ? sc + '2e' : 'rgba(127,127,127,.1)'}">
+                <ha-icon icon="${active ? si : v.icon}" style="--mdc-icon-size:19px;color:${active ? sc : 'var(--secondary-text-color)'}"></ha-icon></div>
+              <div style="font-size:24px;font-weight:500;line-height:1;color:${tc}">${f(t, 1)}<span style="font-size:13px;vertical-align:top">°</span></div>
+            </div>
+            <div style="font-size:14px;font-weight:600;margin-top:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${v.name}</div>
+            <div style="font-size:11px;color:${active ? sc : 'var(--secondary-text-color)'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${st}</div>
+            <div style="font-size:11px;color:var(--secondary-text-color);white-space:nowrap">${tline || '&nbsp;'}</div>
+            ${bar}
+          </div>`;
+        return `
+          <div style="height:100%;box-sizing:border-box;padding:${big ? '16px' : '12px'};
+               background:${active ? `linear-gradient(135deg, ${sc}24 0%, transparent 70%)` : 'transparent'}">
+            <div style="display:flex;align-items:center;gap:10px">
+              <div style="width:${big ? 42 : 36}px;height:${big ? 42 : 36}px;flex:none;border-radius:12px;display:flex;align-items:center;justify-content:center;
+                   background:${active ? sc + '2e' : 'rgba(127,127,127,.1)'}">
+                <ha-icon icon="${active ? si : v.icon}" style="--mdc-icon-size:${big ? 24 : 20}px;color:${active ? sc : 'var(--secondary-text-color)'}"></ha-icon></div>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:${big ? 16 : 14}px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${v.name}</div>
+                <div style="font-size:11px;color:${active ? sc : 'var(--secondary-text-color)'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${st}</div>
+              </div>
+              <div style="text-align:right;flex:none">
+                <div style="font-size:${big ? 30 : 22}px;font-weight:${big ? 300 : 500};line-height:1;color:${tc}">${f(t, 1)}<span style="font-size:${big ? 15 : 12}px;vertical-align:top">°</span></div>
+                <div style="font-size:11px;color:var(--secondary-text-color);white-space:nowrap">${target !== null ? 'Ziel ' + f(target, 1) + '°' : ''}${target !== null && h !== null ? ' · ' : ''}${h !== null ? f(h, 0) + ' %' : ''}</div>
+              </div>
+            </div>
+            ${bar}
+          </div>`;
+      ]]]

@@ -224,7 +224,7 @@ class OilGaugeNumber(_OilEntity, NumberEntity):
     _attr_mode = NumberMode.BOX
     _attr_native_min_value = 0
     _attr_native_max_value = 150
-    _attr_native_step = 1
+    _attr_native_step = 0.1  # the gauge is read to the millimetre
     _attr_native_unit_of_measurement = "cm"
     _attr_icon = "mdi:gauge"
 
@@ -234,7 +234,7 @@ class OilGaugeNumber(_OilEntity, NumberEntity):
     @property
     def native_value(self) -> float | None:
         total = self.oil.tank_liters()
-        return None if total is None else round(self.oil.tank.cm(total))
+        return None if total is None else round(self.oil.tank.cm(total), 1)
 
     async def async_set_native_value(self, value: float) -> None:
         self.oil.set_reading(float(value), dt_util.now())

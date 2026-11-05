@@ -1,0 +1,413 @@
+# GENERIERT von scripts/build_dashboard_rooms.py (Raumliste). Vorlage „raum“: dashboard_button_templates.yaml
+title: Heizung
+path: heizung
+icon: mdi:radiator
+type: sections
+max_columns: 3
+dense_section_placement: true
+sections:
+- type: grid
+  cards:
+  - type: heading
+    heading: Heizung
+    icon: mdi:radiator
+  - type: custom:button-card
+    grid_options:
+      columns: full
+    entity: binary_sensor.olheizung_brenner_lauft
+    show_name: false
+    show_icon: false
+    show_state: false
+    triggers_update: all
+    tap_action:
+      action: navigate
+      navigation_path: /dashboard-home/oel-heizung
+    variables:
+      rooms:
+      - name: Badezimmer
+        icon: mdi:shower
+        temp: sensor.h5179_f06f_temperature
+        hum: sensor.h5179_f06f_humidity
+        bts: &id007
+        - climate.bt_bad
+        valves: &id008
+        - climate.fritz_smart_thermo_302_1
+        k: input_number.heizung_warm_k_badezimmer
+      - name: Flur
+        icon: mdi:door
+        temp: sensor.temperatursensor_flur_temperatur
+        hum: sensor.temperatursensor_flur_luftfeuchtigkeit
+        bts: &id005
+        - climate.bt_flur_bt_flur
+        valves: &id006
+        - climate.heizung_flur
+        k: input_number.heizung_warm_k_flur
+      - name: Wohnzimmer
+        icon: mdi:sofa-outline
+        temp: sensor.wohnzimmer_temperatur
+        hum: sensor.temp_wohnzimmer_luftfeuchtigkeit
+        bts: &id001
+        - climate.bt_wohnzimmer_bt_wohnzimmer
+        - climate.bt_esszimmer_bt_esszimmer
+        valves: &id002
+        - climate.wohnzimmer
+        - climate.esszimmer
+        k: input_number.heizung_warm_k_wohnzimmer
+        ac: climate.152832118046533_climate
+        ac_hz: sensor.klima_wohnzimmer_kompressor
+      - name: Küche
+        icon: mdi:fridge-outline
+        temp: sensor.temperatursensor_kuche_temperatur
+        hum: sensor.temperatursensor_kuche_luftfeuchtigkeit
+        bts: &id003
+        - climate.bt_kuche_bt_kuche
+        valves: &id004
+        - climate.kuche
+        k: input_number.heizung_warm_k_kuche
+        off_flag: automation.heizung_kuche_dauerhaft_aus_halten
+      - name: Schlafzimmer
+        icon: mdi:bed-outline
+        temp: sensor.temperature_schalfzimmer_temperatur
+        hum: sensor.temperature_schalfzimmer_luftfeuchtigkeit
+        bts: &id009
+        - climate.bt_schlafzimmer_bt_schlafzimmer
+        valves: &id010
+        - climate.produktion_2
+        k: input_number.heizung_warm_k_schlafzimmer
+      - name: Gästezimmer
+        icon: mdi:desk
+        temp: sensor.temperature_gastezimmer_temperatur
+        hum: sensor.temperature_gastezimmer_luftfeuchtigkeit
+        bts: &id013
+        - climate.bt_gastezimmer_bt_gastezimmer
+        valves: &id014
+        - climate.produktion_4
+        k: input_number.heizung_warm_k_gastezimmer
+        ac: climate.air_conditioner
+      - name: Kinderzimmer
+        icon: mdi:teddy-bear
+        temp: sensor.temperature_kinderzimmer_temperatur
+        hum: sensor.temperature_kinderzimmer_luftfeuchtigkeit
+        bts: &id011
+        - climate.bt_kinderzimmer_bt_kinderzimmer
+        valves: &id012
+        - climate.produktion_1
+        k: input_number.heizung_warm_k_kinderzimmer
+      - name: Keller
+        icon: mdi:briefcase-outline
+        temp: sensor.temperatursensor_keller_temperatur
+        hum: sensor.temperatursensor_keller_luftfeuchtigkeit
+        note: Thermostat manuell
+      - name: Keller Bällebad
+        icon: mdi:baby-face-outline
+        temp: sensor.temperature_humidity_sensor_16_temperatur
+        hum: sensor.temperature_humidity_sensor_16_luftfeuchtigkeit
+        note: Thermostat manuell
+    styles:
+      card:
+      - padding: 0
+      - border-radius: 18px
+      - overflow: hidden
+      grid:
+      - grid-template-areas: '"c"'
+      - grid-template-columns: 1fr
+      custom_fields:
+        c:
+        - white-space: normal
+        - text-align: left
+        - width: 100%
+    custom_fields:
+      c: "[[[\n  const n = (x) => { const y = parseFloat(x); return isNaN(y) ? null : y; };\n  const f = (x, d) => x === null || isNaN(x) ? '–' : Number(x).toLocaleString('de-DE', {minimumFractionDigits:\
+        \ d, maximumFractionDigits: d});\n  const rooms = variables.rooms.map(r => {\n    const t = n(states[r.temp]?.state);\n    const bts = (r.bts || []).map(b => states[b]).filter(Boolean);\n    const\
+        \ want = bts.some(s => s.attributes.hvac_action === 'heating');\n    const k = n(states[r.k]?.state) ?? 1.5;\n    const warm = t !== null && (r.valves || []).some(id => { const vt = n(states[id]?.attributes?.current_temperature);\
+        \ return vt !== null && vt - t >= k; });\n    return {name: r.name, t, want, warm};\n  });\n  const want = rooms.filter(r => r.want).length, warm = rooms.filter(r => r.warm).length;\n  const temps\
+        \ = rooms.map(r => r.t).filter(x => x !== null);\n  const avg = temps.length ? temps.reduce((a, b) => a + b, 0) / temps.length : null;\n  const cold = rooms.filter(r => r.t !== null).sort((a, b)\
+        \ => a.t - b.t)[0];\n  const on = entity.state === 'on';\n  const col = on ? '#f97316' : want ? '#f59e0b' : '#10b981';\n  const out = n(states['sensor.openweathermap_temperature']?.state);\n  const\
+        \ tile = (icon, c, v, lab) => `<div style=\"padding:10px;border-radius:14px;background:rgba(127,127,127,.08)\">\n      <ha-icon icon=\"${icon}\" style=\"--mdc-icon-size:18px;color:${c}\"></ha-icon>\n\
+        \      <div style=\"font-size:17px;font-weight:600;margin-top:2px;white-space:nowrap\">${v}</div>\n      <div style=\"font-size:11px;color:var(--secondary-text-color)\">${lab}</div></div>`;\n  return\
+        \ `<div style=\"padding:18px;background:linear-gradient(135deg, ${col}22 0%, transparent 60%)\">\n    <div style=\"display:flex;align-items:center;gap:12px\">\n      <div style=\"width:44px;height:44px;border-radius:14px;display:flex;align-items:center;justify-content:center;background:${col}2e\"\
+        >\n        <ha-icon icon=\"${on ? 'mdi:fire' : 'mdi:home-thermometer-outline'}\" style=\"--mdc-icon-size:26px;color:${col}\"></ha-icon></div>\n      <div style=\"flex:1\">\n        <div style=\"\
+        font-size:12px;color:var(--secondary-text-color);text-transform:uppercase;letter-spacing:.06em\">Heizung</div>\n        <div style=\"font-size:18px;font-weight:700\">${on ? 'Ölbrenner läuft' : want\
+        \ ? want + (want === 1 ? ' Raum fordert' : ' Räume fordern') + ' Wärme' : 'Alle Räume zufrieden'}</div></div>\n      <div style=\"text-align:right\">\n        <div style=\"font-size:30px;font-weight:300;line-height:1\"\
+        >${f(out, 1)}<span style=\"font-size:15px;vertical-align:top\">°</span></div>\n        <div style=\"font-size:11px;color:var(--secondary-text-color)\">außen</div></div>\n    </div>\n    <div style=\"\
+        display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:14px\">\n      ${tile('mdi:fire', '#f59e0b', want, 'fordern')}\n      ${tile('mdi:radiator', '#f97316', warm, 'warm')}\n     \
+        \ ${tile('mdi:thermometer', '#10b981', f(avg, 1) + '°', 'Ø Räume')}\n      ${tile('mdi:snowflake-thermometer', '#3b82f6', cold ? f(cold.t, 1) + '°' : '–', cold ? cold.name : 'kältester')}\n    </div></div>`;\n\
+        ]]]"
+  - type: heading
+    heading: Wohnbereich
+    heading_style: subtitle
+  - type: custom:button-card
+    template: raum
+    variables:
+      name: Wohnzimmer
+      icon: mdi:sofa-outline
+      temp: sensor.wohnzimmer_temperatur
+      hum: sensor.temp_wohnzimmer_luftfeuchtigkeit
+      bts: *id001
+      valves: *id002
+      k: input_number.heizung_warm_k_wohnzimmer
+      ac: climate.152832118046533_climate
+      ac_hz: sensor.klima_wohnzimmer_kompressor
+      big: true
+    grid_options:
+      columns: full
+  - type: tile
+    entity: climate.bt_wohnzimmer_bt_wohnzimmer
+    name: Thermostat Wohnzimmer
+    icon: mdi:thermostat
+    color: deep-orange
+    features_position: bottom
+    grid_options:
+      columns: full
+    features:
+    - type: target-temperature
+    - type: climate-hvac-modes
+      hvac_modes:
+      - heat
+      - 'off'
+  - type: tile
+    entity: climate.bt_esszimmer_bt_esszimmer
+    name: Thermostat Esszimmer
+    icon: mdi:thermostat
+    color: deep-orange
+    features_position: bottom
+    grid_options:
+      columns: full
+    features:
+    - type: target-temperature
+    - type: climate-hvac-modes
+      hvac_modes:
+      - heat
+      - 'off'
+- type: grid
+  cards:
+  - type: heading
+    heading: Küche und Flur
+    heading_style: subtitle
+  - type: custom:button-card
+    template: raum
+    variables:
+      name: Küche
+      icon: mdi:fridge-outline
+      temp: sensor.temperatursensor_kuche_temperatur
+      hum: sensor.temperatursensor_kuche_luftfeuchtigkeit
+      bts: *id003
+      valves: *id004
+      k: input_number.heizung_warm_k_kuche
+      off_flag: automation.heizung_kuche_dauerhaft_aus_halten
+      big: true
+    grid_options:
+      columns: full
+  - type: tile
+    entity: climate.bt_kuche_bt_kuche
+    name: Thermostat Küche
+    icon: mdi:thermostat
+    color: deep-orange
+    features_position: bottom
+    grid_options:
+      columns: full
+    features:
+    - type: target-temperature
+    - type: climate-hvac-modes
+      hvac_modes:
+      - heat
+      - 'off'
+    visibility:
+    - condition: state
+      entity: climate.bt_kuche_bt_kuche
+      state:
+      - heat
+      - 'off'
+      - heat_cool
+      - auto
+  - type: tile
+    entity: automation.heizung_kuche_dauerhaft_aus_halten
+    name: Dauerhaft aus
+    icon: mdi:radiator-off
+    color: blue-grey
+    grid_options:
+      columns: full
+    features_position: inline
+    features:
+    - type: toggle
+  - type: custom:button-card
+    template: raum
+    variables:
+      name: Flur
+      icon: mdi:door
+      temp: sensor.temperatursensor_flur_temperatur
+      hum: sensor.temperatursensor_flur_luftfeuchtigkeit
+      bts: *id005
+      valves: *id006
+      k: input_number.heizung_warm_k_flur
+      big: true
+    grid_options:
+      columns: full
+  - type: tile
+    entity: climate.bt_flur_bt_flur
+    name: Thermostat
+    icon: mdi:thermostat
+    color: deep-orange
+    features_position: bottom
+    grid_options:
+      columns: full
+    features:
+    - type: target-temperature
+    - type: climate-hvac-modes
+      hvac_modes:
+      - heat
+      - 'off'
+  - type: heading
+    heading: Bad
+    heading_style: subtitle
+  - type: custom:button-card
+    template: raum
+    variables:
+      name: Badezimmer
+      icon: mdi:shower
+      temp: sensor.h5179_f06f_temperature
+      hum: sensor.h5179_f06f_humidity
+      bts: *id007
+      valves: *id008
+      k: input_number.heizung_warm_k_badezimmer
+      big: true
+    grid_options:
+      columns: full
+  - type: tile
+    entity: climate.bt_bad
+    name: Thermostat
+    icon: mdi:thermostat
+    color: deep-orange
+    features_position: bottom
+    grid_options:
+      columns: full
+    features:
+    - type: target-temperature
+    - type: climate-hvac-modes
+      hvac_modes:
+      - heat
+      - 'off'
+  - type: tile
+    entity: input_boolean.bad_urlaub
+    name: Bad-Urlaub
+    icon: mdi:palm-tree
+    color: teal
+    grid_options:
+      columns: full
+    features_position: inline
+    features:
+    - type: toggle
+- type: grid
+  cards:
+  - type: heading
+    heading: Schlafbereich
+    heading_style: subtitle
+  - type: custom:button-card
+    template: raum
+    variables:
+      name: Schlafzimmer
+      icon: mdi:bed-outline
+      temp: sensor.temperature_schalfzimmer_temperatur
+      hum: sensor.temperature_schalfzimmer_luftfeuchtigkeit
+      bts: *id009
+      valves: *id010
+      k: input_number.heizung_warm_k_schlafzimmer
+      big: true
+    grid_options:
+      columns: full
+  - type: tile
+    entity: climate.bt_schlafzimmer_bt_schlafzimmer
+    name: Thermostat
+    icon: mdi:thermostat
+    color: deep-orange
+    features_position: bottom
+    grid_options:
+      columns: full
+    features:
+    - type: target-temperature
+    - type: climate-hvac-modes
+      hvac_modes:
+      - heat
+      - 'off'
+  - type: custom:button-card
+    template: raum
+    variables:
+      name: Kinderzimmer
+      icon: mdi:teddy-bear
+      temp: sensor.temperature_kinderzimmer_temperatur
+      hum: sensor.temperature_kinderzimmer_luftfeuchtigkeit
+      bts: *id011
+      valves: *id012
+      k: input_number.heizung_warm_k_kinderzimmer
+      big: true
+    grid_options:
+      columns: full
+  - type: tile
+    entity: climate.bt_kinderzimmer_bt_kinderzimmer
+    name: Thermostat
+    icon: mdi:thermostat
+    color: deep-orange
+    features_position: bottom
+    grid_options:
+      columns: full
+    features:
+    - type: target-temperature
+    - type: climate-hvac-modes
+      hvac_modes:
+      - heat
+      - 'off'
+  - type: custom:button-card
+    template: raum
+    variables:
+      name: Gästezimmer
+      icon: mdi:desk
+      temp: sensor.temperature_gastezimmer_temperatur
+      hum: sensor.temperature_gastezimmer_luftfeuchtigkeit
+      bts: *id013
+      valves: *id014
+      k: input_number.heizung_warm_k_gastezimmer
+      ac: climate.air_conditioner
+      big: true
+    grid_options:
+      columns: full
+  - type: tile
+    entity: climate.bt_gastezimmer_bt_gastezimmer
+    name: Thermostat
+    icon: mdi:thermostat
+    color: deep-orange
+    features_position: bottom
+    grid_options:
+      columns: full
+    features:
+    - type: target-temperature
+    - type: climate-hvac-modes
+      hvac_modes:
+      - heat
+      - 'off'
+  - type: heading
+    heading: Keller
+    heading_style: subtitle
+  - type: custom:button-card
+    template: raum
+    variables:
+      name: Keller
+      icon: mdi:briefcase-outline
+      temp: sensor.temperatursensor_keller_temperatur
+      hum: sensor.temperatursensor_keller_luftfeuchtigkeit
+      note: Thermostat manuell
+      big: true
+    grid_options:
+      columns: 6
+      rows: 2
+  - type: custom:button-card
+    template: raum
+    variables:
+      name: Keller Bällebad
+      icon: mdi:baby-face-outline
+      temp: sensor.temperature_humidity_sensor_16_temperatur
+      hum: sensor.temperature_humidity_sensor_16_luftfeuchtigkeit
+      note: Thermostat manuell
+      big: true
+    grid_options:
+      columns: 6
+      rows: 2
