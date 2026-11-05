@@ -4,12 +4,22 @@ Every minute from the coordinator: replan (ev_charge_model) and, when "Ladesteue
 is on, start/stop charging and set the current. Off = the plan is only shown.
 Order of commands: start charging first, then set the current; a current set while the car
 is not charging was ignored in the test of 05.11.2026 (the car started with 16 A).
+
+Plugging in: the car starts charging on its own right away. The Wall Connector sees the car
+within seconds, the BLE link only after up to two minutes. So on "car connected" at the Wall
+Connector the BLE link is pulled up at once (refresh button) and the control runs immediately,
+without waiting for the minute cycle. While BLE is away the plan uses the Tibber charge level,
+so it is ready before the car is plugged in.
 """
 from __future__ import annotations
+
+import asyncio
 
 from datetime import datetime, time, timedelta
 import logging
 
+from homeassistant.core import callback
+from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.storage import Store
 import homeassistant.util.dt as dt_util
 
@@ -31,6 +41,12 @@ E_CLIMATE = f"climate.{CAR}_climate"
 E_CABIN = f"sensor.{CAR}_cabin_temperature"
 E_OUTSIDE = f"sensor.{CAR}_outside_temperature"
 E_WAKE = f"button.{CAR}_wake_up"
+E_REFRESH = f"button.{CAR}_force_refresh_vehicle_data"
+E_SOC_TIBBER = "sensor.reskey_ladezustand"           # Tibber (Tesla cloud), also while BLE is out of reach
+E_PLUG_TIBBER = "binary_sensor.reskey_stecker"
+E_WC_CAR = "binary_sensor.tesla_wall_connector_fahrzeug_verbunden"
+E_WC_STATUS = "sensor.tesla_wall_connector_status"
+REFRESH_GAP = timedelta(seconds=20)
 E_ASLEEP = f"binary_sensor.{CAR}_asleep"
 E_SEAT = f"select.aussen_{CAR}_front_left_seat_climate"
 E_WHEEL = f"switch.aussen_{CAR}_steering_wheel_heater"
@@ -69,6 +85,11 @@ class EvChargeController:
         self._last_cmd: datetime | None = None
         self._surplus_a = 0
         self.listeners: list = []
+        self.soc_source = None
+        self._last_result: dict = {}
+        self._lock = asyncio.Lock()
+        self._refresh_at: datetime | None = None
+        self._unsub = None
         # preheating state
         self.pre_status = "aus"
         self._holidays: set = set()
@@ -85,6 +106,31 @@ class EvChargeController:
         self.s.update({k: v for k, v in data.items() if k in DEFAULTS})
         if data.get("pre_per_k") == 0.5:  # first default (measured against outside), not learned
             self.s["pre_per_k"] = PREHEAT_MIN_PER_K
+        self._unsub = async_track_state_change_event(
+            self.hass, [E_WC_CAR, E_WC_STATUS, E_PLUG_TIBBER, E_LINK, E_PLUG, E_CHARGING], self._on_car_event)
+
+    def async_stop(self) -> None:
+        if self._unsub:
+            self._unsub()
+            self._unsub = None
+
+    @callback
+    def _on_car_event(self, event) -> None:
+        """Plug-in seen: get the BLE link up and decide now, not at the next minute."""
+        new, old = event.data.get("new_state"), event.data.get("old_state")
+        if new is None or (old is not None and old.state == new.state) or not self._last_result:
+            return
+        eid = event.data.get("entity_id")
+        now = dt_util.utcnow()
+        if eid in (E_WC_CAR, E_PLUG_TIBBER, E_WC_STATUS) and new.state in ("on", "charging"):
+            self._last_cmd = None   # a fresh plug-in must not wait for the command gap
+            if self.s["active"] and self._state(E_LINK) != "on" and (
+                    self._refresh_at is None or now - self._refresh_at >= REFRESH_GAP):
+                self._refresh_at = now
+                self.hass.async_create_task(self._try("button", "press", E_REFRESH))
+        if eid in (E_LINK, E_PLUG) and new.state == "on":
+            self._last_cmd = None
+        self.hass.async_create_task(self.async_update(now, self._last_result, quick=True))
 
     async def async_set(self, key: str, value) -> None:
         self.s[key] = value
@@ -134,9 +180,29 @@ class EvChargeController:
         return dt_util.as_local(t) if t else None
 
     # ------------------------------------------------------------------ loop
-    async def async_update(self, now: datetime, result: dict) -> None:
+    async def async_update(self, now: datetime, result: dict, quick: bool = False) -> None:
+        if not quick:
+            self._last_result = result
+        async with self._lock:
+            await self._update(now, result, quick)
+
+    def _soc(self):
+        """Car charge level: BLE first, the Tibber value while the car is out of BLE reach."""
+        soc = self._float(E_SOC)
+        if soc is not None:
+            self.soc_source = "auto"
+            return soc
+        soc = self._float(E_SOC_TIBBER)
+        self.soc_source = "tibber" if soc is not None else None
+        return soc
+
+    def _plugged(self) -> bool:
+        return "on" in (self._state(E_PLUG), self._state(E_WC_CAR), self._state(E_PLUG_TIBBER))
+
+    async def _update(self, now: datetime, result: dict, quick: bool) -> None:
         local = dt_util.as_local(now)
-        await self._refresh_reference(now)
+        if not quick:
+            await self._refresh_reference(now)
         hol = german_holidays(local.year) | german_holidays(local.year + 1)
         self._holidays = hol
         wd = time.fromisoformat(self.s["dep_weekday"])
@@ -146,8 +212,8 @@ class EvChargeController:
         if travel and travel < local:
             await self.async_set("travel_on", False)
             travel = None
-        soc = self._float(E_SOC)
-        plugged = self._state(E_PLUG) == "on"
+        soc = self._soc()
+        plugged = self._plugged()
         if soc is not None:
             settings = Settings(self.s["min_target"], self.s["max_target"], travel, self.s["travel_target"],
                                 self.s["wait_ct"] / 100.0, self.s["negative_target"])
@@ -179,6 +245,9 @@ class EvChargeController:
             self.reason = "nicht angesteckt – " + self.reason
         if self.s["active"] and plugged and self._state(E_LINK) == "on":
             await self._execute(now, target_amps, travel)
+        if quick:
+            self._changed()
+            return
         try:
             await self._preheat(local)
         except Exception:  # noqa: BLE001 - never break the charging loop
@@ -335,6 +404,7 @@ class EvChargeController:
             "kwh": p.kwh if p else None, "kosten_eur": p.cost_eur if p else None,
             "viertelstunden": [{"start": t.strftime("%a %H:%M"), "preis": round(v[0], 3), "grund": v[1]} for t, v in slots],
             "fenster": _windows(slots),
+            "ladestand_quelle": self.soc_source,
             "referenz_tage": 28, "referenz_preise": len(self.reference),
             "vorklima": {"status": self.pre_status, **self.pre_next},
         }

@@ -1401,6 +1401,8 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
                 await self.oil.async_stop()
             except Exception:  # noqa: BLE001
                 _LOGGER.exception("Stopping the oil monitor failed")
+        if self.ev is not None:
+            self.ev.async_stop()
 
     async def _apply_inverter(self, now: datetime, turn_on: bool) -> None:
         is_on = self._inverter_read_state()
