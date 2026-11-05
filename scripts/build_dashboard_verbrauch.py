@@ -16,6 +16,7 @@ CATS = {
     'spuel': ('Spülmaschine', '#3b82f6', 'mdi:dishwasher'),
     'wasch': ('Waschmaschine', '#06b6d4', 'mdi:washing-machine'),
     'licht': ('Licht', '#f59e0b', 'mdi:lightbulb-on-outline'),
+    'tv': ('TV & Unterhaltung', '#ec4899', 'mdi:television'),
     'akku': ('Akku laden', '#10b981', 'mdi:battery-charging'),
     'pool': ('Pool & Hydro', '#14b8a6', 'mdi:pool'),
     'klaeren': ('Zu klären', '#a855f7', 'mdi:help-circle-outline'),
@@ -31,7 +32,8 @@ DEVICES = [
     ('Licht außen 2', 'licht', 'sensor.shellydimmer2_4cebd6edf59d_power', 'sensor.shellydimmer2_4cebd6edf59d_energy'),
     ('Licht Wohnzimmer', 'licht', 'sensor.licht_wohnzimmer_leistung', 'sensor.licht_wohnzimmer_energie_gesamt'),
     ('Licht Bücherregal', 'licht', 'sensor.antela_smart_steckdose_leistung', 'sensor.antela_smart_steckdose_energie_gesamt'),
-    ('Licht Hochbett Kinderzimmer', 'licht', 'sensor.kinderzimmer_hochbett_licht_leistung', 'sensor.kinderzimmer_hochbett_licht_energie_gesamt'),
+    # plug formerly on the bunk bed light, since 06.11.2026: TV with Teufel box and everything around it
+    ('Fernseher Wohnzimmer', 'tv', 'sensor.kinderzimmer_hochbett_licht_leistung', 'sensor.kinderzimmer_hochbett_licht_energie_gesamt'),
     ('Licht Keller Lasercutter', 'licht', 'sensor.licht_keller_lasercutter_leistung', 'sensor.licht_keller_lasercutter_energie_gesamt'),
     ('Licht LED Keller (?)', 'licht', 'sensor.licht_schrank_esszimmer_leistung', 'sensor.licht_led_keller_energie_gesamt'),
     ('Akku laden (Netz)', 'akku', 'sensor.shellyplus1pm_e86beaeae1a0_switch_0_power', 'sensor.shellyplus1pm_e86beaeae1a0_switch_0_energy'),

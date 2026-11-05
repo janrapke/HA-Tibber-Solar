@@ -33,7 +33,7 @@
  },
  {
   "stat_consumption": "sensor.kinderzimmer_hochbett_licht_energie_gesamt",
-  "name": "Licht Hochbett Kinderzimmer"
+  "name": "Fernseher Wohnzimmer"
  },
  {
   "stat_consumption": "sensor.licht_keller_lasercutter_energie_gesamt",
