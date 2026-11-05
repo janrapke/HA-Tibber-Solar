@@ -1,14 +1,14 @@
 """Pure math of the electricity cost comparison (no Home Assistant imports, unit-tested).
 
-The panels hang on MPPT chargers that can only charge the battery: without the battery they would
-deliver nothing. The honest comparison case is therefore "balcony power plant only", and everything
-the panels bring counts for the battery system.
+All solar (balcony + panels) counts as "used directly" as far as the house could have used it at the
+moment of production. Only the surplus beyond the house load is credited to the battery: if the
+battery takes panel power although the house needs it, it only earns the price difference on that part.
 
 Scenarios per interval (Tibber price, exported energy is not paid):
     without system : house * price
-    balcony only   : max(0, house - balcony) * price
+    without battery: max(0, house - (balcony + panels * inverter efficiency)) * price
     real           : grid import * price (includes what the grid charger drew)
-battery system saves = balcony only - real, split into
+battery system saves = without battery - real, split into
     price shifting : discharged energy * (price at use - price when it went into the battery),
                      for solar and grid-charged energy alike
     stored solar   : the rest = solar energy made usable, valued at the price of its production
@@ -23,7 +23,7 @@ from datetime import date, timedelta
 
 INVERTER_EFF = 0.93          # battery DC -> house AC
 CHARGER_EFF = 0.90           # grid charger AC -> battery DC
-# day record: [without_eur, balcony_only_eur, real_eur, house_kwh, solar_kwh, import_kwh,
+# day record: [without_eur, without_battery_eur, real_eur, house_kwh, solar_kwh, import_kwh,
 #              unused_without_battery_kwh, panel_kwh, price_shift_eur]
 FIELDS = 9
 
@@ -38,7 +38,11 @@ def interval(price: float, hours: float, imp_w: float, exp_w: float, inverter_w:
     inverter_w, balcony_w, charger_w, panel_w = (max(0.0, x) for x in (inverter_w, balcony_w, charger_w, panel_w))
     house = max(0.0, imp_w - exp_w + inverter_w + balcony_w - charger_w)
     kwh = hours / 1000.0
-    unused = panel_w + max(0.0, balcony_w - house)   # solar that could not have been used without the battery
+    # solar the house could have used directly: balcony first, then the panels through an inverter
+    bal_used = min(house, balcony_w)
+    panel_used = min(panel_w, (house - bal_used) / INVERTER_EFF)
+    direct_ac = bal_used + panel_used * INVERTER_EFF
+    unused = (balcony_w - bal_used) + (panel_w - panel_used)   # surplus, only usable through the battery
 
     shift = 0.0
     if pool is not None:
@@ -57,7 +61,7 @@ def interval(price: float, hours: float, imp_w: float, exp_w: float, inverter_w:
             pool["kwh"] *= f
             pool["eur"] *= f
 
-    return [house * kwh * price, max(0.0, house - balcony_w) * kwh * price, max(0.0, imp_w) * kwh * price,
+    return [house * kwh * price, (house - direct_ac) * kwh * price, max(0.0, imp_w) * kwh * price,
             house * kwh, (panel_w + balcony_w) * kwh, max(0.0, imp_w) * kwh, unused * kwh, panel_w * kwh, shift]
 
 
@@ -98,8 +102,8 @@ def summarize(days: dict, today: date) -> dict:
 
 def _fmt(t: list[float], n: int) -> dict:
     akku = t[1] - t[2]
-    return {"ohne_system": round(t[0], 2), "nur_balkon": round(t[1], 2), "tatsaechlich": round(t[2], 2),
-            "balkon_spart": round(t[0] - t[1], 2), "akku_spart": round(akku, 2),
+    return {"ohne_system": round(t[0], 2), "ohne_speicher": round(t[1], 2), "tatsaechlich": round(t[2], 2),
+            "solar_direkt_spart": round(t[0] - t[1], 2), "akku_spart": round(akku, 2),
             "akku_preis_spart": round(t[8], 2), "akku_solar_spart": round(akku - t[8], 2),
             "gesamt_spart": round(t[0] - t[2], 2), "verbrauch_kwh": round(t[3], 1), "solar_kwh": round(t[4], 1),
             "panel_kwh": round(t[7], 1), "ungenutzt_ohne_akku_kwh": round(t[6], 1), "netz_kwh": round(t[5], 1),

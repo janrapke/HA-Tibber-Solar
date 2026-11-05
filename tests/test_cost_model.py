@@ -23,12 +23,21 @@ def test_evening_battery_covers_house():
     assert shift == 0  # without a pool nothing is known about the origin
 
 
-def test_noon_panels_only_charge_the_battery():
+def test_noon_balcony_covers_house_panels_are_surplus():
     # house 300 W, balcony 400 W covers it, 100 W exported; panels push 1000 W into the battery
     a, b, c, house, solar, imp, unused, panel, shift = cm.interval(0.40, 1.0, 0, 100, 0, 400, 0, 1000)
     assert r(house) == 0.3 and r(solar) == 1.4 and r(panel) == 1.0
     assert r(unused) == 1.1   # all panel energy plus the balcony surplus would be lost without the battery
     assert a > 0 and b == 0 and c == 0
+
+
+def test_house_could_have_used_part_of_the_panel_power():
+    # 14:00: balcony 150 W, panels 800 W into the battery, house 400 W -> 250 W from the grid
+    a, b, c, house, solar, imp, unused, panel, shift = cm.interval(0.40, 1.0, 250, 0, 0, 150, 0, 800)
+    assert r(house) == 0.4
+    assert b == 0                                  # without battery the panels would have covered the house
+    assert r(c) == 0.1                             # real: the 250 W came from the grid
+    assert r(unused) == r(0.8 - 0.25 / 0.93)       # only the surplus (~530 W DC) counts for the battery
 
 
 def test_balcony_and_grid_charger():
@@ -76,7 +85,7 @@ def test_summary_periods_and_months():
     assert s["heute"]["gesamt_spart"] == 0.5 and s["heute"]["tage"] == 1
     assert s["7_tage"]["ohne_system"] == 16 and s["monat"]["ohne_system"] == 6
     g = s["gesamt"]
-    assert g["balkon_spart"] == 3 and g["akku_spart"] == 2.5
+    assert g["solar_direkt_spart"] == 3 and g["akku_spart"] == 2.5
     assert g["akku_preis_spart"] == 0.8 and g["akku_solar_spart"] == 1.7
     assert g["ungenutzt_ohne_akku_kwh"] == 4 and g["panel_kwh"] == 5
     assert list(s["monate"]) == ["2026-10", "2026-11"] and s["seit"] == "2026-10-30"

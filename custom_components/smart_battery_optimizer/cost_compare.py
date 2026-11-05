@@ -1,9 +1,9 @@
-"""Electricity bill in three scenarios: without any system, balcony power plant only, real (battery + panels).
+"""Electricity bill in three scenarios: without any system, without battery (solar only used directly), real.
 
 Per interval the household consumption is reconstructed from the Tibber meter:
     house = grid import - export + battery inverter output + balcony output - grid charger input
-The panels charge the battery through MPPT chargers and could deliver nothing without it, so they
-belong to the battery system. The math (incl. the split into stored solar and price shifting) is in
+Solar counts as used directly as far as the house could take it at production time; only the surplus
+is credited to the battery. The math (incl. the split into stored solar and price shifting) is in
 cost_model.py.
 
 Live values are integrated every coordinator cycle; on the first start the past is filled from the
@@ -26,7 +26,7 @@ from .cost_model import add, interval, new_pool, summarize
 _LOGGER = logging.getLogger(__name__)
 
 STORE_VERSION = 1
-METHOD = 5                   # 5: balcony-only case, price shifting = price at use - price at charge time
+METHOD = 6                   # 6: all solar direct up to the house load, only the surplus counts for the battery
 MAX_GAP_S = 300              # longer gaps between cycles are not integrated (restart, outage)
 SAVE_EVERY = timedelta(minutes=10)
 BACKFILL_START = datetime(2024, 1, 1)

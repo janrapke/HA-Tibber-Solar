@@ -1,7 +1,7 @@
 /**
  * Smart Battery Optimizer – Stromkosten-Vergleich v4
- * Electricity bill in three scenarios: without any system, without battery (only solar that feeds the house
- * directly; panels that can only charge the battery count for the battery), real. Data: sensor "Stromkosten-Vergleich" (attributes heute/7_tage/30_tage/monat/jahr/gesamt, monate).
+ * Electricity bill in three scenarios: without any system, without battery (all solar used directly as far as
+ * the house can take it, the surplus would be exported unpaid), real. Data: sensor "Stromkosten-Vergleich" (attributes heute/7_tage/30_tage/monat/jahr/gesamt, monate).
  *
  * Config:
  *   type: custom:savings-card
@@ -121,8 +121,8 @@ class SavingsCard extends HTMLElement {
       : per === 'gesamt' ? `Gesamt: seit ${a.seit ? dfmt(a.seit) : '–'} (${p.tage || 0} Tage mit Messwerten)`
       : per.startsWith('m:') ? `${mName(per.slice(2))} (${p.tage || 0} Tage)`
       : `Jahr ${per.slice(2)} (${p.tage || 0} Tage)`;
-    const A = p.ohne_system || 0, B = p.nur_balkon || 0, C = p.tatsaechlich || 0;
-    const sol = p.balkon_spart || 0, bat = p.akku_spart || 0, tot = p.gesamt_spart || 0;
+    const A = p.ohne_system || 0, B = p.ohne_speicher || 0, C = p.tatsaechlich || 0;
+    const sol = p.solar_direkt_spart || 0, bat = p.akku_spart || 0, tot = p.gesamt_spart || 0;
     const batSun = p.akku_solar_spart || 0, batShift = p.akku_preis_spart || 0;
     const yieldKwh = p.solar_kwh || 0, unused = p.ungenutzt_ohne_akku_kwh || 0;
     const unusedPct = yieldKwh > 0 ? Math.round(100 * unused / yieldKwh) : 0;
@@ -170,7 +170,7 @@ class SavingsCard extends HTMLElement {
     let chart = '';
     if (mon.length) {
       const W = 320, H = 120, PB = 16, PT = 12;
-      const vals = mon.map(([, v]) => ({ s: v.balkon_spart || 0, b: v.akku_spart || 0, p: v.akku_preis_spart || 0 }));
+      const vals = mon.map(([, v]) => ({ s: v.solar_direkt_spart || 0, b: v.akku_spart || 0, p: v.akku_preis_spart || 0 }));
       const top = Math.max(1, ...vals.map(v => v.s + Math.max(0, v.b)));
       const bottom = Math.min(0, ...vals.map(v => Math.min(0, v.b)));
       const y = v => PT + (top - v) / (top - bottom) * (H - PT - PB);
@@ -208,7 +208,7 @@ class SavingsCard extends HTMLElement {
       </div>
       <div class="what">${what}</div>
       ${rows}${chips}${chart}
-      <div class="foot">„Ohne Speicher“: Solarstrom zählt nur, soweit das Haus ihn im selben Moment direkt verbraucht hätte; Panels, die nur den Speicher laden, liefern dann nichts, Überschuss wäre unbezahlt eingespeist worden. „Solarstrom nutzbar gemacht“: gespeicherter Solarstrom zum Preis seiner Erzeugung, abzüglich Verluste und Netzbezug beim Laden. „Preisverschiebung“: entladene Energie × (Preis bei Nutzung − Preis beim Laden), für Solar- und Netzstrom. Daten seit ${since}, Werte vor Einführung aus Stundenmitteln. Grundgebühr nicht enthalten.</div>
+      <div class="foot">„Ohne Speicher“: aller Solarstrom zählt als direkt genutzt, soweit das Haus ihn im Moment der Erzeugung hätte verbrauchen können; nur der Überschuss darüber wird dem Speicher gutgeschrieben (sonst unbezahlt eingespeist). Nimmt der Speicher Solarstrom, den das Haus gebraucht hätte, verdient er daran nur die Preisverschiebung. „Solarstrom nutzbar gemacht“: gespeicherter Solarstrom zum Preis seiner Erzeugung, abzüglich Verluste und Netzbezug beim Laden. „Preisverschiebung“: entladene Energie × (Preis bei Nutzung − Preis beim Laden), für Solar- und Netzstrom. Daten seit ${since}, Werte vor Einführung aus Stundenmitteln. Grundgebühr nicht enthalten.</div>
     </ha-card>`;
     const go = k => { if (!k) return; this._period = k; this._sig = ''; this._render(this._state()); };
     this.shadowRoot.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => go(t.dataset.k)));
