@@ -1,14 +1,14 @@
 /**
- * Smart Battery Optimizer – Stromkosten-Vergleich v3
- * Electricity bill in three scenarios: without any system, solar panels only (direct feed-in, export unpaid),
- * real (with battery). Data: sensor "Stromkosten-Vergleich" (attributes heute/7_tage/30_tage/monat/jahr/gesamt, monate).
+ * Smart Battery Optimizer – Stromkosten-Vergleich v4
+ * Electricity bill in three scenarios: without any system, without battery (only solar that feeds the house
+ * directly; panels that can only charge the battery count for the battery), real. Data: sensor "Stromkosten-Vergleich" (attributes heute/7_tage/30_tage/monat/jahr/gesamt, monate).
  *
  * Config:
  *   type: custom:savings-card
  *   entity: sensor.smart_battery_optimizer_stromkosten_vergleich   # optional, found automatically
  *   default_period: gesamt                                          # optional
  */
-console.info('%c SAVINGS-CARD %c v3.0 ', 'color:white;background:#4CAF50;font-weight:bold', 'color:#4CAF50;background:white;font-weight:bold');
+console.info('%c SAVINGS-CARD %c v4.0 ', 'color:white;background:#4CAF50;font-weight:bold', 'color:#4CAF50;background:white;font-weight:bold');
 
 // fixed periods; months ("m:YYYY-MM") and years ("y:YYYY") are picked from the drop-downs
 const PERIODS = [
@@ -18,7 +18,7 @@ const PERIODS = [
   { key: 'gesamt', label: 'Gesamt' },
 ];
 const MONTHS_LONG = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
-const C_GRID = '#ef5350', C_SOLAR = '#f9a825', C_BATT = '#1e88e5', C_REAL = '#43a047';
+const C_GRID = '#ef5350', C_SOLAR = '#f9a825', C_BATT = '#1e88e5', C_SHIFT = '#7e57c2', C_REAL = '#43a047';
 const MONTHS = ['Jan', 'Feb', 'Mär', 'Apr', 'Mai', 'Jun', 'Jul', 'Aug', 'Sep', 'Okt', 'Nov', 'Dez'];
 
 class SavingsCard extends HTMLElement {
@@ -58,6 +58,7 @@ class SavingsCard extends HTMLElement {
   _render(st) {
     const eur = (v, d = 2) => (v ?? 0).toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d }) + ' €';
     const kwh = v => Math.round(v ?? 0).toLocaleString('de-DE') + ' kWh';
+    const kwhd = v => (v ?? 0).toLocaleString('de-DE', { maximumFractionDigits: (v ?? 0) >= 100 ? 0 : 1 }) + ' kWh';
     const css = `
       <style>
         ha-card { padding: 14px 16px 12px; }
@@ -89,10 +90,14 @@ class SavingsCard extends HTMLElement {
         .chips { display: flex; gap: 6px; margin: 4px 0 12px; }
         .chip { flex: 1; border-radius: 10px; padding: 7px 6px; text-align: center; }
         .chip .v { font-size: 1.1em; font-weight: 700; }
-        .chip .l { font-size: .7em; opacity: .8; }
+        .chip .l { font-size: .7em; opacity: .8; white-space: nowrap; }
         .kwh { display: flex; flex-wrap: wrap; gap: 4px 14px; justify-content: center; font-size: .75em; color: var(--secondary-text-color); margin-bottom: 10px; }
         .kwh b { color: var(--primary-text-color); }
         .kwh > span { white-space: nowrap; }
+        .split { margin: -4px 0 12px; font-size: .8em; }
+        .sl { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+        .sl ha-icon { --mdc-icon-size: 16px; }
+        .sl .n { flex: 1; color: var(--secondary-text-color); }
         .sub { font-size: .8em; font-weight: 600; margin: 4px 0 2px; color: var(--secondary-text-color); }
         svg text { font-family: inherit; }
         .foot { font-size: .68em; color: var(--secondary-text-color); margin-top: 6px; line-height: 1.4; }
@@ -116,8 +121,11 @@ class SavingsCard extends HTMLElement {
       : per === 'gesamt' ? `Gesamt: seit ${a.seit ? dfmt(a.seit) : '–'} (${p.tage || 0} Tage mit Messwerten)`
       : per.startsWith('m:') ? `${mName(per.slice(2))} (${p.tage || 0} Tage)`
       : `Jahr ${per.slice(2)} (${p.tage || 0} Tage)`;
-    const A = p.ohne_system || 0, B = p.nur_solar || 0, C = p.tatsaechlich || 0;
-    const sol = p.solar_spart || 0, bat = p.akku_spart || 0, tot = p.gesamt_spart || 0;
+    const A = p.ohne_system || 0, B = p.nur_balkon || 0, C = p.tatsaechlich || 0;
+    const sol = p.balkon_spart || 0, bat = p.akku_spart || 0, tot = p.gesamt_spart || 0;
+    const batSun = p.akku_solar_spart || 0, batShift = p.akku_preis_spart || 0;
+    const yieldKwh = p.solar_kwh || 0, unused = p.ungenutzt_ohne_akku_kwh || 0;
+    const unusedPct = yieldKwh > 0 ? Math.round(100 * unused / yieldKwh) : 0;
     const max = Math.max(A, B, C, 0.01);
     const w = v => Math.max(0, 100 * v / max).toFixed(2) + '%';
     const lbl = (v, minPct) => (100 * Math.abs(v) / max >= minPct ? eur(v, Math.abs(v) >= 100 ? 0 : 2) : '');
@@ -129,24 +137,31 @@ class SavingsCard extends HTMLElement {
         <div class="bar"><div class="seg" style="width:${w(A)};background:${C_GRID}">${lbl(A, 18)}</div></div>
       </div>
       <div class="row">
-        <div class="rl"><ha-icon icon="mdi:solar-panel" style="color:${C_SOLAR}"></ha-icon><span class="n">Nur Solarmodule, ohne Speicher</span><span class="c">${eur(B)}</span></div>
+        <div class="rl"><ha-icon icon="mdi:solar-panel" style="color:${C_SOLAR}"></ha-icon><span class="n">Ohne Speicher – Solar nur direkt genutzt</span><span class="c">${eur(B)}</span></div>
         <div class="bar"><div class="seg" style="width:${w(B)};background:${C_GRID}">${lbl(B, 18)}</div>
           <div class="seg saved" style="width:${w(Math.max(0, sol))};background:${C_SOLAR}">${lbl(-sol, 14)}</div></div>
       </div>
       <div class="row">
         <div class="rl"><ha-icon icon="mdi:home-battery" style="color:${C_BATT}"></ha-icon><span class="n">Mit Speicher – tatsächlich bezahlt</span><span class="c">${eur(C)}</span></div>
         <div class="bar"><div class="seg" style="width:${w(C)};background:${C_GRID}">${lbl(C, 18)}</div>
-          <div class="seg saved" style="width:${w(Math.max(0, bat))};background:${C_BATT}">${lbl(-bat, 14)}</div>
+          <div class="seg saved" style="width:${w(Math.max(0, Math.min(bat, batSun)))};background:${C_BATT}">${lbl(-batSun, 14)}</div>
+          <div class="seg saved" style="width:${w(Math.max(0, Math.min(batShift, bat - Math.max(0, batSun))))};background:${C_SHIFT}">${lbl(-batShift, 14)}</div>
           <div class="seg saved" style="width:${w(Math.max(0, Math.min(sol, A - C - Math.max(0, bat))))};background:${C_SOLAR}">${lbl(-sol, 14)}</div></div>
       </div>`;
 
     const chips = `
       <div class="chips">
-        <div class="chip" style="background:${C_SOLAR}22"><div class="v" style="color:${C_SOLAR}">${eur(sol)}</div><div class="l">Solar spart · ${pct(sol)}</div></div>
-        <div class="chip" style="background:${C_BATT}22"><div class="v" style="color:${C_BATT}">${eur(bat)}</div><div class="l">Speicher spart zusätzlich · ${pct(bat)}</div></div>
+        <div class="chip" style="background:${C_SOLAR}22"><div class="v" style="color:${C_SOLAR}">${eur(sol)}</div><div class="l">Solar direkt · ${pct(sol)}</div></div>
+        <div class="chip" style="background:${C_BATT}22"><div class="v" style="color:${C_BATT}">${eur(bat)}</div><div class="l">Speicher-System · ${pct(bat)}</div></div>
         <div class="chip" style="background:${C_REAL}22"><div class="v" style="color:${C_REAL}">${eur(tot)}</div><div class="l">zusammen · ${pct(tot)}</div></div>
       </div>
-      <div class="kwh"><span>Verbrauch <b>${kwh(p.verbrauch_kwh)}</b></span><span>Solar <b>${kwh(p.solar_kwh)}</b></span><span>aus dem Netz <b>${kwh(p.netz_kwh)}</b></span></div>`;
+      <div class="split">
+        <div class="sl"><span style="color:${C_BATT}">■</span><span class="n">Speicher: Solarstrom nutzbar gemacht</span><b>${eur(batSun)}</b></div>
+        <div class="sl"><span style="color:${C_SHIFT}">■</span><span class="n">Speicher: Preisverschiebung (Laden → Nutzung)</span><b>${eur(batShift)}</b></div>
+        <div class="sl"><ha-icon icon="mdi:white-balance-sunny" style="color:${C_SOLAR}"></ha-icon><span class="n">Solarertrag</span><b>${kwhd(yieldKwh)}</b></div>
+        <div class="sl"><ha-icon icon="mdi:transmission-tower-export" style="color:${C_GRID}"></ha-icon><span class="n">davon ohne Speicher nicht nutzbar</span><b>${kwhd(unused)} · ${unusedPct} %</b></div>
+      </div>
+      <div class="kwh"><span>Verbrauch <b>${kwh(p.verbrauch_kwh)}</b></span><span>Solar <b>${kwhd(yieldKwh)}</b></span><span>aus dem Netz <b>${kwh(p.netz_kwh)}</b></span></div>`;
 
     // monthly savings: solar (amber) + battery (blue, may be negative) stacked
     const yearSel = per.startsWith('y:') ? per.slice(2) : (per.startsWith('m:') ? per.slice(2, 6) : null);
@@ -155,7 +170,7 @@ class SavingsCard extends HTMLElement {
     let chart = '';
     if (mon.length) {
       const W = 320, H = 120, PB = 16, PT = 12;
-      const vals = mon.map(([, v]) => ({ s: v.solar_spart || 0, b: v.akku_spart || 0 }));
+      const vals = mon.map(([, v]) => ({ s: v.balkon_spart || 0, b: v.akku_spart || 0, p: v.akku_preis_spart || 0 }));
       const top = Math.max(1, ...vals.map(v => v.s + Math.max(0, v.b)));
       const bottom = Math.min(0, ...vals.map(v => Math.min(0, v.b)));
       const y = v => PT + (top - v) / (top - bottom) * (H - PT - PB);
@@ -165,8 +180,12 @@ class SavingsCard extends HTMLElement {
         const v = vals[i], x = i * bw + bw * 0.18, ww = bw * 0.64;
         if (per === 'm:' + k) bars += `<rect x="${i * bw + 1}" y="0" width="${bw - 2}" height="${H}" fill="var(--primary-color)" opacity=".12" rx="4"/>`;
         bars += `<rect class="mb" data-k="m:${k}" x="${i * bw}" y="0" width="${bw}" height="${H}" fill="transparent"/>`;
-        bars += `<rect x="${x}" y="${y(v.s)}" width="${ww}" height="${Math.max(0, y(0) - y(v.s))}" fill="${C_SOLAR}" rx="2"><title>${k}: Solar ${eur(v.s)}</title></rect>`;
-        if (v.b >= 0) bars += `<rect x="${x}" y="${y(v.s + v.b)}" width="${ww}" height="${Math.max(0, y(v.s) - y(v.s + v.b))}" fill="${C_BATT}" rx="2"><title>${k}: Speicher ${eur(v.b)}</title></rect>`;
+        bars += `<rect x="${x}" y="${y(v.s)}" width="${ww}" height="${Math.max(0, y(0) - y(v.s))}" fill="${C_SOLAR}" rx="2"><title>${k}: Solar direkt ${eur(v.s)}</title></rect>`;
+        if (v.b >= 0) {
+          const pp = Math.max(0, Math.min(v.p, v.b)), sb = v.b - pp;   // stored solar below, price shift on top
+          bars += `<rect x="${x}" y="${y(v.s + sb)}" width="${ww}" height="${Math.max(0, y(v.s) - y(v.s + sb))}" fill="${C_BATT}" rx="2"><title>${k}: Solarstrom nutzbar gemacht ${eur(sb)}</title></rect>`;
+          bars += `<rect x="${x}" y="${y(v.s + v.b)}" width="${ww}" height="${Math.max(0, y(v.s + sb) - y(v.s + v.b))}" fill="${C_SHIFT}" rx="2"><title>${k}: Preisverschiebung ${eur(pp)}</title></rect>`;
+        }
         else bars += `<rect x="${x}" y="${y(0)}" width="${ww}" height="${Math.max(0, y(v.b) - y(0))}" fill="${C_BATT}" opacity=".5" rx="2"><title>${k}: Speicher ${eur(v.b)}</title></rect>`;
         const tot = v.s + v.b;
         bars += `<text x="${x + ww / 2}" y="${y(v.s + Math.max(0, v.b)) - 3}" font-size="8" text-anchor="middle" fill="var(--secondary-text-color)">${Math.round(tot)}</text>`;
@@ -175,7 +194,7 @@ class SavingsCard extends HTMLElement {
       chart = `<div class="sub">Ersparnis pro Monat (€)${per.startsWith('y:') ? ' · ' + yearSel : ''} – Balken antippen für den Monat</div>
         <svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="none" style="display:block">
           <line x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}" stroke="var(--divider-color)"/>${bars}</svg>
-        <div class="kwh" style="margin:2px 0 0"><span><span style="color:${C_SOLAR}">■</span> Solar</span><span><span style="color:${C_BATT}">■</span> Speicher</span></div>`;
+        <div class="kwh" style="margin:2px 0 0"><span><span style="color:${C_SOLAR}">■</span> Solar direkt</span><span><span style="color:${C_BATT}">■</span> Solarstrom nutzbar</span><span><span style="color:${C_SHIFT}">■</span> Preisverschiebung</span></div>`;
     }
 
     const since = a.seit ? new Date(a.seit + 'T12:00').toLocaleDateString('de-DE') : '–';
@@ -189,7 +208,7 @@ class SavingsCard extends HTMLElement {
       </div>
       <div class="what">${what}</div>
       ${rows}${chips}${chart}
-      <div class="foot">„Nur Solar“: Solarstrom zählt nur, soweit das Haus ihn im selben Moment verbraucht hätte; Überschuss wäre unbezahlt eingespeist worden. Speicher-Ersparnis enthält Lade­verluste und Netzladen. Daten seit ${since}, Werte vor Einführung aus Stundenmitteln. Grundgebühr nicht enthalten.</div>
+      <div class="foot">„Ohne Speicher“: Solarstrom zählt nur, soweit das Haus ihn im selben Moment direkt verbraucht hätte; Panels, die nur den Speicher laden, liefern dann nichts, Überschuss wäre unbezahlt eingespeist worden. „Solarstrom nutzbar gemacht“: gespeicherter Solarstrom zum Preis seiner Erzeugung, abzüglich Verluste und Netzbezug beim Laden. „Preisverschiebung“: entladene Energie × (Preis bei Nutzung − Preis beim Laden), für Solar- und Netzstrom. Daten seit ${since}, Werte vor Einführung aus Stundenmitteln. Grundgebühr nicht enthalten.</div>
     </ha-card>`;
     const go = k => { if (!k) return; this._period = k; this._sig = ''; this._render(this._state()); };
     this.shadowRoot.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => go(t.dataset.k)));
@@ -203,6 +222,6 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: 'savings-card',
   name: 'Smart Battery: Stromkosten-Vergleich',
-  description: 'Stromrechnung ohne System, nur mit Solar und tatsächlich mit Speicher',
+  description: 'Stromrechnung ohne System, ohne Speicher und tatsächlich mit Speicher',
   preview: true,
 });

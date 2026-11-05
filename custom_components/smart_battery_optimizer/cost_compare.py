@@ -1,12 +1,10 @@
-"""Electricity bill in three scenarios: without any system, solar panels only (direct feed-in), real (with battery).
+"""Electricity bill in three scenarios: without any system, balcony power plant only, real (battery + panels).
 
 Per interval the household consumption is reconstructed from the Tibber meter:
     house = grid import - export + battery inverter output + balcony output - grid charger input
-Scenario costs (Tibber price of the interval, exported energy is not paid):
-    without system : house * price
-    solar only     : max(0, house - solar) * price, solar = panel DC power * inverter efficiency + balcony
-    real           : grid import * price (includes what the grid charger drew)
-"solar saves" = without - solar only, "battery saves" = solar only - real (time shifting minus losses).
+The panels charge the battery through MPPT chargers and could deliver nothing without it, so they
+belong to the battery system. The math (incl. the split into stored solar and price shifting) is in
+cost_model.py.
 
 Live values are integrated every coordinator cycle; on the first start the past is filled from the
 hourly recorder statistics (hourly means, so a bit coarser than the live minute values).
@@ -20,15 +18,15 @@ from homeassistant.helpers.storage import Store
 import homeassistant.util.dt as dt_util
 
 from .const import (
-    CONF_BALCONY_POWER_SENSOR, CONF_GRID_CHARGER_POWER_W, CONF_GRID_CHARGER_SWITCH, CONF_SOLAR_POWER_SENSOR,
+    CONF_BALCONY_POWER_SENSOR, CONF_BATTERY_CAPACITY_WH, CONF_GRID_CHARGER_POWER_W, CONF_GRID_CHARGER_SWITCH, CONF_SOLAR_POWER_SENSOR,
     CONF_TIBBER_CONSUMPTION_SENSOR, CONF_TIBBER_EXPORT_SENSOR, CONF_TIBBER_PRICE_SENSOR, DOMAIN,
 )
-from .cost_model import add, interval, summarize
+from .cost_model import add, interval, new_pool, summarize
 
 _LOGGER = logging.getLogger(__name__)
 
 STORE_VERSION = 1
-METHOD = 2                   # 2: grid import/export of the past from the meter counters, not the power mean
+METHOD = 5                   # 5: balcony-only case, price shifting = price at use - price at charge time
 MAX_GAP_S = 300              # longer gaps between cycles are not integrated (restart, outage)
 SAVE_EVERY = timedelta(minutes=10)
 BACKFILL_START = datetime(2024, 1, 1)
@@ -46,6 +44,7 @@ class CostCompare:
         self._last: datetime | None = None
         self._last_save: datetime | None = None
         self._backfill_done = False
+        self.pool = new_pool()               # battery content: DC kWh and its value at charge-time price
         self.listeners: list = []
 
     async def async_start(self) -> None:
@@ -54,13 +53,15 @@ class CostCompare:
             self.days = data.get("days", {})
             self.live_from = data.get("live_from")
             self._backfill_done = bool(data.get("backfill_done"))
+            self.pool = data.get("pool") if "kwh" in (data.get("pool") or {}) else new_pool()
         else:
             _LOGGER.info("Cost comparison: calculation changed, refilling from the recorder")
         self._summarize()
 
     async def async_save(self) -> None:
         await self.store.async_save({"days": self.days, "live_from": self.live_from,
-                                     "backfill_done": self._backfill_done, "method": METHOD})
+                                     "backfill_done": self._backfill_done, "method": METHOD,
+                                     "pool": self.pool})
 
     def _summarize(self) -> None:
         self.summary = summarize(self.days, dt_util.now().date())
@@ -73,7 +74,11 @@ class CostCompare:
         if not sw:
             return None
         cand = "sensor." + sw.split(".", 1)[1] + "_power"
-        return cand if self.hass.states.get(cand) is not None else None
+        if self.hass.states.get(cand) is not None:
+            return cand
+        # right after the HA start the Shelly may not have its state yet: the registry knows it already
+        from homeassistant.helpers import entity_registry as er
+        return cand if er.async_get(self.hass).async_get(cand) is not None else None
 
     def charger_w(self, read_float) -> float:
         sensor = self.charger_sensor()
@@ -97,6 +102,9 @@ class CostCompare:
                     found[kind] = e.entity_id
         return found["consumption"], found["production"]
 
+    def capacity_kwh(self) -> float:
+        return float(self.config.get(CONF_BATTERY_CAPACITY_WH) or 5000) / 1000.0
+
     # ------------------------------------------------------------------ live
     async def async_update(self, now: datetime, price: float | None, imp: float | None, exp: float, inverter: float,
                            balcony: float, charger: float, panel: float | None) -> None:
@@ -112,7 +120,8 @@ class CostCompare:
             return  # this hour already came from the backfill
         key = dt_util.as_local(now).date().isoformat()
         self.days[key] = add(self.days.get(key), interval(price, secs / 3600.0, imp, exp, inverter, balcony,
-                                                            charger, panel or 0.0))
+                                                            charger, panel or 0.0, self.pool,
+                                                            self.capacity_kwh()))
         if self._last_save is None or now - self._last_save >= SAVE_EVERY:
             self._last_save = now
             self._summarize()
@@ -171,6 +180,7 @@ class CostCompare:
         pan = [series(p) for p in panels]
         first_solar = min((min(s) for s in pan if s), default=None)
         days: dict = {}
+        pool, cap = new_pool(), self.capacity_kwh()
         for ts in sorted(price):
             grid_in = imp_m.get(ts, imp.get(ts))
             grid_out = exp_m.get(ts, exp.get(ts, 0.0))
@@ -179,9 +189,10 @@ class CostCompare:
             key = dt_util.as_local(ts).date().isoformat()
             days[key] = add(days.get(key), interval(
                 price[ts], 1.0, grid_in, grid_out, max(0.0, inv.get(ts, 0.0)), bal.get(ts, 0.0),
-                max(0.0, chg.get(ts, 0.0)), sum(s.get(ts, 0.0) for s in pan)))
+                max(0.0, chg.get(ts, 0.0)), sum(s.get(ts, 0.0) for s in pan), pool, cap))
         for k, v in days.items():   # live days already recorded keep their own values
             self.days.setdefault(k, v)
+        self.pool = pool
         self.live_from = end.isoformat()
         self._summarize()
         await self.async_save()
@@ -190,5 +201,5 @@ class CostCompare:
 
     async def async_rebuild(self) -> None:
         """Forget everything and fill again from the recorder (button)."""
-        self.days, self.live_from, self._backfill_done = {}, None, False
+        self.days, self.live_from, self._backfill_done, self.pool = {}, None, False, new_pool()
         await self._backfill(dt_util.utcnow())
