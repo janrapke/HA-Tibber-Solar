@@ -149,6 +149,9 @@ sections:
       ac: climate.152832118046533_climate
       ac_hz: sensor.klima_wohnzimmer_kompressor
       big: true
+    tap_action:
+      action: navigate
+      navigation_path: /dashboard-home/raum-wohn
     grid_options:
       columns: full
   - type: tile
@@ -196,6 +199,9 @@ sections:
       k: input_number.heizung_warm_k_kuche
       off_flag: automation.heizung_kuche_dauerhaft_aus_halten
       big: true
+    tap_action:
+      action: navigate
+      navigation_path: /dashboard-home/raum-kueche
     grid_options:
       columns: full
   - type: tile
@@ -241,6 +247,9 @@ sections:
       valves: *id006
       k: input_number.heizung_warm_k_flur
       big: true
+    tap_action:
+      action: navigate
+      navigation_path: /dashboard-home/raum-flur
     grid_options:
       columns: full
   - type: tile
@@ -271,6 +280,9 @@ sections:
       valves: *id008
       k: input_number.heizung_warm_k_badezimmer
       big: true
+    tap_action:
+      action: navigate
+      navigation_path: /dashboard-home/raum-bad
     grid_options:
       columns: full
   - type: tile
@@ -313,6 +325,9 @@ sections:
       valves: *id010
       k: input_number.heizung_warm_k_schlafzimmer
       big: true
+    tap_action:
+      action: navigate
+      navigation_path: /dashboard-home/raum-schlaf
     grid_options:
       columns: full
   - type: tile
@@ -340,6 +355,9 @@ sections:
       valves: *id012
       k: input_number.heizung_warm_k_kinderzimmer
       big: true
+    tap_action:
+      action: navigate
+      navigation_path: /dashboard-home/raum-kind
     grid_options:
       columns: full
   - type: tile
@@ -368,6 +386,9 @@ sections:
       k: input_number.heizung_warm_k_gastezimmer
       ac: climate.air_conditioner
       big: true
+    tap_action:
+      action: navigate
+      navigation_path: /dashboard-home/raum-gast
     grid_options:
       columns: full
   - type: tile
@@ -396,6 +417,9 @@ sections:
       hum: sensor.temperatursensor_keller_luftfeuchtigkeit
       note: Thermostat manuell
       big: true
+    tap_action:
+      action: navigate
+      navigation_path: /dashboard-home/raum-keller
     grid_options:
       columns: 6
       rows: 2
@@ -408,6 +432,9 @@ sections:
       hum: sensor.temperature_humidity_sensor_16_luftfeuchtigkeit
       note: Thermostat manuell
       big: true
+    tap_action:
+      action: navigate
+      navigation_path: /dashboard-home/raum-baelle
     grid_options:
       columns: 6
       rows: 2

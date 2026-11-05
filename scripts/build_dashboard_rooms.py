@@ -28,8 +28,10 @@ R = {
 HOME_ORDER = ['bad', 'flur', 'wohn', 'kueche', 'schlaf', 'gast', 'kind', 'keller', 'baelle']
 
 
-def room(key, big=False, **grid):
+def room(key, big=False, link=True, **grid):
     c = {'type': 'custom:button-card', 'template': 'raum', 'variables': dict(R[key], **({'big': True} if big else {}))}
+    if link:  # tap opens the room page with history; hold still opens the thermostat
+        c['tap_action'] = {'action': 'navigate', 'navigation_path': f'/dashboard-home/raum-{key}'}
     if grid:
         c['grid_options'] = grid
     return c
@@ -135,12 +137,67 @@ view = {
     ],
 }
 
+def chart(title, span, series, height=200, yaxis=None):
+    c = {'type': 'custom:apexcharts-card', 'grid_options': {'columns': 'full'}, 'graph_span': span,
+         'header': {'show': True, 'title': title, 'show_states': True, 'colorize_states': True},
+         'apex_config': {'chart': {'height': height, 'toolbar': {'show': False}}, 'grid': {'strokeDashArray': 4},
+                         'legend': {'show': False}},
+         'series': series}
+    if yaxis:
+        c['yaxis'] = yaxis
+    return c
+
+
+def room_page(key):
+    r = R[key]
+    g = '10min'
+    temp = [{'entity': r['temp'], 'name': 'Raum', 'color': '#f59e0b', 'type': 'area', 'opacity': 0.15, 'stroke_width': 2,
+             'float_precision': 1, 'group_by': {'func': 'avg', 'duration': g}}]
+    if r.get('bts'):
+        temp.append({'entity': r['bts'][0], 'attribute': 'temperature', 'name': 'Ziel', 'color': '#10b981', 'curve': 'stepline',
+                     'stroke_width': 2, 'float_precision': 1, 'group_by': {'func': 'last', 'duration': g}})
+    for i, v in enumerate(r.get('valves', [])):
+        temp.append({'entity': v, 'attribute': 'current_temperature', 'name': 'Heizkörper' + (f' {i + 1}' if len(r['valves']) > 1 else ''),
+                     'color': ['#ef4444', '#f97316'][i % 2], 'stroke_width': 1, 'float_precision': 1, 'group_by': {'func': 'avg', 'duration': g}})
+    temp.append({'entity': 'sensor.openweathermap_temperature', 'name': 'Außen', 'color': '#818cf8', 'stroke_width': 1,
+                 'float_precision': 1, 'group_by': {'func': 'avg', 'duration': g}})
+    cards1 = [{'type': 'heading', 'heading': r['name'], 'icon': r['icon']}, room(key, True, link=False, columns='full'),
+              chart('Temperatur 24 h', '24h', temp)]
+    if r.get('hum'):
+        cards1.append(chart('Luftfeuchte 24 h', '24h', [
+            {'entity': r['hum'], 'name': 'Luftfeuchte', 'color': '#14b8a6', 'type': 'area', 'opacity': 0.15, 'stroke_width': 2,
+             'float_precision': 0, 'group_by': {'func': 'avg', 'duration': g}}], height=160, yaxis=[{'min': 20, 'max': 80, 'decimals': 0}]))
+    week = [{'entity': r['temp'], 'name': 'Temperatur', 'yaxis_id': 't', 'color': '#f59e0b', 'stroke_width': 2, 'float_precision': 1,
+             'group_by': {'func': 'avg', 'duration': '1h'}}]
+    yax = [{'id': 't', 'decimals': 0}]
+    if r.get('hum'):
+        week.append({'entity': r['hum'], 'name': 'Luftfeuchte', 'yaxis_id': 'h', 'color': '#14b8a6', 'stroke_width': 2,
+                     'float_precision': 0, 'group_by': {'func': 'avg', 'duration': '1h'}})
+        yax.append({'id': 'h', 'opposite': True, 'min': 20, 'max': 80, 'decimals': 0})
+    cards2 = [{'type': 'heading', 'heading': 'Woche', 'icon': 'mdi:calendar-week'},
+              chart('Temperatur und Luftfeuchte 7 Tage', '7d', week, height=220, yaxis=yax)]
+    bts = r.get('bts', [])
+    if bts:
+        cards2.append({'type': 'heading', 'heading': 'Thermostat', 'icon': 'mdi:thermostat'})
+        for b in bts:
+            cards2.append(thermostat(b, states_name(b), conditional=(b == 'climate.bt_kuche_bt_kuche')))
+    return {'title': r['name'], 'path': f'raum-{key}', 'icon': r['icon'], 'subview': True, 'back_path': '/dashboard-home/0',
+            'type': 'sections', 'max_columns': 2, 'sections': [{'type': 'grid', 'cards': cards1}, {'type': 'grid', 'cards': cards2}]}
+
+
+def states_name(b):
+    return {'climate.bt_esszimmer_bt_esszimmer': 'Thermostat Esszimmer',
+            'climate.bt_wohnzimmer_bt_wohnzimmer': 'Thermostat Wohnzimmer'}.get(b, 'Thermostat')
+
+
 home_grid = {'type': 'grid', 'columns': 2, 'square': False, 'cards': [room(k) for k in HOME_ORDER]}
 
 hdr = '# GENERIERT von scripts/build_dashboard_rooms.py (Raumliste). Vorlage „raum“: dashboard_button_templates.yaml\n'
 yaml.safe_dump(view, open(REPO + 'dashboard_heizung.yaml', 'w', encoding='utf-8'), allow_unicode=True, sort_keys=False, width=200)
 yaml.safe_dump(home_grid, open(REPO + 'dashboard_card_raeume.yaml', 'w', encoding='utf-8'), allow_unicode=True, sort_keys=False, width=200)
-for p in ('dashboard_heizung.yaml', 'dashboard_card_raeume.yaml'):
+yaml.safe_dump([room_page(k) for k in HOME_ORDER], open(REPO + 'dashboard_raum_seiten.yaml', 'w', encoding='utf-8'),
+               allow_unicode=True, sort_keys=False, width=200)
+for p in ('dashboard_heizung.yaml', 'dashboard_card_raeume.yaml', 'dashboard_raum_seiten.yaml'):
     s = open(REPO + p, encoding='utf-8').read()
     open(REPO + p, 'w', encoding='utf-8').write(hdr + s)
 print('ok')

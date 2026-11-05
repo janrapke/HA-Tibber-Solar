@@ -1,0 +1,1614 @@
+# GENERIERT von scripts/build_dashboard_rooms.py (Raumliste). Vorlage „raum“: dashboard_button_templates.yaml
+- title: Badezimmer
+  path: raum-bad
+  icon: mdi:shower
+  subview: true
+  back_path: /dashboard-home/0
+  type: sections
+  max_columns: 2
+  sections:
+  - type: grid
+    cards:
+    - type: heading
+      heading: Badezimmer
+      icon: mdi:shower
+    - type: custom:button-card
+      template: raum
+      variables:
+        name: Badezimmer
+        icon: mdi:shower
+        temp: sensor.h5179_f06f_temperature
+        hum: sensor.h5179_f06f_humidity
+        bts:
+        - climate.bt_bad
+        valves:
+        - climate.fritz_smart_thermo_302_1
+        k: input_number.heizung_warm_k_badezimmer
+        big: true
+      grid_options:
+        columns: full
+    - type: custom:apexcharts-card
+      grid_options:
+        columns: full
+      graph_span: 24h
+      header:
+        show: true
+        title: Temperatur 24 h
+        show_states: true
+        colorize_states: true
+      apex_config:
+        chart:
+          height: 200
+          toolbar:
+            show: false
+        grid:
+          strokeDashArray: 4
+        legend:
+          show: false
+      series:
+      - entity: sensor.h5179_f06f_temperature
+        name: Raum
+        color: '#f59e0b'
+        type: area
+        opacity: 0.15
+        stroke_width: 2
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 10min
+      - entity: climate.bt_bad
+        attribute: temperature
+        name: Ziel
+        color: '#10b981'
+        curve: stepline
+        stroke_width: 2
+        float_precision: 1
+        group_by:
+          func: last
+          duration: 10min
+      - entity: climate.fritz_smart_thermo_302_1
+        attribute: current_temperature
+        name: Heizkörper
+        color: '#ef4444'
+        stroke_width: 1
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 10min
+      - entity: sensor.openweathermap_temperature
+        name: Außen
+        color: '#818cf8'
+        stroke_width: 1
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 10min
+    - type: custom:apexcharts-card
+      grid_options:
+        columns: full
+      graph_span: 24h
+      header:
+        show: true
+        title: Luftfeuchte 24 h
+        show_states: true
+        colorize_states: true
+      apex_config:
+        chart:
+          height: 160
+          toolbar:
+            show: false
+        grid:
+          strokeDashArray: 4
+        legend:
+          show: false
+      series:
+      - entity: sensor.h5179_f06f_humidity
+        name: Luftfeuchte
+        color: '#14b8a6'
+        type: area
+        opacity: 0.15
+        stroke_width: 2
+        float_precision: 0
+        group_by:
+          func: avg
+          duration: 10min
+      yaxis:
+      - min: 20
+        max: 80
+        decimals: 0
+  - type: grid
+    cards:
+    - type: heading
+      heading: Woche
+      icon: mdi:calendar-week
+    - type: custom:apexcharts-card
+      grid_options:
+        columns: full
+      graph_span: 7d
+      header:
+        show: true
+        title: Temperatur und Luftfeuchte 7 Tage
+        show_states: true
+        colorize_states: true
+      apex_config:
+        chart:
+          height: 220
+          toolbar:
+            show: false
+        grid:
+          strokeDashArray: 4
+        legend:
+          show: false
+      series:
+      - entity: sensor.h5179_f06f_temperature
+        name: Temperatur
+        yaxis_id: t
+        color: '#f59e0b'
+        stroke_width: 2
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 1h
+      - entity: sensor.h5179_f06f_humidity
+        name: Luftfeuchte
+        yaxis_id: h
+        color: '#14b8a6'
+        stroke_width: 2
+        float_precision: 0
+        group_by:
+          func: avg
+          duration: 1h
+      yaxis:
+      - id: t
+        decimals: 0
+      - id: h
+        opposite: true
+        min: 20
+        max: 80
+        decimals: 0
+    - type: heading
+      heading: Thermostat
+      icon: mdi:thermostat
+    - type: tile
+      entity: climate.bt_bad
+      name: Thermostat
+      icon: mdi:thermostat
+      color: deep-orange
+      features_position: bottom
+      grid_options:
+        columns: full
+      features:
+      - type: target-temperature
+      - type: climate-hvac-modes
+        hvac_modes:
+        - heat
+        - 'off'
+- title: Flur
+  path: raum-flur
+  icon: mdi:door
+  subview: true
+  back_path: /dashboard-home/0
+  type: sections
+  max_columns: 2
+  sections:
+  - type: grid
+    cards:
+    - type: heading
+      heading: Flur
+      icon: mdi:door
+    - type: custom:button-card
+      template: raum
+      variables:
+        name: Flur
+        icon: mdi:door
+        temp: sensor.temperatursensor_flur_temperatur
+        hum: sensor.temperatursensor_flur_luftfeuchtigkeit
+        bts:
+        - climate.bt_flur_bt_flur
+        valves:
+        - climate.heizung_flur
+        k: input_number.heizung_warm_k_flur
+        big: true
+      grid_options:
+        columns: full
+    - type: custom:apexcharts-card
+      grid_options:
+        columns: full
+      graph_span: 24h
+      header:
+        show: true
+        title: Temperatur 24 h
+        show_states: true
+        colorize_states: true
+      apex_config:
+        chart:
+          height: 200
+          toolbar:
+            show: false
+        grid:
+          strokeDashArray: 4
+        legend:
+          show: false
+      series:
+      - entity: sensor.temperatursensor_flur_temperatur
+        name: Raum
+        color: '#f59e0b'
+        type: area
+        opacity: 0.15
+        stroke_width: 2
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 10min
+      - entity: climate.bt_flur_bt_flur
+        attribute: temperature
+        name: Ziel
+        color: '#10b981'
+        curve: stepline
+        stroke_width: 2
+        float_precision: 1
+        group_by:
+          func: last
+          duration: 10min
+      - entity: climate.heizung_flur
+        attribute: current_temperature
+        name: Heizkörper
+        color: '#ef4444'
+        stroke_width: 1
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 10min
+      - entity: sensor.openweathermap_temperature
+        name: Außen
+        color: '#818cf8'
+        stroke_width: 1
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 10min
+    - type: custom:apexcharts-card
+      grid_options:
+        columns: full
+      graph_span: 24h
+      header:
+        show: true
+        title: Luftfeuchte 24 h
+        show_states: true
+        colorize_states: true
+      apex_config:
+        chart:
+          height: 160
+          toolbar:
+            show: false
+        grid:
+          strokeDashArray: 4
+        legend:
+          show: false
+      series:
+      - entity: sensor.temperatursensor_flur_luftfeuchtigkeit
+        name: Luftfeuchte
+        color: '#14b8a6'
+        type: area
+        opacity: 0.15
+        stroke_width: 2
+        float_precision: 0
+        group_by:
+          func: avg
+          duration: 10min
+      yaxis:
+      - min: 20
+        max: 80
+        decimals: 0
+  - type: grid
+    cards:
+    - type: heading
+      heading: Woche
+      icon: mdi:calendar-week
+    - type: custom:apexcharts-card
+      grid_options:
+        columns: full
+      graph_span: 7d
+      header:
+        show: true
+        title: Temperatur und Luftfeuchte 7 Tage
+        show_states: true
+        colorize_states: true
+      apex_config:
+        chart:
+          height: 220
+          toolbar:
+            show: false
+        grid:
+          strokeDashArray: 4
+        legend:
+          show: false
+      series:
+      - entity: sensor.temperatursensor_flur_temperatur
+        name: Temperatur
+        yaxis_id: t
+        color: '#f59e0b'
+        stroke_width: 2
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 1h
+      - entity: sensor.temperatursensor_flur_luftfeuchtigkeit
+        name: Luftfeuchte
+        yaxis_id: h
+        color: '#14b8a6'
+        stroke_width: 2
+        float_precision: 0
+        group_by:
+          func: avg
+          duration: 1h
+      yaxis:
+      - id: t
+        decimals: 0
+      - id: h
+        opposite: true
+        min: 20
+        max: 80
+        decimals: 0
+    - type: heading
+      heading: Thermostat
+      icon: mdi:thermostat
+    - type: tile
+      entity: climate.bt_flur_bt_flur
+      name: Thermostat
+      icon: mdi:thermostat
+      color: deep-orange
+      features_position: bottom
+      grid_options:
+        columns: full
+      features:
+      - type: target-temperature
+      - type: climate-hvac-modes
+        hvac_modes:
+        - heat
+        - 'off'
+- title: Wohnzimmer
+  path: raum-wohn
+  icon: mdi:sofa-outline
+  subview: true
+  back_path: /dashboard-home/0
+  type: sections
+  max_columns: 2
+  sections:
+  - type: grid
+    cards:
+    - type: heading
+      heading: Wohnzimmer
+      icon: mdi:sofa-outline
+    - type: custom:button-card
+      template: raum
+      variables:
+        name: Wohnzimmer
+        icon: mdi:sofa-outline
+        temp: sensor.wohnzimmer_temperatur
+        hum: sensor.temp_wohnzimmer_luftfeuchtigkeit
+        bts:
+        - climate.bt_wohnzimmer_bt_wohnzimmer
+        - climate.bt_esszimmer_bt_esszimmer
+        valves:
+        - climate.wohnzimmer
+        - climate.esszimmer
+        k: input_number.heizung_warm_k_wohnzimmer
+        ac: climate.152832118046533_climate
+        ac_hz: sensor.klima_wohnzimmer_kompressor
+        big: true
+      grid_options:
+        columns: full
+    - type: custom:apexcharts-card
+      grid_options:
+        columns: full
+      graph_span: 24h
+      header:
+        show: true
+        title: Temperatur 24 h
+        show_states: true
+        colorize_states: true
+      apex_config:
+        chart:
+          height: 200
+          toolbar:
+            show: false
+        grid:
+          strokeDashArray: 4
+        legend:
+          show: false
+      series:
+      - entity: sensor.wohnzimmer_temperatur
+        name: Raum
+        color: '#f59e0b'
+        type: area
+        opacity: 0.15
+        stroke_width: 2
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 10min
+      - entity: climate.bt_wohnzimmer_bt_wohnzimmer
+        attribute: temperature
+        name: Ziel
+        color: '#10b981'
+        curve: stepline
+        stroke_width: 2
+        float_precision: 1
+        group_by:
+          func: last
+          duration: 10min
+      - entity: climate.wohnzimmer
+        attribute: current_temperature
+        name: Heizkörper 1
+        color: '#ef4444'
+        stroke_width: 1
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 10min
+      - entity: climate.esszimmer
+        attribute: current_temperature
+        name: Heizkörper 2
+        color: '#f97316'
+        stroke_width: 1
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 10min
+      - entity: sensor.openweathermap_temperature
+        name: Außen
+        color: '#818cf8'
+        stroke_width: 1
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 10min
+    - type: custom:apexcharts-card
+      grid_options:
+        columns: full
+      graph_span: 24h
+      header:
+        show: true
+        title: Luftfeuchte 24 h
+        show_states: true
+        colorize_states: true
+      apex_config:
+        chart:
+          height: 160
+          toolbar:
+            show: false
+        grid:
+          strokeDashArray: 4
+        legend:
+          show: false
+      series:
+      - entity: sensor.temp_wohnzimmer_luftfeuchtigkeit
+        name: Luftfeuchte
+        color: '#14b8a6'
+        type: area
+        opacity: 0.15
+        stroke_width: 2
+        float_precision: 0
+        group_by:
+          func: avg
+          duration: 10min
+      yaxis:
+      - min: 20
+        max: 80
+        decimals: 0
+  - type: grid
+    cards:
+    - type: heading
+      heading: Woche
+      icon: mdi:calendar-week
+    - type: custom:apexcharts-card
+      grid_options:
+        columns: full
+      graph_span: 7d
+      header:
+        show: true
+        title: Temperatur und Luftfeuchte 7 Tage
+        show_states: true
+        colorize_states: true
+      apex_config:
+        chart:
+          height: 220
+          toolbar:
+            show: false
+        grid:
+          strokeDashArray: 4
+        legend:
+          show: false
+      series:
+      - entity: sensor.wohnzimmer_temperatur
+        name: Temperatur
+        yaxis_id: t
+        color: '#f59e0b'
+        stroke_width: 2
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 1h
+      - entity: sensor.temp_wohnzimmer_luftfeuchtigkeit
+        name: Luftfeuchte
+        yaxis_id: h
+        color: '#14b8a6'
+        stroke_width: 2
+        float_precision: 0
+        group_by:
+          func: avg
+          duration: 1h
+      yaxis:
+      - id: t
+        decimals: 0
+      - id: h
+        opposite: true
+        min: 20
+        max: 80
+        decimals: 0
+    - type: heading
+      heading: Thermostat
+      icon: mdi:thermostat
+    - type: tile
+      entity: climate.bt_wohnzimmer_bt_wohnzimmer
+      name: Thermostat Wohnzimmer
+      icon: mdi:thermostat
+      color: deep-orange
+      features_position: bottom
+      grid_options:
+        columns: full
+      features:
+      - type: target-temperature
+      - type: climate-hvac-modes
+        hvac_modes:
+        - heat
+        - 'off'
+    - type: tile
+      entity: climate.bt_esszimmer_bt_esszimmer
+      name: Thermostat Esszimmer
+      icon: mdi:thermostat
+      color: deep-orange
+      features_position: bottom
+      grid_options:
+        columns: full
+      features:
+      - type: target-temperature
+      - type: climate-hvac-modes
+        hvac_modes:
+        - heat
+        - 'off'
+- title: Küche
+  path: raum-kueche
+  icon: mdi:fridge-outline
+  subview: true
+  back_path: /dashboard-home/0
+  type: sections
+  max_columns: 2
+  sections:
+  - type: grid
+    cards:
+    - type: heading
+      heading: Küche
+      icon: mdi:fridge-outline
+    - type: custom:button-card
+      template: raum
+      variables:
+        name: Küche
+        icon: mdi:fridge-outline
+        temp: sensor.temperatursensor_kuche_temperatur
+        hum: sensor.temperatursensor_kuche_luftfeuchtigkeit
+        bts:
+        - climate.bt_kuche_bt_kuche
+        valves:
+        - climate.kuche
+        k: input_number.heizung_warm_k_kuche
+        off_flag: automation.heizung_kuche_dauerhaft_aus_halten
+        big: true
+      grid_options:
+        columns: full
+    - type: custom:apexcharts-card
+      grid_options:
+        columns: full
+      graph_span: 24h
+      header:
+        show: true
+        title: Temperatur 24 h
+        show_states: true
+        colorize_states: true
+      apex_config:
+        chart:
+          height: 200
+          toolbar:
+            show: false
+        grid:
+          strokeDashArray: 4
+        legend:
+          show: false
+      series:
+      - entity: sensor.temperatursensor_kuche_temperatur
+        name: Raum
+        color: '#f59e0b'
+        type: area
+        opacity: 0.15
+        stroke_width: 2
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 10min
+      - entity: climate.bt_kuche_bt_kuche
+        attribute: temperature
+        name: Ziel
+        color: '#10b981'
+        curve: stepline
+        stroke_width: 2
+        float_precision: 1
+        group_by:
+          func: last
+          duration: 10min
+      - entity: climate.kuche
+        attribute: current_temperature
+        name: Heizkörper
+        color: '#ef4444'
+        stroke_width: 1
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 10min
+      - entity: sensor.openweathermap_temperature
+        name: Außen
+        color: '#818cf8'
+        stroke_width: 1
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 10min
+    - type: custom:apexcharts-card
+      grid_options:
+        columns: full
+      graph_span: 24h
+      header:
+        show: true
+        title: Luftfeuchte 24 h
+        show_states: true
+        colorize_states: true
+      apex_config:
+        chart:
+          height: 160
+          toolbar:
+            show: false
+        grid:
+          strokeDashArray: 4
+        legend:
+          show: false
+      series:
+      - entity: sensor.temperatursensor_kuche_luftfeuchtigkeit
+        name: Luftfeuchte
+        color: '#14b8a6'
+        type: area
+        opacity: 0.15
+        stroke_width: 2
+        float_precision: 0
+        group_by:
+          func: avg
+          duration: 10min
+      yaxis:
+      - min: 20
+        max: 80
+        decimals: 0
+  - type: grid
+    cards:
+    - type: heading
+      heading: Woche
+      icon: mdi:calendar-week
+    - type: custom:apexcharts-card
+      grid_options:
+        columns: full
+      graph_span: 7d
+      header:
+        show: true
+        title: Temperatur und Luftfeuchte 7 Tage
+        show_states: true
+        colorize_states: true
+      apex_config:
+        chart:
+          height: 220
+          toolbar:
+            show: false
+        grid:
+          strokeDashArray: 4
+        legend:
+          show: false
+      series:
+      - entity: sensor.temperatursensor_kuche_temperatur
+        name: Temperatur
+        yaxis_id: t
+        color: '#f59e0b'
+        stroke_width: 2
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 1h
+      - entity: sensor.temperatursensor_kuche_luftfeuchtigkeit
+        name: Luftfeuchte
+        yaxis_id: h
+        color: '#14b8a6'
+        stroke_width: 2
+        float_precision: 0
+        group_by:
+          func: avg
+          duration: 1h
+      yaxis:
+      - id: t
+        decimals: 0
+      - id: h
+        opposite: true
+        min: 20
+        max: 80
+        decimals: 0
+    - type: heading
+      heading: Thermostat
+      icon: mdi:thermostat
+    - type: tile
+      entity: climate.bt_kuche_bt_kuche
+      name: Thermostat
+      icon: mdi:thermostat
+      color: deep-orange
+      features_position: bottom
+      grid_options:
+        columns: full
+      features:
+      - type: target-temperature
+      - type: climate-hvac-modes
+        hvac_modes:
+        - heat
+        - 'off'
+      visibility:
+      - condition: state
+        entity: climate.bt_kuche_bt_kuche
+        state:
+        - heat
+        - 'off'
+        - heat_cool
+        - auto
+- title: Schlafzimmer
+  path: raum-schlaf
+  icon: mdi:bed-outline
+  subview: true
+  back_path: /dashboard-home/0
+  type: sections
+  max_columns: 2
+  sections:
+  - type: grid
+    cards:
+    - type: heading
+      heading: Schlafzimmer
+      icon: mdi:bed-outline
+    - type: custom:button-card
+      template: raum
+      variables:
+        name: Schlafzimmer
+        icon: mdi:bed-outline
+        temp: sensor.temperature_schalfzimmer_temperatur
+        hum: sensor.temperature_schalfzimmer_luftfeuchtigkeit
+        bts:
+        - climate.bt_schlafzimmer_bt_schlafzimmer
+        valves:
+        - climate.produktion_2
+        k: input_number.heizung_warm_k_schlafzimmer
+        big: true
+      grid_options:
+        columns: full
+    - type: custom:apexcharts-card
+      grid_options:
+        columns: full
+      graph_span: 24h
+      header:
+        show: true
+        title: Temperatur 24 h
+        show_states: true
+        colorize_states: true
+      apex_config:
+        chart:
+          height: 200
+          toolbar:
+            show: false
+        grid:
+          strokeDashArray: 4
+        legend:
+          show: false
+      series:
+      - entity: sensor.temperature_schalfzimmer_temperatur
+        name: Raum
+        color: '#f59e0b'
+        type: area
+        opacity: 0.15
+        stroke_width: 2
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 10min
+      - entity: climate.bt_schlafzimmer_bt_schlafzimmer
+        attribute: temperature
+        name: Ziel
+        color: '#10b981'
+        curve: stepline
+        stroke_width: 2
+        float_precision: 1
+        group_by:
+          func: last
+          duration: 10min
+      - entity: climate.produktion_2
+        attribute: current_temperature
+        name: Heizkörper
+        color: '#ef4444'
+        stroke_width: 1
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 10min
+      - entity: sensor.openweathermap_temperature
+        name: Außen
+        color: '#818cf8'
+        stroke_width: 1
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 10min
+    - type: custom:apexcharts-card
+      grid_options:
+        columns: full
+      graph_span: 24h
+      header:
+        show: true
+        title: Luftfeuchte 24 h
+        show_states: true
+        colorize_states: true
+      apex_config:
+        chart:
+          height: 160
+          toolbar:
+            show: false
+        grid:
+          strokeDashArray: 4
+        legend:
+          show: false
+      series:
+      - entity: sensor.temperature_schalfzimmer_luftfeuchtigkeit
+        name: Luftfeuchte
+        color: '#14b8a6'
+        type: area
+        opacity: 0.15
+        stroke_width: 2
+        float_precision: 0
+        group_by:
+          func: avg
+          duration: 10min
+      yaxis:
+      - min: 20
+        max: 80
+        decimals: 0
+  - type: grid
+    cards:
+    - type: heading
+      heading: Woche
+      icon: mdi:calendar-week
+    - type: custom:apexcharts-card
+      grid_options:
+        columns: full
+      graph_span: 7d
+      header:
+        show: true
+        title: Temperatur und Luftfeuchte 7 Tage
+        show_states: true
+        colorize_states: true
+      apex_config:
+        chart:
+          height: 220
+          toolbar:
+            show: false
+        grid:
+          strokeDashArray: 4
+        legend:
+          show: false
+      series:
+      - entity: sensor.temperature_schalfzimmer_temperatur
+        name: Temperatur
+        yaxis_id: t
+        color: '#f59e0b'
+        stroke_width: 2
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 1h
+      - entity: sensor.temperature_schalfzimmer_luftfeuchtigkeit
+        name: Luftfeuchte
+        yaxis_id: h
+        color: '#14b8a6'
+        stroke_width: 2
+        float_precision: 0
+        group_by:
+          func: avg
+          duration: 1h
+      yaxis:
+      - id: t
+        decimals: 0
+      - id: h
+        opposite: true
+        min: 20
+        max: 80
+        decimals: 0
+    - type: heading
+      heading: Thermostat
+      icon: mdi:thermostat
+    - type: tile
+      entity: climate.bt_schlafzimmer_bt_schlafzimmer
+      name: Thermostat
+      icon: mdi:thermostat
+      color: deep-orange
+      features_position: bottom
+      grid_options:
+        columns: full
+      features:
+      - type: target-temperature
+      - type: climate-hvac-modes
+        hvac_modes:
+        - heat
+        - 'off'
+- title: Gästezimmer
+  path: raum-gast
+  icon: mdi:desk
+  subview: true
+  back_path: /dashboard-home/0
+  type: sections
+  max_columns: 2
+  sections:
+  - type: grid
+    cards:
+    - type: heading
+      heading: Gästezimmer
+      icon: mdi:desk
+    - type: custom:button-card
+      template: raum
+      variables:
+        name: Gästezimmer
+        icon: mdi:desk
+        temp: sensor.temperature_gastezimmer_temperatur
+        hum: sensor.temperature_gastezimmer_luftfeuchtigkeit
+        bts:
+        - climate.bt_gastezimmer_bt_gastezimmer
+        valves:
+        - climate.produktion_4
+        k: input_number.heizung_warm_k_gastezimmer
+        ac: climate.air_conditioner
+        big: true
+      grid_options:
+        columns: full
+    - type: custom:apexcharts-card
+      grid_options:
+        columns: full
+      graph_span: 24h
+      header:
+        show: true
+        title: Temperatur 24 h
+        show_states: true
+        colorize_states: true
+      apex_config:
+        chart:
+          height: 200
+          toolbar:
+            show: false
+        grid:
+          strokeDashArray: 4
+        legend:
+          show: false
+      series:
+      - entity: sensor.temperature_gastezimmer_temperatur
+        name: Raum
+        color: '#f59e0b'
+        type: area
+        opacity: 0.15
+        stroke_width: 2
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 10min
+      - entity: climate.bt_gastezimmer_bt_gastezimmer
+        attribute: temperature
+        name: Ziel
+        color: '#10b981'
+        curve: stepline
+        stroke_width: 2
+        float_precision: 1
+        group_by:
+          func: last
+          duration: 10min
+      - entity: climate.produktion_4
+        attribute: current_temperature
+        name: Heizkörper
+        color: '#ef4444'
+        stroke_width: 1
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 10min
+      - entity: sensor.openweathermap_temperature
+        name: Außen
+        color: '#818cf8'
+        stroke_width: 1
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 10min
+    - type: custom:apexcharts-card
+      grid_options:
+        columns: full
+      graph_span: 24h
+      header:
+        show: true
+        title: Luftfeuchte 24 h
+        show_states: true
+        colorize_states: true
+      apex_config:
+        chart:
+          height: 160
+          toolbar:
+            show: false
+        grid:
+          strokeDashArray: 4
+        legend:
+          show: false
+      series:
+      - entity: sensor.temperature_gastezimmer_luftfeuchtigkeit
+        name: Luftfeuchte
+        color: '#14b8a6'
+        type: area
+        opacity: 0.15
+        stroke_width: 2
+        float_precision: 0
+        group_by:
+          func: avg
+          duration: 10min
+      yaxis:
+      - min: 20
+        max: 80
+        decimals: 0
+  - type: grid
+    cards:
+    - type: heading
+      heading: Woche
+      icon: mdi:calendar-week
+    - type: custom:apexcharts-card
+      grid_options:
+        columns: full
+      graph_span: 7d
+      header:
+        show: true
+        title: Temperatur und Luftfeuchte 7 Tage
+        show_states: true
+        colorize_states: true
+      apex_config:
+        chart:
+          height: 220
+          toolbar:
+            show: false
+        grid:
+          strokeDashArray: 4
+        legend:
+          show: false
+      series:
+      - entity: sensor.temperature_gastezimmer_temperatur
+        name: Temperatur
+        yaxis_id: t
+        color: '#f59e0b'
+        stroke_width: 2
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 1h
+      - entity: sensor.temperature_gastezimmer_luftfeuchtigkeit
+        name: Luftfeuchte
+        yaxis_id: h
+        color: '#14b8a6'
+        stroke_width: 2
+        float_precision: 0
+        group_by:
+          func: avg
+          duration: 1h
+      yaxis:
+      - id: t
+        decimals: 0
+      - id: h
+        opposite: true
+        min: 20
+        max: 80
+        decimals: 0
+    - type: heading
+      heading: Thermostat
+      icon: mdi:thermostat
+    - type: tile
+      entity: climate.bt_gastezimmer_bt_gastezimmer
+      name: Thermostat
+      icon: mdi:thermostat
+      color: deep-orange
+      features_position: bottom
+      grid_options:
+        columns: full
+      features:
+      - type: target-temperature
+      - type: climate-hvac-modes
+        hvac_modes:
+        - heat
+        - 'off'
+- title: Kinderzimmer
+  path: raum-kind
+  icon: mdi:teddy-bear
+  subview: true
+  back_path: /dashboard-home/0
+  type: sections
+  max_columns: 2
+  sections:
+  - type: grid
+    cards:
+    - type: heading
+      heading: Kinderzimmer
+      icon: mdi:teddy-bear
+    - type: custom:button-card
+      template: raum
+      variables:
+        name: Kinderzimmer
+        icon: mdi:teddy-bear
+        temp: sensor.temperature_kinderzimmer_temperatur
+        hum: sensor.temperature_kinderzimmer_luftfeuchtigkeit
+        bts:
+        - climate.bt_kinderzimmer_bt_kinderzimmer
+        valves:
+        - climate.produktion_1
+        k: input_number.heizung_warm_k_kinderzimmer
+        big: true
+      grid_options:
+        columns: full
+    - type: custom:apexcharts-card
+      grid_options:
+        columns: full
+      graph_span: 24h
+      header:
+        show: true
+        title: Temperatur 24 h
+        show_states: true
+        colorize_states: true
+      apex_config:
+        chart:
+          height: 200
+          toolbar:
+            show: false
+        grid:
+          strokeDashArray: 4
+        legend:
+          show: false
+      series:
+      - entity: sensor.temperature_kinderzimmer_temperatur
+        name: Raum
+        color: '#f59e0b'
+        type: area
+        opacity: 0.15
+        stroke_width: 2
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 10min
+      - entity: climate.bt_kinderzimmer_bt_kinderzimmer
+        attribute: temperature
+        name: Ziel
+        color: '#10b981'
+        curve: stepline
+        stroke_width: 2
+        float_precision: 1
+        group_by:
+          func: last
+          duration: 10min
+      - entity: climate.produktion_1
+        attribute: current_temperature
+        name: Heizkörper
+        color: '#ef4444'
+        stroke_width: 1
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 10min
+      - entity: sensor.openweathermap_temperature
+        name: Außen
+        color: '#818cf8'
+        stroke_width: 1
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 10min
+    - type: custom:apexcharts-card
+      grid_options:
+        columns: full
+      graph_span: 24h
+      header:
+        show: true
+        title: Luftfeuchte 24 h
+        show_states: true
+        colorize_states: true
+      apex_config:
+        chart:
+          height: 160
+          toolbar:
+            show: false
+        grid:
+          strokeDashArray: 4
+        legend:
+          show: false
+      series:
+      - entity: sensor.temperature_kinderzimmer_luftfeuchtigkeit
+        name: Luftfeuchte
+        color: '#14b8a6'
+        type: area
+        opacity: 0.15
+        stroke_width: 2
+        float_precision: 0
+        group_by:
+          func: avg
+          duration: 10min
+      yaxis:
+      - min: 20
+        max: 80
+        decimals: 0
+  - type: grid
+    cards:
+    - type: heading
+      heading: Woche
+      icon: mdi:calendar-week
+    - type: custom:apexcharts-card
+      grid_options:
+        columns: full
+      graph_span: 7d
+      header:
+        show: true
+        title: Temperatur und Luftfeuchte 7 Tage
+        show_states: true
+        colorize_states: true
+      apex_config:
+        chart:
+          height: 220
+          toolbar:
+            show: false
+        grid:
+          strokeDashArray: 4
+        legend:
+          show: false
+      series:
+      - entity: sensor.temperature_kinderzimmer_temperatur
+        name: Temperatur
+        yaxis_id: t
+        color: '#f59e0b'
+        stroke_width: 2
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 1h
+      - entity: sensor.temperature_kinderzimmer_luftfeuchtigkeit
+        name: Luftfeuchte
+        yaxis_id: h
+        color: '#14b8a6'
+        stroke_width: 2
+        float_precision: 0
+        group_by:
+          func: avg
+          duration: 1h
+      yaxis:
+      - id: t
+        decimals: 0
+      - id: h
+        opposite: true
+        min: 20
+        max: 80
+        decimals: 0
+    - type: heading
+      heading: Thermostat
+      icon: mdi:thermostat
+    - type: tile
+      entity: climate.bt_kinderzimmer_bt_kinderzimmer
+      name: Thermostat
+      icon: mdi:thermostat
+      color: deep-orange
+      features_position: bottom
+      grid_options:
+        columns: full
+      features:
+      - type: target-temperature
+      - type: climate-hvac-modes
+        hvac_modes:
+        - heat
+        - 'off'
+- title: Keller
+  path: raum-keller
+  icon: mdi:briefcase-outline
+  subview: true
+  back_path: /dashboard-home/0
+  type: sections
+  max_columns: 2
+  sections:
+  - type: grid
+    cards:
+    - type: heading
+      heading: Keller
+      icon: mdi:briefcase-outline
+    - type: custom:button-card
+      template: raum
+      variables:
+        name: Keller
+        icon: mdi:briefcase-outline
+        temp: sensor.temperatursensor_keller_temperatur
+        hum: sensor.temperatursensor_keller_luftfeuchtigkeit
+        note: Thermostat manuell
+        big: true
+      grid_options:
+        columns: full
+    - type: custom:apexcharts-card
+      grid_options:
+        columns: full
+      graph_span: 24h
+      header:
+        show: true
+        title: Temperatur 24 h
+        show_states: true
+        colorize_states: true
+      apex_config:
+        chart:
+          height: 200
+          toolbar:
+            show: false
+        grid:
+          strokeDashArray: 4
+        legend:
+          show: false
+      series:
+      - entity: sensor.temperatursensor_keller_temperatur
+        name: Raum
+        color: '#f59e0b'
+        type: area
+        opacity: 0.15
+        stroke_width: 2
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 10min
+      - entity: sensor.openweathermap_temperature
+        name: Außen
+        color: '#818cf8'
+        stroke_width: 1
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 10min
+    - type: custom:apexcharts-card
+      grid_options:
+        columns: full
+      graph_span: 24h
+      header:
+        show: true
+        title: Luftfeuchte 24 h
+        show_states: true
+        colorize_states: true
+      apex_config:
+        chart:
+          height: 160
+          toolbar:
+            show: false
+        grid:
+          strokeDashArray: 4
+        legend:
+          show: false
+      series:
+      - entity: sensor.temperatursensor_keller_luftfeuchtigkeit
+        name: Luftfeuchte
+        color: '#14b8a6'
+        type: area
+        opacity: 0.15
+        stroke_width: 2
+        float_precision: 0
+        group_by:
+          func: avg
+          duration: 10min
+      yaxis:
+      - min: 20
+        max: 80
+        decimals: 0
+  - type: grid
+    cards:
+    - type: heading
+      heading: Woche
+      icon: mdi:calendar-week
+    - type: custom:apexcharts-card
+      grid_options:
+        columns: full
+      graph_span: 7d
+      header:
+        show: true
+        title: Temperatur und Luftfeuchte 7 Tage
+        show_states: true
+        colorize_states: true
+      apex_config:
+        chart:
+          height: 220
+          toolbar:
+            show: false
+        grid:
+          strokeDashArray: 4
+        legend:
+          show: false
+      series:
+      - entity: sensor.temperatursensor_keller_temperatur
+        name: Temperatur
+        yaxis_id: t
+        color: '#f59e0b'
+        stroke_width: 2
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 1h
+      - entity: sensor.temperatursensor_keller_luftfeuchtigkeit
+        name: Luftfeuchte
+        yaxis_id: h
+        color: '#14b8a6'
+        stroke_width: 2
+        float_precision: 0
+        group_by:
+          func: avg
+          duration: 1h
+      yaxis:
+      - id: t
+        decimals: 0
+      - id: h
+        opposite: true
+        min: 20
+        max: 80
+        decimals: 0
+- title: Keller Bällebad
+  path: raum-baelle
+  icon: mdi:baby-face-outline
+  subview: true
+  back_path: /dashboard-home/0
+  type: sections
+  max_columns: 2
+  sections:
+  - type: grid
+    cards:
+    - type: heading
+      heading: Keller Bällebad
+      icon: mdi:baby-face-outline
+    - type: custom:button-card
+      template: raum
+      variables:
+        name: Keller Bällebad
+        icon: mdi:baby-face-outline
+        temp: sensor.temperature_humidity_sensor_16_temperatur
+        hum: sensor.temperature_humidity_sensor_16_luftfeuchtigkeit
+        note: Thermostat manuell
+        big: true
+      grid_options:
+        columns: full
+    - type: custom:apexcharts-card
+      grid_options:
+        columns: full
+      graph_span: 24h
+      header:
+        show: true
+        title: Temperatur 24 h
+        show_states: true
+        colorize_states: true
+      apex_config:
+        chart:
+          height: 200
+          toolbar:
+            show: false
+        grid:
+          strokeDashArray: 4
+        legend:
+          show: false
+      series:
+      - entity: sensor.temperature_humidity_sensor_16_temperatur
+        name: Raum
+        color: '#f59e0b'
+        type: area
+        opacity: 0.15
+        stroke_width: 2
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 10min
+      - entity: sensor.openweathermap_temperature
+        name: Außen
+        color: '#818cf8'
+        stroke_width: 1
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 10min
+    - type: custom:apexcharts-card
+      grid_options:
+        columns: full
+      graph_span: 24h
+      header:
+        show: true
+        title: Luftfeuchte 24 h
+        show_states: true
+        colorize_states: true
+      apex_config:
+        chart:
+          height: 160
+          toolbar:
+            show: false
+        grid:
+          strokeDashArray: 4
+        legend:
+          show: false
+      series:
+      - entity: sensor.temperature_humidity_sensor_16_luftfeuchtigkeit
+        name: Luftfeuchte
+        color: '#14b8a6'
+        type: area
+        opacity: 0.15
+        stroke_width: 2
+        float_precision: 0
+        group_by:
+          func: avg
+          duration: 10min
+      yaxis:
+      - min: 20
+        max: 80
+        decimals: 0
+  - type: grid
+    cards:
+    - type: heading
+      heading: Woche
+      icon: mdi:calendar-week
+    - type: custom:apexcharts-card
+      grid_options:
+        columns: full
+      graph_span: 7d
+      header:
+        show: true
+        title: Temperatur und Luftfeuchte 7 Tage
+        show_states: true
+        colorize_states: true
+      apex_config:
+        chart:
+          height: 220
+          toolbar:
+            show: false
+        grid:
+          strokeDashArray: 4
+        legend:
+          show: false
+      series:
+      - entity: sensor.temperature_humidity_sensor_16_temperatur
+        name: Temperatur
+        yaxis_id: t
+        color: '#f59e0b'
+        stroke_width: 2
+        float_precision: 1
+        group_by:
+          func: avg
+          duration: 1h
+      - entity: sensor.temperature_humidity_sensor_16_luftfeuchtigkeit
+        name: Luftfeuchte
+        yaxis_id: h
+        color: '#14b8a6'
+        stroke_width: 2
+        float_precision: 0
+        group_by:
+          func: avg
+          duration: 1h
+      yaxis:
+      - id: t
+        decimals: 0
+      - id: h
+        opposite: true
+        min: 20
+        max: 80
+        decimals: 0

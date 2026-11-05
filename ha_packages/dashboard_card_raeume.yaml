@@ -15,6 +15,9 @@ cards:
     valves:
     - climate.fritz_smart_thermo_302_1
     k: input_number.heizung_warm_k_badezimmer
+  tap_action:
+    action: navigate
+    navigation_path: /dashboard-home/raum-bad
 - type: custom:button-card
   template: raum
   variables:
@@ -27,6 +30,9 @@ cards:
     valves:
     - climate.heizung_flur
     k: input_number.heizung_warm_k_flur
+  tap_action:
+    action: navigate
+    navigation_path: /dashboard-home/raum-flur
 - type: custom:button-card
   template: raum
   variables:
@@ -43,6 +49,9 @@ cards:
     k: input_number.heizung_warm_k_wohnzimmer
     ac: climate.152832118046533_climate
     ac_hz: sensor.klima_wohnzimmer_kompressor
+  tap_action:
+    action: navigate
+    navigation_path: /dashboard-home/raum-wohn
 - type: custom:button-card
   template: raum
   variables:
@@ -56,6 +65,9 @@ cards:
     - climate.kuche
     k: input_number.heizung_warm_k_kuche
     off_flag: automation.heizung_kuche_dauerhaft_aus_halten
+  tap_action:
+    action: navigate
+    navigation_path: /dashboard-home/raum-kueche
 - type: custom:button-card
   template: raum
   variables:
@@ -68,6 +80,9 @@ cards:
     valves:
     - climate.produktion_2
     k: input_number.heizung_warm_k_schlafzimmer
+  tap_action:
+    action: navigate
+    navigation_path: /dashboard-home/raum-schlaf
 - type: custom:button-card
   template: raum
   variables:
@@ -81,6 +96,9 @@ cards:
     - climate.produktion_4
     k: input_number.heizung_warm_k_gastezimmer
     ac: climate.air_conditioner
+  tap_action:
+    action: navigate
+    navigation_path: /dashboard-home/raum-gast
 - type: custom:button-card
   template: raum
   variables:
@@ -93,6 +111,9 @@ cards:
     valves:
     - climate.produktion_1
     k: input_number.heizung_warm_k_kinderzimmer
+  tap_action:
+    action: navigate
+    navigation_path: /dashboard-home/raum-kind
 - type: custom:button-card
   template: raum
   variables:
@@ -101,6 +122,9 @@ cards:
     temp: sensor.temperatursensor_keller_temperatur
     hum: sensor.temperatursensor_keller_luftfeuchtigkeit
     note: Thermostat manuell
+  tap_action:
+    action: navigate
+    navigation_path: /dashboard-home/raum-keller
 - type: custom:button-card
   template: raum
   variables:
@@ -109,3 +133,6 @@ cards:
     temp: sensor.temperature_humidity_sensor_16_temperatur
     hum: sensor.temperature_humidity_sensor_16_luftfeuchtigkeit
     note: Thermostat manuell
+  tap_action:
+    action: navigate
+    navigation_path: /dashboard-home/raum-baelle
