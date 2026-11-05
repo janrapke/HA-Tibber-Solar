@@ -1,7 +1,7 @@
 /**
  * Smart Battery Optimizer – Stromkosten-Vergleich v4
- * Electricity bill in three scenarios: without any system, without battery (all solar used directly as far as
- * the house can take it, the surplus would be exported unpaid), real. Data: sensor "Stromkosten-Vergleich" (attributes heute/7_tage/30_tage/monat/jahr/gesamt, monate).
+ * Electricity bill in three scenarios: without any system, without battery (solar used directly as far as the
+ * house can take it and it fits under the shared 800 W balcony limit), real. Data: sensor "Stromkosten-Vergleich" (attributes heute/7_tage/30_tage/monat/jahr/gesamt, monate).
  *
  * Config:
  *   type: custom:savings-card
@@ -208,7 +208,7 @@ class SavingsCard extends HTMLElement {
       </div>
       <div class="what">${what}</div>
       ${rows}${chips}${chart}
-      <div class="foot">„Ohne Speicher“: aller Solarstrom zählt als direkt genutzt, soweit das Haus ihn im Moment der Erzeugung hätte verbrauchen können; nur der Überschuss darüber wird dem Speicher gutgeschrieben (sonst unbezahlt eingespeist). Nimmt der Speicher Solarstrom, den das Haus gebraucht hätte, verdient er daran nur die Preisverschiebung. „Solarstrom nutzbar gemacht“: gespeicherter Solarstrom zum Preis seiner Erzeugung, abzüglich Verluste und Netzbezug beim Laden. „Preisverschiebung“: entladene Energie × (Preis bei Nutzung − Preis beim Laden), für Solar- und Netzstrom. Daten seit ${since}, Werte vor Einführung aus Stundenmitteln. Grundgebühr nicht enthalten.</div>
+      <div class="foot">„Ohne Speicher“: Der Solarstrom dürfte dann nur wie ein Balkonkraftwerk mit zusammen höchstens 800 W einspeisen. Er zählt als direkt genutzt, soweit er darunter passt und das Haus ihn im Moment der Erzeugung hätte verbrauchen können; der Überschuss darüber wird dem Speicher gutgeschrieben. Nimmt der Speicher Solarstrom, den das Haus gebraucht hätte, verdient er daran nur die Preisverschiebung. „Solarstrom nutzbar gemacht“: gespeicherter Solarstrom zum Preis seiner Erzeugung, abzüglich Verluste und Netzbezug beim Laden. „Preisverschiebung“: entladene Energie × (Preis bei Nutzung − Preis beim Laden), für Solar- und Netzstrom. Daten seit ${since}, Werte vor Einführung aus Stundenmitteln. Grundgebühr nicht enthalten.</div>
     </ha-card>`;
     const go = k => { if (!k) return; this._period = k; this._sig = ''; this._render(this._state()); };
     this.shadowRoot.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => go(t.dataset.k)));

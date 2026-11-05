@@ -1,12 +1,15 @@
 """Pure math of the electricity cost comparison (no Home Assistant imports, unit-tested).
 
-All solar (balcony + panels) counts as "used directly" as far as the house could have used it at the
-moment of production. Only the surplus beyond the house load is credited to the battery: if the
-battery takes panel power although the house needs it, it only earns the price difference on that part.
+Without the battery the panels could only feed in like a balcony power plant: balcony and panels
+together at most FEED_LIMIT_W (800 W per household). Solar counts as "used directly" as far as it fits
+under that limit and the house could have used it at the moment of production (balcony first, the
+panels fill up the rest). Everything beyond - above the limit or above the house load - is the surplus
+the battery saves. If the battery takes panel power the house could have used directly, it only earns
+the price difference on that part.
 
 Scenarios per interval (Tibber price, exported energy is not paid):
     without system : house * price
-    without battery: max(0, house - (balcony + panels * inverter efficiency)) * price
+    without battery: (house - solar used directly) * price
     real           : grid import * price (includes what the grid charger drew)
 battery system saves = without battery - real, split into
     price shifting : discharged energy * (price at use - price when it went into the battery),
@@ -23,6 +26,7 @@ from datetime import date, timedelta
 
 INVERTER_EFF = 0.93          # battery DC -> house AC
 CHARGER_EFF = 0.90           # grid charger AC -> battery DC
+FEED_LIMIT_W = 800.0         # balcony power plant limit per household (AC), shared by balcony and panels
 # day record: [without_eur, without_battery_eur, real_eur, house_kwh, solar_kwh, import_kwh,
 #              unused_without_battery_kwh, panel_kwh, price_shift_eur]
 FIELDS = 9
@@ -38,9 +42,11 @@ def interval(price: float, hours: float, imp_w: float, exp_w: float, inverter_w:
     inverter_w, balcony_w, charger_w, panel_w = (max(0.0, x) for x in (inverter_w, balcony_w, charger_w, panel_w))
     house = max(0.0, imp_w - exp_w + inverter_w + balcony_w - charger_w)
     kwh = hours / 1000.0
-    # solar the house could have used directly: balcony first, then the panels through an inverter
-    bal_used = min(house, balcony_w)
-    panel_used = min(panel_w, (house - bal_used) / INVERTER_EFF)
+    # solar the house could have used directly: balcony first, then the panels through an inverter,
+    # both together at most FEED_LIMIT_W
+    bal_used = min(house, balcony_w, FEED_LIMIT_W)
+    room_ac = max(0.0, min(house, FEED_LIMIT_W) - bal_used)
+    panel_used = min(panel_w, room_ac / INVERTER_EFF)
     direct_ac = bal_used + panel_used * INVERTER_EFF
     unused = (balcony_w - bal_used) + (panel_w - panel_used)   # surplus, only usable through the battery
 

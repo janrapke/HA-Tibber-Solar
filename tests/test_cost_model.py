@@ -40,6 +40,15 @@ def test_house_could_have_used_part_of_the_panel_power():
     assert r(unused) == r(0.8 - 0.25 / 0.93)       # only the surplus (~530 W DC) counts for the battery
 
 
+def test_shared_800w_limit():
+    # balcony 300 W, panels 1000 W into the battery, house 1200 W -> 900 W from the grid
+    a, b, c, house, solar, imp, unused, panel, shift = cm.interval(0.40, 1.0, 900, 0, 0, 300, 0, 1000)
+    assert r(house) == 1.2
+    # without battery: balcony 300 W + panels 500 W AC (limit 800 W) -> 400 W from the grid
+    assert r(b) == r(0.4 * 0.40)
+    assert r(unused) == r(1.0 - 0.5 / 0.93)   # the battery rescues the panel power beyond the limit
+
+
 def test_balcony_and_grid_charger():
     # balcony 200 W covers part of the house, grid charger draws 600 W into the battery
     a, b, c, house, solar, imp, unused, panel, shift = cm.interval(0.30, 1.0, 900, 0, 0, 200, 600, 0)
