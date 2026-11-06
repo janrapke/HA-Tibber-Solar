@@ -33,6 +33,7 @@ WARMUP_MAX = timedelta(hours=2)
 
 FAN_NORMAL = "silent"
 FAN_BOOST = "medium"
+FAN_FOLLOW_ME = "auto"  # Follow Me: the unit itself slows the fan near the target (silent also caps the compressor)
 
 SAFETY_MIN_ROOM = 17.0
 COOL_OUTDOOR = 18.0  # above: cool instead of heat (manual / surplus)
@@ -100,6 +101,7 @@ class Inputs:
     curtailed_wh_2h: float = 0.0
     grid_charging: bool = False
     free_w: float = 0.0  # power that would go to the grid unpaid (balcony), smoothed
+    follow_me: bool = False  # the remote sends the room temperature (Follow Me): setpoint = real target
     efficiency: float = 3.5  # thermal model at current outdoor temperature
     offset_heat: float = 5.0
     offset_cool: float = 0.0
@@ -447,7 +449,14 @@ def _apply(i: Inputs, st: State, d: Decision, dt_h: float, force: bool = False,
             st.integral = max(-I_MAX, min(I_MAX, st.integral + KI * (d.target_room - i.room) * dt_h))
         p_part = KP * (d.target_room - i.room) if i.room is not None else 0.0
         corr = max(-CORR_MAX, min(CORR_MAX, p_part + st.integral))
-        sp = max(SP_MIN, min(SP_MAX, _round_half(d.target_room if throttle else d.target_room + offset + corr)))
+        if i.follow_me and d.hvac == "heat":
+            # 06.11.2026: with the remote's temperature the unit regulates by itself (down to ~27 Hz / 600 W);
+            # the old offset (+9 K) only drove it to full power. Fewer commands: each one ends Follow Me
+            # until the remote sends again (max. 3 min).
+            st.integral = 0.0
+            sp = max(SP_MIN, min(SP_MAX, _round_half(d.target_room - (1.0 if throttle else 0.0))))
+        else:
+            sp = max(SP_MIN, min(SP_MAX, _round_half(d.target_room if throttle else d.target_room + offset + corr)))
         if d.mode == "aufwaermen":
             sp = SP_MAX
         d.setpoint = sp
@@ -458,10 +467,10 @@ def _apply(i: Inputs, st: State, d: Decision, dt_h: float, force: bool = False,
             st.setpoint_sent = now
         else:
             d.setpoint = st.setpoint if st.setpoint is not None else sp
-        fan = FAN_NORMAL
+        fan = FAN_FOLLOW_ME if (i.follow_me and d.hvac == "heat") else FAN_NORMAL
         cheap = i.price is not None and i.price < i.settings.boost_price
         cold = d.hvac == "heat" and i.room is not None and i.room < d.target_room - BOOST_BELOW_TARGET_K
-        if st.surplus_active or cheap or cold or d.mode == "aufwaermen":
+        if (st.surplus_active or cheap or cold or d.mode == "aufwaermen") and fan != FAN_FOLLOW_ME:
             fan = FAN_BOOST
         fan_due = st.fan_changed is None or now - st.fan_changed >= FAN_INTERVAL
         if d.send_hvac or (fan != st.fan and fan_due):

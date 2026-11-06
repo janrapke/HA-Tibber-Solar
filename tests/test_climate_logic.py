@@ -328,3 +328,21 @@ def test_replace_early_end_needs_three_cents():
     assert d.mode == "ersatz" and "Mindestdauer 2 h" in d.reason
     d = cl.decide(inp(now=NOON + 20 * M, replace_switch=True, price=0.455, price_ahead=0.40), st)
     assert d.mode != "ersatz" and d.radiators
+
+
+def test_follow_me_sets_the_real_target_and_auto_fan():
+    st = cl.State()
+    i = dict(replace_switch=True, price=0.20, in_living=True, offset_heat=9.0, follow_me=True)
+    d = cl.decide(inp(room=18.0, **i), st)  # cold: no offset, no boost fan
+    assert d.mode == "ersatz" and d.setpoint == 21.0 and d.fan == cl.FAN_FOLLOW_ME
+    t = NOON
+    for _ in range(8):  # the integral must not creep in either
+        t += 15 * M
+        d = cl.decide(inp(now=t, room=20.0, **i), st)
+    assert d.setpoint == 21.0 and not d.send_setpoint
+    # above target + 0.5: one degree lower, the unit throttles by itself
+    d = cl.decide(inp(now=t + 15 * M, room=21.6, **i), st)
+    assert d.mode == "ersatz_pause" and d.setpoint == 20.0
+    # without Follow Me the old offset regulation stays
+    d = cl.decide(inp(room=20.0, replace_switch=True, price=0.20, in_living=True, offset_heat=9.0), cl.State())
+    assert d.setpoint == 30.0 and d.fan == cl.FAN_NORMAL

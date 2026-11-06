@@ -173,6 +173,7 @@ class ClimateController:
         self.control_active = False  # off = observe only
         self.replace_switch = True  # heat with the AC whenever it is cheaper than oil
         self.surplus_switch = False
+        self.follow_me_switch = False  # the Midea remote lies in the room with Follow Me on
         self.manual_external = False  # manuell_an came from the remote: leave the AC alone
         self.radiators_taken = False  # we switched the radiators off and owe them back
         self.saved_bt_targets: dict = {}  # BT target temperatures before the handover
@@ -235,6 +236,7 @@ class ClimateController:
             "control_active": self.control_active,
             "replace_switch": self.replace_switch,
             "surplus_switch": self.surplus_switch,
+            "follow_me_switch": self.follow_me_switch,
             "manual_external": self.manual_external,
             "radiators_taken": self.radiators_taken,
             "saved_bt_targets": self.saved_bt_targets,
@@ -252,6 +254,7 @@ class ClimateController:
         self.control_active = bool(d.get("control_active", False))
         self.replace_switch = bool(d.get("replace_switch", True))
         self.surplus_switch = bool(d.get("surplus_switch", False))
+        self.follow_me_switch = bool(d.get("follow_me_switch", False))
         self.manual_external = bool(d.get("manual_external", False))
         self.radiators_taken = bool(d.get("radiators_taken", False))
         self.saved_bt_targets = dict(d.get("saved_bt_targets") or {})
@@ -289,7 +292,7 @@ class ClimateController:
         self._changed()
 
     def set_switch(self, name: str, on: bool) -> None:
-        if name in ("replace_switch", "surplus_switch"):
+        if name in ("replace_switch", "surplus_switch", "follow_me_switch"):
             setattr(self, name, bool(on))
             self._save()
             self._changed()
@@ -506,6 +509,7 @@ class ClimateController:
         inputs = Inputs(
             now=now, mode=self.mode, app_enabled=ext.get("app_enabled", True),
             replace_switch=self.replace_switch, surplus_switch=self.surplus_switch,
+            follow_me=self.follow_me_switch,
             room=room, outdoor=outdoor, price=price, price_ahead=ext.get("price_ahead"),
             home=self._on(self.cfg[CONF_AC_PRESENCE_HOME], True),
             in_living=self._on(self.cfg[CONF_AC_PRESENCE_LIVING], False),
@@ -549,6 +553,7 @@ class ClimateController:
             "zieltemperatur_raum": d.target_room,
             "grenzpreis": d.break_even,
             "balkon_frei_w": inputs.free_w,
+            "follow_me": self.follow_me_switch,
             "kosten_klima_kwh_waerme": d.cost_ac,
             "kosten_oel_kwh_waerme": d.cost_oil,
             "effizienz": round(efficiency, 2),
