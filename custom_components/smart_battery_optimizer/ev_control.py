@@ -68,6 +68,9 @@ PRE_HOLD = timedelta(minutes=10)     # safety: 10 min after the ready time the c
 PRE_GIVE_UP = timedelta(minutes=60)  # no BLE contact until then: assume driven away and forget it
 PRE_WAKE = timedelta(minutes=3)      # wake the car this long before the start so the values are fresh
 PRE_COLD_EXTRAS = 3.0                # below this outside temperature also seat and steering wheel heating
+PRE_ALERT_TRIES = 3                  # climate still off after this many tries: tell the phone (06.11.2026: "on" got lost)
+PRE_NOTIFY_ID = f"{DOMAIN}_ev_preheat"
+CMD_TIMEOUT = 45                     # s; a BLE command hung 8 min on 06.11.2026 and blocked the whole loop
 STORE_VERSION = 1
 CMD_GAP = timedelta(seconds=60)
 REF_EVERY = timedelta(hours=6)
@@ -112,7 +115,11 @@ class EvChargeController:
         self.pre_status = "aus"
         self._holidays: set = set()
         self.pre_next: dict = {}
-        self._pre_started: datetime | None = None   # we switched the climate on at this time
+        self._pre_started: datetime | None = None   # we sent "climate on" first at this time
+        self._pre_on_at: datetime | None = None     # the car reported the climate on at this time
+        self._pre_tries = 0
+        self._pre_alerted = False
+        self._pre_extras = False                    # seat / steering wheel switched on by us
         self._pre_outdoor: float | None = None
         self._pre_from: float | None = None         # cabin (or outside) temperature at the start
         self._pre_learned = False
@@ -360,9 +367,36 @@ class EvChargeController:
         target = float(self.s["pre_target"])
         climate_on = self._state(E_CLIMATE) not in (None, "off")
         link = self._state(E_LINK) == "on"
-        if self._pre_started:                      # started by us: learn the warm-up, end after the hold
+        if self._pre_started and self._pre_on_at is None and climate_on:
+            # the car confirms the climate: only now seat and wheel, so they cannot hold up the main command
+            self._pre_on_at = local
+            _LOGGER.info("Tesla preheat: climate on after %d tries", self._pre_tries)
+            if self._pre_alerted:
+                await self._try("persistent_notification", "dismiss", None, notification_id=PRE_NOTIFY_ID)
+            if self._pre_outdoor is not None and self._pre_outdoor < PRE_COLD_EXTRAS:
+                self._pre_extras = True
+                await self._try("select", "select_option", E_SEAT, option="Medium heat")
+                await self._try("switch", "turn_on", E_WHEEL)
+        if self._pre_started and self._pre_on_at is None:
+            # sent, but the car does not report it on (06.11.2026: the setpoint arrived, "on" got lost)
+            if local >= self._pre_done_for or not self.s["pre_on"]:
+                _LOGGER.warning("Tesla preheat: climate did not come on after %d tries - giving up", self._pre_tries)
+                self._pre_started, self.pre_status = None, "fehlgeschlagen"
+                if link and not self._pre_alerted:  # no link: probably driven off already, no message while driving
+                    await self._pre_alert("Das Auto hat die Vorklimatisierung bis zur Fertigzeit nicht angenommen.")
+            elif link:
+                self._pre_tries += 1
+                self.pre_status = f"startet (Versuch {self._pre_tries})"
+                await self._pre_on(target)
+                if self._pre_tries >= PRE_ALERT_TRIES and not self._pre_alerted:
+                    await self._pre_alert(f"Die Klima geht nach {self._pre_tries} Versuchen nicht an, "
+                                          "es wird weiter versucht.")
+            else:
+                self.pre_status = "startet, wartet auf Verbindung"
+                await self._try("button", "press", E_WAKE)
+        elif self._pre_started:                    # running: learn the warm-up, end after the hold
             cabin = self._float(E_CABIN)
-            mins = (local - self._pre_started).total_seconds() / 60
+            mins = (local - self._pre_on_at).total_seconds() / 60
             if not self._pre_learned and cabin is not None and cabin >= target - 1 and self._pre_from is not None:
                 frost = self._pre_outdoor is not None and self._pre_outdoor < 0
                 await self.async_set("pre_per_k", learn_per_k(self.s["pre_per_k"], mins, self._pre_from, target, frost))
@@ -411,30 +445,38 @@ class EvChargeController:
             self._pre_done_for = ready
             if climate_on:                         # already on by hand: nothing to do
                 return
-            await self._try("climate", "set_hvac_mode", E_CLIMATE, hvac_mode="heat_cool")
-            await self._try("climate", "set_temperature", E_CLIMATE, temperature=target)
-            if outdoor is not None and outdoor < PRE_COLD_EXTRAS:
-                await self._try("select", "select_option", E_SEAT, option="Medium heat")
-                await self._try("switch", "turn_on", E_WHEEL)
             self._pre_started, self._pre_outdoor, self._pre_from, self._pre_learned = local, outdoor, from_temp, False
-            self.pre_status = "läuft"
+            self._pre_on_at, self._pre_tries, self._pre_alerted, self._pre_extras = None, 1, False, False
+            self.pre_status = "startet"
+            await self._pre_on(target)   # confirmed (and repeated if needed) in the next cycles
         elif local >= start and self._pre_woken_for == ready:
             await self._try("button", "press", E_WAKE)  # no link yet: keep trying to reach the car
+
+    async def _pre_on(self, target: float) -> None:
+        await self._try("climate", "set_hvac_mode", E_CLIMATE, hvac_mode="heat_cool")
+        await self._try("climate", "set_temperature", E_CLIMATE, temperature=target)
+
+    async def _pre_alert(self, text: str) -> None:
+        self._pre_alerted = True
+        msg = text + " Bitte in der Tesla-App vorklimatisieren."
+        await self._try("persistent_notification", "create", None, title="Tesla Vorklima",
+                        message=msg, notification_id=PRE_NOTIFY_ID)
+        await self._try("notify", NOTIFY, None, title="Tesla Vorklima", message=msg)
 
     async def _pre_off(self, link: bool) -> None:
         if link:
             await self._try("climate", "set_hvac_mode", E_CLIMATE, hvac_mode="off")
-            if self._pre_outdoor is not None and self._pre_outdoor < PRE_COLD_EXTRAS:
+            if self._pre_extras:
                 await self._try("select", "select_option", E_SEAT, option="Off")
                 await self._try("switch", "turn_off", E_WHEEL)
-        self._pre_started = None
+        self._pre_started, self._pre_extras = None, False
         self.pre_status = "fertig"
 
     async def _try(self, domain, service, entity_id, **data) -> None:
         try:
             await self._call(domain, service, entity_id, **data)
-        except Exception as err:  # noqa: BLE001 - BLE may drop
-            _LOGGER.warning("Tesla command %s.%s failed: %s", domain, service, err)
+        except Exception as err:  # noqa: BLE001 - BLE may drop (a timeout is an Exception too)
+            _LOGGER.warning("Tesla command %s.%s failed: %s", domain, service, err or type(err).__name__)
 
     async def _execute(self, now: datetime, amps: int, travel) -> None:
         if self._last_cmd and now - self._last_cmd < CMD_GAP:
@@ -478,7 +520,7 @@ class EvChargeController:
     async def _call(self, domain, service, entity_id, **data) -> None:
         _LOGGER.info("Tesla: %s.%s %s %s", domain, service, entity_id, data or "")
         payload = {"entity_id": entity_id, **data} if entity_id else data
-        await self.hass.services.async_call(domain, service, payload, blocking=True)
+        await asyncio.wait_for(self.hass.services.async_call(domain, service, payload, blocking=True), CMD_TIMEOUT)
 
     # ------------------------------------------------------------------ views
     def attributes(self) -> dict:
