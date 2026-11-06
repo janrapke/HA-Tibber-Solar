@@ -122,6 +122,7 @@ AC_DEFAULTS = {
         "automation.heizung_wohnzimmer",
         "automation.heizung_esszimmer",
         "automation.heizung_kuche",
+        "automation.heizung_flur_folgt_wohnzimmer_1_degc",
         "automation.heizung_auf_heat_stellen",
     ],
     CONF_AC_OPENINGS: [

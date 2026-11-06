@@ -46,6 +46,37 @@
 #   wieder mitlaufen zu lassen (der Besitzer meint, die Küche bringt mehr); erst danach Raumsoll
 #   Tag am Kessel 21 -> 22 °C. Nur vorschlagen, nicht selbst ändern.
 
+automation:
+  # Flur läuft mit dem Wohnzimmer mit, immer 1 K darunter (Wunsch des Besitzers 06.11.2026).
+  # Wird von der Klima-Steuerung der Integration mit den anderen Heiz-Automationen pausiert.
+  - id: heizung_flur_folgt_wohnzimmer
+    alias: "Heizung Flur folgt Wohnzimmer (-1 °C)"
+    mode: queued
+    max: 3
+    triggers:
+      - trigger: state
+        entity_id: climate.bt_wohnzimmer_bt_wohnzimmer
+        attribute: temperature
+      - trigger: homeassistant
+        event: start
+      - trigger: time_pattern
+        minutes: "/15"
+    variables:
+      ziel: "{{ (state_attr('climate.bt_wohnzimmer_bt_wohnzimmer', 'temperature') | float(0)) - 1 }}"
+    conditions:
+      - condition: state
+        entity_id: input_boolean.heizung_manuell
+        state: "off"
+      - condition: template
+        value_template: >
+          {{ ziel >= 5 and state_attr('climate.bt_flur_bt_flur', 'temperature') | float(0) != ziel }}
+    actions:
+      - action: climate.set_temperature
+        target:
+          entity_id: climate.bt_flur_bt_flur
+        data:
+          temperature: "{{ ziel }}"
+
 template:
   - binary_sensor:
       - name: "Heizung Wohnbereich aktiv"
