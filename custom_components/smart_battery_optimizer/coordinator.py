@@ -1255,7 +1255,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             return
         await self.climate.async_update(dt_util.as_local(now), {
             "price": self._current_price(now),
-            "price_ahead": self._price_ahead(now),
+            "price_ahead": self._price_ahead(now, hours=1.0),  # matches the 1 h minimum duration
             "soc": result.get("soc"),
             "curtailed_wh_2h": self.plan.curtailed_wh(2.0) if self.plan.steps else 0.0,
             "grid_charging": self._charger_should_run,
