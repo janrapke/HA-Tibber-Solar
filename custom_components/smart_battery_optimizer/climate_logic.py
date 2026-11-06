@@ -50,6 +50,9 @@ FAN_INTERVAL = timedelta(minutes=15)
 SURPLUS_CURTAIL_WH = 300.0
 SURPLUS_SOC_HYST = 5.0
 SURPLUS_DELTA_K = 1.0
+# balcony power: on only after 10 min above the minimum, off only after 20 min below FREE_OFF_W
+SOLAR_ON = timedelta(minutes=10)
+SOLAR_OFF = timedelta(minutes=20)
 BOOST_BELOW_TARGET_K = 1.5
 KP = 1.0  # K setpoint per K room error (immediate)
 KI = 1.5  # K setpoint per K room error and hour
@@ -74,6 +77,8 @@ class Settings:
     boost_price: float = 0.15
     # balcony feed-in that the AC can use for free (owner's wish 06.11.2026: count it from ~200-250 W)
     free_min_w: float = 150.0      # below: ignore (noise, a cloud)
+    free_off_w: float = 80.0       # once on: only this low counts as "sun gone"
+    solar_away_k: float = 1.0      # away: store the free heat, 1 K above the away target
     ac_normal_w: float = 1100.0    # measured: the AC runs 58 % of the time at 1.0-1.2 kW, it does not go lower
     solar_bonus_pct: float = 20.0  # with free power the oil limit is raised by this much
 
@@ -111,6 +116,8 @@ class State:
     replace_active: bool = False
     replace_changed: datetime | None = None
     surplus_active: bool = False
+    solar_active: bool = False
+    solar_since: datetime | None = None
     integral: float = 0.0
     last_update: datetime | None = None
     setpoint: float | None = None
@@ -133,7 +140,7 @@ class State:
         return st
 
 
-_DT_FIELDS = {"on_since", "off_since", "replace_changed", "last_update", "setpoint_sent", "fan_changed"}
+_DT_FIELDS = {"solar_since", "on_since", "off_since", "replace_changed", "last_update", "setpoint_sent", "fan_changed"}
 
 
 @dataclass
@@ -184,6 +191,32 @@ def solar_share(i: Inputs) -> float:
     return min(i.free_w, s.ac_normal_w) / s.ac_normal_w
 
 
+def _solar_update(i: Inputs, st: State) -> float:
+    """Free balcony power with delays, so clouds do not switch the AC on and off.
+
+    On after SOLAR_ON above the minimum; then it stays until the free power was below free_off_w
+    for SOLAR_OFF. While on, the share is at least the one of the minimum power."""
+    s, now = i.settings, i.now
+    if not st.solar_active:
+        if i.free_w >= s.free_min_w:
+            st.solar_since = st.solar_since or now
+            if now - st.solar_since >= SOLAR_ON:
+                st.solar_active, st.solar_since = True, None
+        else:
+            st.solar_since = None
+    else:
+        if i.free_w < s.free_off_w:
+            st.solar_since = st.solar_since or now
+            if now - st.solar_since >= SOLAR_OFF:
+                st.solar_active, st.solar_since = False, None
+        else:
+            st.solar_since = None
+    if not st.solar_active or s.ac_normal_w <= 0:
+        return 0.0
+    floor = min(s.free_min_w, s.ac_normal_w) / s.ac_normal_w
+    return max(floor, min(i.free_w, s.ac_normal_w) / s.ac_normal_w)
+
+
 def decide(i: Inputs, st: State) -> Decision:
     s = i.settings
     now = i.now
@@ -191,7 +224,7 @@ def decide(i: Inputs, st: State) -> Decision:
     be = break_even_price(oil, i.efficiency)
     cost_ac = i.price / i.efficiency if i.price is not None and i.efficiency > 0 else None
     solar_note = ""
-    share = solar_share(i)
+    share = _solar_update(i, st)
     if share > 0 and i.price is not None:
         # the free part of the AC power costs nothing: compare the effective price with a raised limit
         real = i.price
@@ -292,12 +325,15 @@ def decide(i: Inputs, st: State) -> Decision:
                    if st.surplus_active else "")
 
     if st.replace_active:
-        t = target + (SURPLUS_DELTA_K if st.surplus_active else 0.0)
+        solar_away = st.solar_active and not i.home and share > 0
+        t = target + (SURPLUS_DELTA_K if st.surplus_active else (s.solar_away_k if solar_away else 0.0))
         why = f"Heizung ersetzen: {i.price:.3f} €/kWh < Grenze {be:.3f} €/kWh" if i.price is not None else "Heizung ersetzen"
         if not replace_ok:
             why = replace_why
         if st.surplus_active:
             why += f", {surplus_why} → +1 K"
+        elif solar_away:
+            why += f", niemand da: Balkonwärme speichern → +{s.solar_away_k:.0f} K"
         paused = st.reason_mode == "ersatz_pause"
         if i.room > t + PAUSE_ABOVE_K or (paused and i.room > t):
             # AC stays on; a setpoint at the room target makes the compressor stop by itself

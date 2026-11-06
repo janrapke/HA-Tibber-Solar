@@ -1263,6 +1263,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             "app_enabled": self.is_enabled,
             # balcony feed-in for the free-power share of the AC
             "grid_w": result.get("grid"), "export_w": result.get("export"),
+            "inverter_w": result.get("inverter_w"),
             "balcony_w": self._read_float(self.config.get(CONF_BALCONY_POWER_SENSOR)),
         })
 

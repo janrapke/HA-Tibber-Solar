@@ -268,20 +268,50 @@ def test_zone_target_night_phase_and_tv():
     assert at(12, 0, home=False) == 18.0
 
 
-def test_free_balcony_power_makes_replace_cheaper():
+
+def _solar_run(st, minutes, start=0, **kw):
+    d = None
+    for k in range(start, start + minutes + 1):
+        d = cl.decide(inp(replace_switch=True, now=NOON + k * M, **kw), st)
+    return d
+
+
+def test_free_balcony_power_makes_replace_cheaper_after_ten_minutes():
     # limit 0.4235; at 0.55 EUR/kWh the AC alone is far too expensive
-    d = cl.decide(inp(replace_switch=True, price=0.55), cl.State())
-    assert d.mode != "ersatz"
+    assert cl.decide(inp(replace_switch=True, price=0.55), cl.State()).mode != "ersatz"
     # 100 W are below the minimum and are ignored
-    d = cl.decide(inp(replace_switch=True, price=0.55, free_w=100.0), cl.State())
-    assert d.mode != "ersatz"
-    # 250 W of 1100 W free: effective 0.425, limit +20 % = 0.508 -> replace
-    d = cl.decide(inp(replace_switch=True, price=0.55, free_w=250.0), cl.State())
+    assert _solar_run(cl.State(), 15, price=0.55, free_w=100.0).mode != "ersatz"
+    # 250 W of 1100 W free: effective 0.425, limit +20 % = 0.508 -> replace, but only after 10 min
+    st = cl.State()
+    assert _solar_run(st, 5, price=0.55, free_w=250.0).mode != "ersatz"
+    d = _solar_run(st, 6, start=6, price=0.55, free_w=250.0)
     assert d.mode == "ersatz" and "Balkon 250 W frei" in d.reason
     assert abs(d.break_even - 0.4235 * 1.2) < 1e-3
     # far too expensive even with the free share
-    d = cl.decide(inp(replace_switch=True, price=0.75, free_w=250.0), cl.State())
-    assert d.mode != "ersatz"
+    assert _solar_run(cl.State(), 15, price=0.75, free_w=250.0).mode != "ersatz"
+
+
+def test_balcony_power_rides_through_clouds():
+    st = cl.State()
+    assert _solar_run(st, 11, price=0.55, free_w=250.0).mode == "ersatz"
+    # a cloud: 15 min almost nothing free -> still on (counts as the minimum share)
+    t0 = NOON + 12 * M
+    for k in range(15):
+        d = cl.decide(inp(replace_switch=True, now=t0 + k * M, price=0.55, free_w=20.0), st)
+    assert st.solar_active and d.mode == "ersatz"
+    # sun gone for good: off after 20 min below 80 W, then oil again
+    for k in range(15, 40):
+        d = cl.decide(inp(replace_switch=True, now=t0 + k * M, price=0.55, free_w=20.0), st)
+    assert not st.solar_active and d.mode != "ersatz"
+
+
+def test_balcony_power_away_stores_one_kelvin_more():
+    st = cl.State()
+    d = _solar_run(st, 11, price=0.55, free_w=300.0, home=False, room=18.0)
+    assert d.mode == "ersatz" and d.target_room == 19.0 and "Balkonwärme" in d.reason
+    st = cl.State()
+    d = _solar_run(st, 11, price=0.55, free_w=300.0, home=True, room=18.0)
+    assert d.mode == "ersatz" and d.target_room == 20.0
 
 
 def test_solar_share_is_capped_at_the_normal_ac_power():

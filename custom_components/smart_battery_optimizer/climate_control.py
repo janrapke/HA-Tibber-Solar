@@ -412,14 +412,17 @@ class ClimateController:
 
     # ------------------------------------------------------------ main step
     def _free_power(self, now, ac_w: float, ext: dict) -> float:
-        """Balcony power that would go to the grid unpaid: export now, or what the running AC already
-        takes of it (AC power minus grid import). Capped at the balcony output, smoothed over ~10 min."""
+        """Balcony power the house itself does not need (only the balcony, never the battery inverter);
+        with the AC running its own share counts too. Capped at the balcony output, smoothed ~10 min."""
         imp, exp, bal = ext.get("grid_w"), ext.get("export_w"), ext.get("balcony_w")
+        inv = max(0.0, float(ext.get("inverter_w") or 0.0))
         if imp is None or bal is None:
             raw = 0.0
         else:
-            net = float(imp) - float(exp or 0.0)
-            raw = max(0.0, min(float(bal), (ac_w or 0.0) - net))
+            # balcony beyond the house load (without the AC): what the battery inverter feeds in never counts
+            #   house without AC = import - export + inverter + balcony - AC
+            #   free = balcony - house without AC = AC + export - import - inverter
+            raw = max(0.0, min(float(bal), (ac_w or 0.0) + float(exp or 0.0) - float(imp) - inv))
         last = getattr(self, "_free_at", None)
         dt = (now - last).total_seconds() if last else 600.0
         a = min(1.0, max(0.0, dt) / 600.0)
