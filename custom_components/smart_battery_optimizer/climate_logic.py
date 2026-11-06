@@ -15,7 +15,7 @@ Priorities, most important first:
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timedelta
 
 try:
@@ -72,6 +72,10 @@ class Settings:
     cool_max_price: float = 0.30
     surplus_soc: float = 90.0
     boost_price: float = 0.15
+    # balcony feed-in that the AC can use for free (owner's wish 06.11.2026: count it from ~200-250 W)
+    free_min_w: float = 150.0      # below: ignore (noise, a cloud)
+    ac_normal_w: float = 1100.0    # measured: the AC runs 58 % of the time at 1.0-1.2 kW, it does not go lower
+    solar_bonus_pct: float = 20.0  # with free power the oil limit is raised by this much
 
 
 @dataclass
@@ -90,6 +94,7 @@ class Inputs:
     soc: float | None = None
     curtailed_wh_2h: float = 0.0
     grid_charging: bool = False
+    free_w: float = 0.0  # power that would go to the grid unpaid (balcony), smoothed
     efficiency: float = 3.5  # thermal model at current outdoor temperature
     offset_heat: float = 5.0
     offset_cool: float = 0.0
@@ -171,12 +176,30 @@ def _round_half(x: float) -> float:
     return round(x * 2) / 2
 
 
+def solar_share(i: Inputs) -> float:
+    """Share of the AC's normal power that the free balcony power covers (0 below the minimum)."""
+    s = i.settings
+    if i.free_w < s.free_min_w or s.ac_normal_w <= 0:
+        return 0.0
+    return min(i.free_w, s.ac_normal_w) / s.ac_normal_w
+
+
 def decide(i: Inputs, st: State) -> Decision:
     s = i.settings
     now = i.now
     oil = oil_cost_per_kwh_heat(s.oil_eur_l, s.boiler_eff_pct / 100.0)
     be = break_even_price(oil, i.efficiency)
     cost_ac = i.price / i.efficiency if i.price is not None and i.efficiency > 0 else None
+    solar_note = ""
+    share = solar_share(i)
+    if share > 0 and i.price is not None:
+        # the free part of the AC power costs nothing: compare the effective price with a raised limit
+        real = i.price
+        i = replace(i, price=real * (1 - share),
+                    price_ahead=None if i.price_ahead is None else i.price_ahead * (1 - share))
+        be = be * (1 + s.solar_bonus_pct / 100.0)
+        solar_note = (f" [Balkon {i.free_w:.0f} W frei: effektiv {i.price:.3f} statt {real:.3f} €/kWh, "
+                      f"Grenze +{s.solar_bonus_pct:.0f} %]")
     target = zone_target(i)
     daytime = DAY_START_H <= now.hour < DAY_END_H
     dt_h = 0.0 if st.last_update is None else max(0.0, min(0.25, (now - st.last_update).total_seconds() / 3600))
@@ -184,6 +207,8 @@ def decide(i: Inputs, st: State) -> Decision:
 
     def finish(d: Decision) -> Decision:
         d.target_room = d.target_room if d.target_room is not None else target
+        if solar_note and ("Grenze" in d.reason or "Öl" in d.reason or "günstiger" in d.reason):
+            d.reason += solar_note
         d.break_even, d.cost_ac, d.cost_oil = round(be, 4), (round(cost_ac, 4) if cost_ac is not None else None), round(oil, 4)
         return d
 

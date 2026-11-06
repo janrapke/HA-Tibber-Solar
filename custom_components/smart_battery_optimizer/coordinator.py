@@ -1261,6 +1261,9 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             "grid_charging": self._charger_should_run,
             "outdoor_forecast": self._outdoor_forecast(now),
             "app_enabled": self.is_enabled,
+            # balcony feed-in for the free-power share of the AC
+            "grid_w": result.get("grid"), "export_w": result.get("export"),
+            "balcony_w": self._read_float(self.config.get(CONF_BALCONY_POWER_SENSOR)),
         })
 
     async def _step_oil(self, now, result) -> None:

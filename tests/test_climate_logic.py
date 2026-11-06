@@ -266,3 +266,25 @@ def test_zone_target_night_phase_and_tv():
     assert at(3, 0, in_living=True) == 20.0  # TV at night: 20 instead of 21
     assert at(20, 0, in_living=True) == 21.0
     assert at(12, 0, home=False) == 18.0
+
+
+def test_free_balcony_power_makes_replace_cheaper():
+    # limit 0.4235; at 0.55 EUR/kWh the AC alone is far too expensive
+    d = cl.decide(inp(replace_switch=True, price=0.55), cl.State())
+    assert d.mode != "ersatz"
+    # 100 W are below the minimum and are ignored
+    d = cl.decide(inp(replace_switch=True, price=0.55, free_w=100.0), cl.State())
+    assert d.mode != "ersatz"
+    # 250 W of 1100 W free: effective 0.425, limit +20 % = 0.508 -> replace
+    d = cl.decide(inp(replace_switch=True, price=0.55, free_w=250.0), cl.State())
+    assert d.mode == "ersatz" and "Balkon 250 W frei" in d.reason
+    assert abs(d.break_even - 0.4235 * 1.2) < 1e-3
+    # far too expensive even with the free share
+    d = cl.decide(inp(replace_switch=True, price=0.75, free_w=250.0), cl.State())
+    assert d.mode != "ersatz"
+
+
+def test_solar_share_is_capped_at_the_normal_ac_power():
+    assert cl.solar_share(inp(free_w=149.0)) == 0.0
+    assert abs(cl.solar_share(inp(free_w=550.0)) - 0.5) < 1e-9
+    assert cl.solar_share(inp(free_w=3000.0)) == 1.0

@@ -411,6 +411,22 @@ class ClimateController:
         return self.power_w()
 
     # ------------------------------------------------------------ main step
+    def _free_power(self, now, ac_w: float, ext: dict) -> float:
+        """Balcony power that would go to the grid unpaid: export now, or what the running AC already
+        takes of it (AC power minus grid import). Capped at the balcony output, smoothed over ~10 min."""
+        imp, exp, bal = ext.get("grid_w"), ext.get("export_w"), ext.get("balcony_w")
+        if imp is None or bal is None:
+            raw = 0.0
+        else:
+            net = float(imp) - float(exp or 0.0)
+            raw = max(0.0, min(float(bal), (ac_w or 0.0) - net))
+        last = getattr(self, "_free_at", None)
+        dt = (now - last).total_seconds() if last else 600.0
+        a = min(1.0, max(0.0, dt) / 600.0)
+        self._free_w = getattr(self, "_free_w", raw) * (1 - a) + raw * a
+        self._free_at = now
+        return round(self._free_w, 1)
+
     async def async_update(self, now: datetime, ext: dict | None = None) -> Decision:
         """One cycle (called every minute by the coordinator)."""
         ext = ext or {}
@@ -492,6 +508,7 @@ class ClimateController:
             in_living=self._on(self.cfg[CONF_AC_PRESENCE_LIVING], False),
             soc=ext.get("soc"), curtailed_wh_2h=float(ext.get("curtailed_wh_2h") or 0.0),
             grid_charging=bool(ext.get("grid_charging")), efficiency=efficiency,
+            free_w=self._free_power(now, power if freq > 0 else 0.0, ext),
             offset_heat=self.model.device_offset("heat"), offset_cool=self.model.device_offset("cool"),
             settings=s,
         )
@@ -528,6 +545,7 @@ class ClimateController:
             "heizkoerper": "an" if d.radiators else "aus",
             "zieltemperatur_raum": d.target_room,
             "grenzpreis": d.break_even,
+            "balkon_frei_w": inputs.free_w,
             "kosten_klima_kwh_waerme": d.cost_ac,
             "kosten_oel_kwh_waerme": d.cost_oil,
             "effizienz": round(efficiency, 2),
