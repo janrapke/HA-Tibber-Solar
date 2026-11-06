@@ -25,42 +25,54 @@ CATS = {
     'klaeren': ('Zu klären', '#a855f7', 'mdi:help-circle-outline'),
 }
 
-# name, category, power sensor (W), energy sensor (kWh, for history)
+# Groups: shown as one row (expandable) and as parent in the energy dashboard; sensor = kWh sum (group helper)
+GROUPS = {
+    'Licht Wohnzimmer': 'sensor.licht_wohnzimmer_gesamt_strom',
+    'Außenlicht': 'sensor.aussenlicht_gesamt_strom',
+    'Licht Keller': 'sensor.licht_keller_gesamt_strom',
+    'Pool & Hydro': 'sensor.pool_hydro_gesamt_strom',
+}
+
+# name, category, power sensor (W), energy sensor (kWh, for history), group (optional)
+# Energy: own Riemann integrals (UI helpers, every 5 min) where the plug's own counter is coarse or late.
 DEVICES = [
-    ('Tesla Wallbox', 'auto', 'sensor.tesla_wall_connector_gesamtleistung', 'sensor.tesla_wall_connector_energie'),
-    ('Klima Wohnzimmer', 'klima', 'sensor.klima_wohnzimmer_klima_leistung', 'sensor.klima_wohnzimmer_klimastrom_gesamt'),
-    # no plug: the burner adds ~300 W while it runs (load step measured 27.10.2026: +295 / -298 W);
-    # helpers sensor.olbrenner_leistung (template on binary_sensor.olheizung_brenner_lauft) and
-    # sensor.olbrenner_strom (Riemann integral) were created in the UI
-    ('Ölheizung Brenner (≈300 W)', 'heizung', 'sensor.olbrenner_leistung', 'sensor.olbrenner_strom'),
+    ('Tesla Wallbox', 'auto', 'sensor.tesla_wall_connector_gesamtleistung', 'sensor.tesla_wall_connector_energie', None),
+    ('Klima Wohnzimmer', 'klima', 'sensor.klima_wohnzimmer_klima_leistung', 'sensor.klima_wohnzimmer_klimastrom_gesamt', None),
+    # no plug: the burner adds ~300 W while it runs (load step measured 27.10.2026: +295 / -298 W)
+    ('Ölheizung Brenner (≈300 W)', 'heizung', 'sensor.olbrenner_leistung', 'sensor.olbrenner_strom', None),
     # former plug "Monitor Kamera Keller", since 06.11.2026 on the chest freezer (history cleared, must stay on)
-    ('TK-Kühltruhe', 'kuehl', 'sensor.tk_kuehltruhe_leistung', 'sensor.tk_kuehltruhe_strom'),
-    ('Spülmaschine', 'spuel', 'sensor.tasmota_energy_power', 'sensor.tasmota_energy_total'),
-    ('Waschmaschine', 'wasch', 'sensor.waschmaschiene_energy_power', 'sensor.miner_energy_total'),
-    ('Licht Außen Garage', 'licht', 'sensor.shellydimmer2_08f9e04436dc_power', 'sensor.shellydimmer2_08f9e04436dc_energy'),
-    ('Licht Außen Einfahrt', 'licht', 'sensor.shellydimmer2_4cebd6edf59d_power', 'sensor.shellydimmer2_4cebd6edf59d_energy'),
+    ('TK-Kühltruhe', 'kuehl', 'sensor.tk_kuehltruhe_leistung', 'sensor.tk_kuehltruhe_strom', None),
+    ('Spülmaschine', 'spuel', 'sensor.tasmota_energy_power', 'sensor.tasmota_energy_total', None),
+    ('Waschmaschine', 'wasch', 'sensor.waschmaschiene_energy_power', 'sensor.miner_energy_total', None),
+    # living room lights
+    ('Stehlampe (Steckdose)', 'licht', 'sensor.licht_wohnzimmer_leistung', 'sensor.licht_wohnzimmer_strom', 'Licht Wohnzimmer'),
+    ('Bücherregal', 'licht', 'sensor.antela_smart_steckdose_leistung', 'sensor.licht_buecherregal_strom', 'Licht Wohnzimmer'),
     # Shelly Plus 1 without metering; 8 W measured 06.11.2026 (3 on/off cycles at the house load, 4-12 W)
-    ('Licht Wohnzimmer Vitrine (≈8 W)', 'licht', 'sensor.licht_wohnzimmer_vitrine_leistung', 'sensor.licht_wohnzimmer_vitrine_strom'),
+    ('Vitrine (≈8 W)', 'licht', 'sensor.licht_wohnzimmer_vitrine_leistung', 'sensor.licht_wohnzimmer_vitrine_strom', 'Licht Wohnzimmer'),
+    # outdoor lights
+    ('Einfahrt', 'licht', 'sensor.shellydimmer2_4cebd6edf59d_power', 'sensor.licht_aussen_einfahrt_strom', 'Außenlicht'),
+    ('Garage', 'licht', 'sensor.shellydimmer2_08f9e04436dc_power', 'sensor.licht_aussen_garage_strom', 'Außenlicht'),
     # Shelly Plus 1 without metering, light columns in the bed; 32 W measured 06.11.2026 (3 cycles, 26-36 W)
-    ('Außen Ambiente Licht (≈32 W)', 'licht', 'sensor.aussen_ambiente_licht_leistung', 'sensor.aussen_ambiente_licht_strom'),
-    ('Licht Wohnzimmer', 'licht', 'sensor.licht_wohnzimmer_leistung', 'sensor.licht_wohnzimmer_energie_gesamt'),
-    ('Licht Bücherregal', 'licht', 'sensor.antela_smart_steckdose_leistung', 'sensor.antela_smart_steckdose_energie_gesamt'),
+    ('Ambiente Beet (≈32 W)', 'licht', 'sensor.aussen_ambiente_licht_leistung', 'sensor.aussen_ambiente_licht_strom', 'Außenlicht'),
+    # basement lights; Keller Flur: Shelly Plus 1, 74 W measured 06.11.2026 (62-86 W)
+    ('Flur (≈74 W)', 'licht', 'sensor.licht_keller_flur_leistung', 'sensor.licht_keller_flur_strom', 'Licht Keller'),
+    ('Lasercutter', 'licht', 'sensor.licht_keller_lasercutter_leistung', 'sensor.licht_keller_lasercutter_strom', 'Licht Keller'),
+    ('LED (?)', 'licht', 'sensor.licht_schrank_esszimmer_leistung', 'sensor.licht_led_keller_strom', 'Licht Keller'),
+    # Shelly Plus 1 without metering; 13 W measured 06.11.2026 (rounds 2-3: 9-17 W)
+    ('Licht Abstellkammer (≈13 W)', 'licht', 'sensor.licht_abstellkammer_leistung', 'sensor.licht_abstellkammer_strom', None),
     # plug formerly on the bunk bed light, since 06.11.2026: TV with Teufel box and everything around it
-    ('Fernseher Wohnzimmer', 'tv', 'sensor.kinderzimmer_hochbett_licht_leistung', 'sensor.kinderzimmer_hochbett_licht_energie_gesamt'),
-    ('Licht Keller Lasercutter', 'licht', 'sensor.licht_keller_lasercutter_leistung', 'sensor.licht_keller_lasercutter_energie_gesamt'),
-    ('Licht LED Keller (?)', 'licht', 'sensor.licht_schrank_esszimmer_leistung', 'sensor.licht_led_keller_energie_gesamt'),
-    # no plug: HASS.Agent runs scripts/surface_power.ps1 every 60 s (estimate, 0 away from home / on battery);
-    # UI helpers sensor.surface_netzbezug (0 when stale > 3 min) and sensor.surface_strom (kWh)
+    ('Fernseher Wohnzimmer', 'tv', 'sensor.kinderzimmer_hochbett_licht_leistung', 'sensor.fernseher_wohnzimmer_strom', None),
     # no plug: DLNA renderer of the basement TV reachable = on; ~120 W from 23 on/off load steps (26.10.-05.11.2026)
-    ('Fernseher Keller (≈120 W)', 'tv', 'sensor.fernseher_keller_leistung', 'sensor.fernseher_keller_strom'),
-    ('Surface (geschätzt)', 'computer', 'sensor.surface_netzbezug', 'sensor.surface_strom'),
-    ('Akku laden (Netz)', 'akku', 'sensor.shellyplus1pm_e86beaeae1a0_switch_0_power', 'sensor.shellyplus1pm_e86beaeae1a0_switch_0_energy'),
-    ('Hydrotower Erdbeere (?)', 'pool', 'sensor.pool_warmepumpe_leistung', 'sensor.pool_warmepumpe_energie_gesamt'),
-    ('Hydrotower Salat (?)', 'pool', 'sensor.poolpumpe_leistung', 'sensor.poolpumpe_energie_gesamt'),
-    ('Pool-Pumpe (?)', 'pool', 'sensor.steckdose_pool_pumpe_leistung', 'sensor.steckdose_pool_pumpe_energie_gesamt'),
-    ('Pool-Pumpe Dach (?)', 'pool', 'sensor.steckdose_pool_pumpe_dach_leistung', 'sensor.steckdose_pool_pumpe_dach_energie_gesamt'),
-    ('Pool außen (?)', 'pool', 'sensor.antela_smart_plug_leistung', 'sensor.antela_smart_plug_energie_gesamt'),
-    ('Hydo Paprika (?)', 'klaeren', 'sensor.tasmota_energy_power_2', 'sensor.tasmota_energy_total_2'),
+    ('Fernseher Keller (≈120 W)', 'tv', 'sensor.fernseher_keller_leistung', 'sensor.fernseher_keller_strom', None),
+    # no plug: HASS.Agent runs scripts/surface_power.ps1 every 60 s (estimate, 0 away from home / on battery)
+    ('Surface (geschätzt)', 'computer', 'sensor.surface_netzbezug', 'sensor.surface_strom', None),
+    ('Akku laden (Netz)', 'akku', 'sensor.shellyplus1pm_e86beaeae1a0_switch_0_power', 'sensor.shellyplus1pm_e86beaeae1a0_switch_0_energy', None),
+    ('Hydrotower Erdbeere (?)', 'pool', 'sensor.pool_warmepumpe_leistung', 'sensor.pool_warmepumpe_energie_gesamt', 'Pool & Hydro'),
+    ('Hydrotower Salat (?)', 'pool', 'sensor.poolpumpe_leistung', 'sensor.poolpumpe_energie_gesamt', 'Pool & Hydro'),
+    ('Pool-Pumpe (?)', 'pool', 'sensor.steckdose_pool_pumpe_leistung', 'sensor.steckdose_pool_pumpe_energie_gesamt', 'Pool & Hydro'),
+    ('Pool-Pumpe Dach (?)', 'pool', 'sensor.steckdose_pool_pumpe_dach_leistung', 'sensor.steckdose_pool_pumpe_dach_energie_gesamt', 'Pool & Hydro'),
+    ('Pool außen (?)', 'pool', 'sensor.antela_smart_plug_leistung', 'sensor.antela_smart_plug_energie_gesamt', 'Pool & Hydro'),
+    ('Hydo Paprika (?)', 'klaeren', 'sensor.tasmota_energy_power_2', 'sensor.tasmota_energy_total_2', None),
 ]
 
 # House load of the optimizer: grid - export + inverters (Hoymiles, Ecoflow plug), but WITHOUT wallbox
@@ -72,7 +84,7 @@ ECOFLOW_ENERGY = 'sensor.antela_smart_steckdose_4_energie_gesamt'
 BASE = 'sensor.grundlast'
 PHASES = [('L1', 'sensor.tibber_locl_0100240700ff'), ('L2', 'sensor.tibber_locl_0100380700ff'), ('L3', 'sensor.tibber_locl_01004c0700ff')]
 
-dev_js = json.dumps([{'n': n, 'c': c, 'p': p} for n, c, p, _ in DEVICES], ensure_ascii=False)
+dev_js = json.dumps([{'n': n, 'c': c, 'p': p, 'g': g} for n, c, p, _, g in DEVICES], ensure_ascii=False)
 cat_js = json.dumps({k: {'l': v[0], 'col': v[1], 'i': v[2]} for k, v in CATS.items()}, ensure_ascii=False)
 HELP = """
   const n = (id) => { const x = parseFloat(states[id]?.state); return isNaN(x) ? null : x; };
@@ -86,7 +98,7 @@ BTN = {'show_name': False, 'show_icon': False, 'show_state': False, 'triggers_up
                   'custom_fields': {'c': [{'white-space': 'normal'}, {'text-align': 'left'}, {'width': '100%'}]}}}
 
 now_card = dict(BTN, type='custom:button-card', entity=TOTAL, grid_options={'columns': 'full'},
-                tap_action={'action': 'more-info'}, custom_fields={'c': '[[[' + HELP + r"""
+                tap_action={'action': 'none'}, hold_action={'action': 'more-info'}, custom_fields={'c': '[[[' + HELP + r"""
   const total = Math.max(0, (n('""" + TOTAL + r"""') ?? 0) + """ + json.dumps(ADD_BACK) + r""".reduce((a, id) => a + Math.max(0, n(id) ?? 0), 0));
   const base = n('""" + BASE + r"""');
   const devs = DEV.map(d => ({...d, w: n(d.p), off: ['unavailable', 'unknown', undefined].includes(states[d.p]?.state)}));
@@ -101,14 +113,24 @@ now_card = dict(BTN, type='custom:button-card', entity=TOTAL, grid_options={'col
   const bar = segs.filter(s => s[1] > 0).map(s => `<div title="${s[0]}: ${W(s[1])}" style="width:${s[1] / sum * 100}%;background:${s[2]}"></div>`).join('');
   const legend = segs.filter(s => s[1] > 0.5).map(s => `<span style="display:inline-flex;align-items:center;gap:5px;margin:0 10px 4px 0;font-size:12px">
       <span style="width:10px;height:10px;border-radius:3px;background:${s[2]}"></span>${s[0]} <b>${W(s[1])}</b></span>`).join('');
-  const run = devs.filter(d => d.w > 1).sort((a, b) => b.w - a.w);
-  const rows = run.map(d => { const c = CAT[d.c]; return `<div style="display:flex;align-items:center;gap:10px;padding:6px 0">
-      <div style="width:30px;height:30px;flex:none;border-radius:10px;display:flex;align-items:center;justify-content:center;background:${c.col}22">
-        <ha-icon icon="${c.i}" style="--mdc-icon-size:17px;color:${c.col}"></ha-icon></div>
-      <div style="flex:1;min-width:0"><div style="font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${d.n}</div>
+  const open = window.__vbOpen || (window.__vbOpen = {});
+  const groups = {};
+  devs.forEach(d => { const k = d.g || d.n; (groups[k] = groups[k] || {n: k, c: d.c, g: !!d.g, w: 0, items: []}); groups[k].items.push(d); groups[k].w += Math.max(0, d.w || 0); });
+  const row = (name, w, c, icon, small) => `<div style="display:flex;align-items:center;gap:10px;padding:${small ? '4px 0 4px 40px' : '6px 0'}">
+      ${small ? '' : `<div style="width:30px;height:30px;flex:none;border-radius:10px;display:flex;align-items:center;justify-content:center;background:${c}22">
+        <ha-icon icon="${icon}" style="--mdc-icon-size:17px;color:${c}"></ha-icon></div>`}
+      <div style="flex:1;min-width:0"><div style="font-size:${small ? 12 : 13}px;font-weight:${small ? 400 : 600};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${name}</div>
         <div style="height:4px;border-radius:2px;background:rgba(127,127,127,.12);margin-top:4px;overflow:hidden">
-          <div style="height:100%;width:${Math.min(100, d.w / sum * 100)}%;background:${c.col}"></div></div></div>
-      <div style="width:70px;text-align:right;font-size:13px;font-weight:600">${W(d.w)}</div></div>`; }).join('');
+          <div style="height:100%;width:${Math.min(100, w / sum * 100)}%;background:${c}"></div></div></div>
+      <div style="width:70px;text-align:right;font-size:${small ? 12 : 13}px;font-weight:${small ? 400 : 600}">${W(w)}</div></div>`;
+  const rows = Object.values(groups).filter(g => g.w > 1).sort((a, b) => b.w - a.w).map(g => {
+    const c = CAT[g.c];
+    if (!g.g) return row(g.n, g.w, c.col, c.i, false);
+    const kids = g.items.filter(d => d.w > 0.5).sort((a, b) => b.w - a.w).map(d => row(d.n, d.w, c.col, c.i, true)).join('');
+    return `<details ${open[g.n] ? 'open' : ''}>
+      <summary style="list-style:none;display:block;cursor:pointer"
+        onclick="event.preventDefault(); event.stopPropagation(); const d = this.parentElement; d.open = !d.open; (window.__vbOpen = window.__vbOpen || {})['${g.n}'] = d.open;">${row(g.n + ` <span style="font-weight:400;color:var(--secondary-text-color)">▾ ${g.items.filter(d => d.w > 0.5).length}</span>`, g.w, c.col, c.i, false)}</summary>${kids}</details>`;
+  }).join('');
   const offline = devs.filter(d => d.off).length;
   return `<div style="display:flex;justify-content:space-between;align-items:flex-end">
       <div><div style="font-size:12px;color:var(--secondary-text-color);text-transform:uppercase;letter-spacing:.06em">Haus verbraucht gerade</div>
@@ -154,7 +176,7 @@ stack = {'type': 'custom:apexcharts-card', 'grid_options': {'columns': 'full'}, 
                          'legend': {'show': False}, 'stroke': {'width': 1}, 'yaxis': {'decimalsInFloat': 0}},
          'series': [{'entity': p, 'name': n, 'color': COLORS[c], 'type': 'area', 'opacity': 0.55, 'float_precision': 0,
                      'group_by': {'func': 'avg', 'duration': '10min', 'fill': 'zero'}}
-                    for n, c, p, _ in DEVICES if c not in ('pool', 'klaeren')]}
+                    for n, c, p, _, g in DEVICES if c not in ('pool', 'klaeren')]}
 week = {'type': 'custom:apexcharts-card', 'grid_options': {'columns': 'full'}, 'graph_span': '7d',
         'header': {'show': True, 'title': 'Haus ohne Auto und Klima, 7 Tage', 'show_states': True, 'colorize_states': True},
         'apex_config': {'chart': {'height': 200, 'toolbar': {'show': False}}, 'grid': {'strokeDashArray': 4}, 'legend': {'show': False}},
@@ -181,6 +203,13 @@ view = {
 
 hdr = '# GENERIERT von scripts/build_dashboard_verbrauch.py – dort Geräte ergänzen, nicht hier.\n'
 (OUT / 'dashboard_verbrauch.yaml').write_text(hdr + yaml.safe_dump(view, allow_unicode=True, sort_keys=False, width=200), encoding='utf-8')
-(OUT / 'energy_device_consumption.json').write_text(json.dumps(
-    [{'stat_consumption': e, 'name': n} for n, c, _, e in DEVICES], ensure_ascii=False, indent=1), encoding='utf-8')
+energy = []
+for gname, gstat in GROUPS.items():
+    energy.append({'stat_consumption': gstat, 'name': gname})
+for n, c, _, e, g in DEVICES:
+    item = {'stat_consumption': e, 'name': n}
+    if g:
+        item['included_in_stat'] = GROUPS[g]
+    energy.append(item)
+(OUT / 'energy_device_consumption.json').write_text(json.dumps(energy, ensure_ascii=False, indent=1), encoding='utf-8')
 print('ok', len(DEVICES), 'devices')

@@ -1,5 +1,21 @@
 [
  {
+  "stat_consumption": "sensor.licht_wohnzimmer_gesamt_strom",
+  "name": "Licht Wohnzimmer"
+ },
+ {
+  "stat_consumption": "sensor.aussenlicht_gesamt_strom",
+  "name": "Außenlicht"
+ },
+ {
+  "stat_consumption": "sensor.licht_keller_gesamt_strom",
+  "name": "Licht Keller"
+ },
+ {
+  "stat_consumption": "sensor.pool_hydro_gesamt_strom",
+  "name": "Pool & Hydro"
+ },
+ {
   "stat_consumption": "sensor.tesla_wall_connector_energie",
   "name": "Tesla Wallbox"
  },
@@ -24,40 +40,57 @@
   "name": "Waschmaschine"
  },
  {
-  "stat_consumption": "sensor.shellydimmer2_08f9e04436dc_energy",
-  "name": "Licht Außen Garage"
+  "stat_consumption": "sensor.licht_wohnzimmer_strom",
+  "name": "Stehlampe (Steckdose)",
+  "included_in_stat": "sensor.licht_wohnzimmer_gesamt_strom"
  },
  {
-  "stat_consumption": "sensor.shellydimmer2_4cebd6edf59d_energy",
-  "name": "Licht Außen Einfahrt"
+  "stat_consumption": "sensor.licht_buecherregal_strom",
+  "name": "Bücherregal",
+  "included_in_stat": "sensor.licht_wohnzimmer_gesamt_strom"
  },
  {
   "stat_consumption": "sensor.licht_wohnzimmer_vitrine_strom",
-  "name": "Licht Wohnzimmer Vitrine (≈8 W)"
+  "name": "Vitrine (≈8 W)",
+  "included_in_stat": "sensor.licht_wohnzimmer_gesamt_strom"
+ },
+ {
+  "stat_consumption": "sensor.licht_aussen_einfahrt_strom",
+  "name": "Einfahrt",
+  "included_in_stat": "sensor.aussenlicht_gesamt_strom"
+ },
+ {
+  "stat_consumption": "sensor.licht_aussen_garage_strom",
+  "name": "Garage",
+  "included_in_stat": "sensor.aussenlicht_gesamt_strom"
  },
  {
   "stat_consumption": "sensor.aussen_ambiente_licht_strom",
-  "name": "Außen Ambiente Licht (≈32 W)"
+  "name": "Ambiente Beet (≈32 W)",
+  "included_in_stat": "sensor.aussenlicht_gesamt_strom"
  },
  {
-  "stat_consumption": "sensor.licht_wohnzimmer_energie_gesamt",
-  "name": "Licht Wohnzimmer"
+  "stat_consumption": "sensor.licht_keller_flur_strom",
+  "name": "Flur (≈74 W)",
+  "included_in_stat": "sensor.licht_keller_gesamt_strom"
  },
  {
-  "stat_consumption": "sensor.antela_smart_steckdose_energie_gesamt",
-  "name": "Licht Bücherregal"
+  "stat_consumption": "sensor.licht_keller_lasercutter_strom",
+  "name": "Lasercutter",
+  "included_in_stat": "sensor.licht_keller_gesamt_strom"
  },
  {
-  "stat_consumption": "sensor.kinderzimmer_hochbett_licht_energie_gesamt",
+  "stat_consumption": "sensor.licht_led_keller_strom",
+  "name": "LED (?)",
+  "included_in_stat": "sensor.licht_keller_gesamt_strom"
+ },
+ {
+  "stat_consumption": "sensor.licht_abstellkammer_strom",
+  "name": "Licht Abstellkammer (≈13 W)"
+ },
+ {
+  "stat_consumption": "sensor.fernseher_wohnzimmer_strom",
   "name": "Fernseher Wohnzimmer"
- },
- {
-  "stat_consumption": "sensor.licht_keller_lasercutter_energie_gesamt",
-  "name": "Licht Keller Lasercutter"
- },
- {
-  "stat_consumption": "sensor.licht_led_keller_energie_gesamt",
-  "name": "Licht LED Keller (?)"
  },
  {
   "stat_consumption": "sensor.fernseher_keller_strom",
@@ -73,23 +106,28 @@
  },
  {
   "stat_consumption": "sensor.pool_warmepumpe_energie_gesamt",
-  "name": "Hydrotower Erdbeere (?)"
+  "name": "Hydrotower Erdbeere (?)",
+  "included_in_stat": "sensor.pool_hydro_gesamt_strom"
  },
  {
   "stat_consumption": "sensor.poolpumpe_energie_gesamt",
-  "name": "Hydrotower Salat (?)"
+  "name": "Hydrotower Salat (?)",
+  "included_in_stat": "sensor.pool_hydro_gesamt_strom"
  },
  {
   "stat_consumption": "sensor.steckdose_pool_pumpe_energie_gesamt",
-  "name": "Pool-Pumpe (?)"
+  "name": "Pool-Pumpe (?)",
+  "included_in_stat": "sensor.pool_hydro_gesamt_strom"
  },
  {
   "stat_consumption": "sensor.steckdose_pool_pumpe_dach_energie_gesamt",
-  "name": "Pool-Pumpe Dach (?)"
+  "name": "Pool-Pumpe Dach (?)",
+  "included_in_stat": "sensor.pool_hydro_gesamt_strom"
  },
  {
   "stat_consumption": "sensor.antela_smart_plug_energie_gesamt",
-  "name": "Pool außen (?)"
+  "name": "Pool außen (?)",
+  "included_in_stat": "sensor.pool_hydro_gesamt_strom"
  },
  {
   "stat_consumption": "sensor.tasmota_energy_total_2",
