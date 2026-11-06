@@ -115,11 +115,13 @@ AC_DEFAULTS = {
         "climate.bt_wohnzimmer_bt_wohnzimmer",
         "climate.bt_esszimmer_bt_esszimmer",
         "climate.bt_flur_bt_flur",
-        # kitchen radiator permanently off (03.11.2026: under the worktop it only heats the drawers)
+        # kitchen: off 03.11.-06.11.2026, back on because the living area no longer reached 21 °C
+        "climate.bt_kuche_bt_kuche",
     ],
     CONF_AC_HEATING_AUTOMATIONS: [
         "automation.heizung_wohnzimmer",
         "automation.heizung_esszimmer",
+        "automation.heizung_kuche",
         "automation.heizung_auf_heat_stellen",
     ],
     CONF_AC_OPENINGS: [
@@ -132,6 +134,7 @@ AC_RADIATOR_VALVES = {
     "climate.bt_wohnzimmer_bt_wohnzimmer": "climate.wohnzimmer",
     "climate.bt_esszimmer_bt_esszimmer": "climate.esszimmer",
     "climate.bt_flur_bt_flur": "climate.heizung_flur",
+    "climate.bt_kuche_bt_kuche": "climate.kuche",
 }
 # automations that are triggered once when the radiators get the heating back (like YAML no. 18)
 AC_RETRIGGER_AUTOMATIONS = ["automation.heizung_wohnzimmer"]
