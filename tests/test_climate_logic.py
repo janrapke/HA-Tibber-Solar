@@ -86,16 +86,16 @@ def test_replace_by_cost():
     assert d.mode != "ersatz"
 
 
-def test_replace_hysteresis_one_hour():
+def test_replace_hysteresis_two_hours():
     st = cl.State()
     cl.decide(inp(replace_switch=True, price=0.20), st)
-    d = cl.decide(inp(now=NOON + 30 * M, replace_switch=True, price=0.43), st)  # just above the limit
-    assert d.mode == "ersatz" and "Mindestdauer 1 h" in d.reason
-    d = cl.decide(inp(now=NOON + 61 * M, replace_switch=True, price=0.43), st)
+    d = cl.decide(inp(now=NOON + 60 * M, replace_switch=True, price=0.43), st)  # just above the limit
+    assert d.mode == "ersatz" and "Mindestdauer" in d.reason
+    d = cl.decide(inp(now=NOON + 121 * M, replace_switch=True, price=0.43), st)
     assert d.mode != "ersatz" and d.radiators
-    d = cl.decide(inp(now=NOON + 90 * M, replace_switch=True, price=0.20), st)
-    assert d.mode != "ersatz"  # not before 1 h after the last change
-    d = cl.decide(inp(now=NOON + 122 * M, replace_switch=True, price=0.20), st)
+    d = cl.decide(inp(now=NOON + 150 * M, replace_switch=True, price=0.20), st)
+    assert d.mode != "ersatz"  # not before 2 h after the last change
+    d = cl.decide(inp(now=NOON + 242 * M, replace_switch=True, price=0.20), st)
     assert d.mode == "ersatz"
 
 
@@ -103,7 +103,7 @@ def test_replace_looks_at_the_next_two_hours():
     # 03.11.2026 15:20: 0.448 just under the limit, then 0.50-0.53 -> no start (limit here 0.4235)
     st = cl.State()
     d = cl.decide(inp(replace_switch=True, price=0.42, price_ahead=0.50), st)
-    assert d.mode != "ersatz" and d.radiators and "nächste Stunde" in d.reason
+    assert d.mode != "ersatz" and d.radiators and "nächsten 2 h" in d.reason
     d = cl.decide(inp(now=NOON + 5 * M, replace_switch=True, price=0.42, price_ahead=0.40), st)
     assert d.mode == "ersatz"
 
@@ -318,3 +318,13 @@ def test_solar_share_is_capped_at_the_normal_ac_power():
     assert cl.solar_share(inp(free_w=149.0)) == 0.0
     assert abs(cl.solar_share(inp(free_w=550.0)) - 0.5) < 1e-9
     assert cl.solar_share(inp(free_w=3000.0)) == 1.0
+
+
+def test_replace_early_end_needs_three_cents():
+    # limit 0.4235: +2.2 ct keeps the AC within the 2 h hold, +3.2 ct ends at once
+    st = cl.State()
+    cl.decide(inp(replace_switch=True, price=0.20), st)
+    d = cl.decide(inp(now=NOON + 10 * M, replace_switch=True, price=0.445, price_ahead=0.40), st)
+    assert d.mode == "ersatz" and "Mindestdauer 2 h" in d.reason
+    d = cl.decide(inp(now=NOON + 20 * M, replace_switch=True, price=0.455, price_ahead=0.40), st)
+    assert d.mode != "ersatz" and d.radiators
