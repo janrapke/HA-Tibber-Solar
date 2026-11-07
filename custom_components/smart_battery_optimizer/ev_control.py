@@ -48,6 +48,17 @@ E_CABIN = f"sensor.{CAR}_cabin_temperature"
 E_OUTSIDE = f"sensor.{CAR}_outside_temperature"
 E_WAKE = f"button.{CAR}_wake_up"
 E_REFRESH = f"button.{CAR}_force_refresh_vehicle_data"
+# BLE presence via the ESP32 proxy at the Wall Connector: the car advertises also while asleep, so this
+# stays "home" all night and turns "not_home" only when it is driven away (history 04.-07.11.2026)
+E_HOME = f"device_tracker.{CAR}_location"
+# the tracker says "not_home" only 4-5 min after the car is gone. Every departure 05.-07.11.2026 went:
+# driver in the car (user_present) -> unplugged -> BLE link off 20-40 s later -> tracker 4-5 min later.
+# So: link off within DEPART_WINDOW after someone got in or the car was unplugged = driving away now.
+# Replayed on 04.-07.11.2026: all 7 departures 4-5 min earlier, no false "away" at home (the link drops
+# for 10-60 s on ESP reconnects, but nobody gets in or unplugs then). Only "-> on" / "on -> off" count:
+# a reconnect also moves user_present from unavailable to off.
+E_PRESENT = f"binary_sensor.{CAR}_user_present"
+DEPART_WINDOW = timedelta(minutes=10)
 E_SOC_TIBBER = "sensor.reskey_ladezustand"           # Tibber (Tesla cloud), also while BLE is out of reach
 E_PLUG_TIBBER = "binary_sensor.reskey_stecker"
 E_WC_CAR = "binary_sensor.tesla_wall_connector_fahrzeug_verbunden"
@@ -65,6 +76,8 @@ E_SEAT = f"select.aussen_{CAR}_front_left_seat_climate"
 E_WHEEL = f"switch.aussen_{CAR}_steering_wheel_heater"
 OUTDOOR_FALLBACK = "sensor.openweathermap_temperature"
 PRE_HOLD = timedelta(minutes=10)     # safety: 10 min after the ready time the climate goes off if the car is still in reach
+PRE_NOW_HOLD = timedelta(minutes=15) # "Jetzt vorheizen": stays on this long after the estimated warm time
+PRE_NOW_REACH = timedelta(minutes=10)  # "Jetzt vorheizen": time to reach and wake the car before giving up
 PRE_GIVE_UP = timedelta(minutes=60)  # no BLE contact until then: assume driven away and forget it
 PRE_WAKE = timedelta(minutes=3)      # wake the car this long before the start so the values are fresh
 PRE_COLD_EXTRAS = 3.0                # below this outside temperature also seat and steering wheel heating
@@ -124,6 +137,11 @@ class EvChargeController:
         self._pre_from: float | None = None         # cabin (or outside) temperature at the start
         self._pre_learned = False
         self._pre_done_for: datetime | None = None  # ready time already started
+        self._pre_until: datetime | None = None     # running: warm at (scheduled: the ready time)
+        self._pre_manual = False                    # started with "Jetzt vorheizen"
+        self._pre_mins: float | None = None         # estimated warm-up of the current run, minutes
+        self._entered_at: datetime | None = None    # someone got into the car (user_present -> on)
+        self._unplugged_at: datetime | None = None  # unplugged at the Wall Connector (on -> off)
         self._pre_woken_for: datetime | None = None
 
     async def async_start(self) -> None:
@@ -132,7 +150,8 @@ class EvChargeController:
         if data.get("pre_per_k") == 0.5:  # first default (measured against outside), not learned
             self.s["pre_per_k"] = PREHEAT_MIN_PER_K
         self._unsub = async_track_state_change_event(
-            self.hass, [E_WC_CAR, E_WC_STATUS, E_PLUG_TIBBER, E_LINK, E_PLUG, E_CHARGING], self._on_car_event)
+            self.hass, [E_WC_CAR, E_WC_STATUS, E_PLUG_TIBBER, E_LINK, E_PLUG, E_CHARGING, E_PRESENT],
+            self._on_car_event)
         self._unsub_watch = async_track_time_interval(self.hass, self._watch, WATCH_EVERY)
 
     def async_stop(self) -> None:
@@ -152,9 +171,12 @@ class EvChargeController:
     def _on_car_event(self, event) -> None:
         """Plug-in seen: get the BLE link up and decide now, not at the next minute."""
         new, old = event.data.get("new_state"), event.data.get("old_state")
+        eid = event.data.get("entity_id")
+        self._note_departure_signs(eid, old.state if old else None, new.state if new else None)
+        if eid == E_PRESENT:
+            return
         if new is None or (old is not None and old.state == new.state) or not self._last_result:
             return
-        eid = event.data.get("entity_id")
         now = dt_util.utcnow()
         if eid in (E_WC_CAR, E_PLUG_TIBBER) and new.state == "on" and old is not None and old.state == "off"                 and not self.s["active"]:
             # switched off and forgotten: a new plug-in hands the car back to the control
@@ -370,6 +392,8 @@ class EvChargeController:
         if self._pre_started and self._pre_on_at is None and climate_on:
             # the car confirms the climate: only now seat and wheel, so they cannot hold up the main command
             self._pre_on_at = local
+            if self._pre_manual:
+                self._pre_until = local + timedelta(minutes=self._pre_mins)
             _LOGGER.info("Tesla preheat: climate on after %d tries", self._pre_tries)
             if self._pre_alerted:
                 await self._try("persistent_notification", "dismiss", None, notification_id=PRE_NOTIFY_ID)
@@ -379,7 +403,7 @@ class EvChargeController:
                 await self._try("switch", "turn_on", E_WHEEL)
         if self._pre_started and self._pre_on_at is None:
             # sent, but the car does not report it on (06.11.2026: the setpoint arrived, "on" got lost)
-            if local >= self._pre_done_for or not self.s["pre_on"]:
+            if local >= self._pre_until or not (self.s["pre_on"] or self._pre_manual):
                 _LOGGER.warning("Tesla preheat: climate did not come on after %d tries - giving up", self._pre_tries)
                 self._pre_started, self.pre_status = None, "fehlgeschlagen"
                 if link and not self._pre_alerted:  # no link: probably driven off already, no message while driving
@@ -405,10 +429,11 @@ class EvChargeController:
                              self._pre_from, target - 1, mins, self.s["pre_per_k"])
             if link and not climate_on:
                 self._pre_started = None           # switched off by hand: leave it alone
-            elif local >= self._pre_done_for + PRE_HOLD or not self.s["pre_on"]:
+            elif local >= self._pre_until + (PRE_NOW_HOLD if self._pre_manual else PRE_HOLD) \
+                    or not (self.s["pre_on"] or self._pre_manual):
                 if link:                           # still in BLE reach = not driven away: switch off
                     await self._pre_off(link)
-                elif local >= self._pre_done_for + PRE_GIVE_UP:
+                elif local >= self._pre_until + PRE_GIVE_UP:
                     self._pre_started, self.pre_status = None, "fertig"
                 else:
                     self.pre_status = "aus wartet auf Verbindung"
@@ -442,7 +467,8 @@ class EvChargeController:
             self._pre_woken_for = ready
             await self._try("button", "press", E_WAKE)
         if local >= start and link:
-            self._pre_done_for = ready
+            self._pre_done_for = self._pre_until = ready
+            self._pre_manual, self._pre_mins = False, mins
             if climate_on:                         # already on by hand: nothing to do
                 return
             self._pre_started, self._pre_outdoor, self._pre_from, self._pre_learned = local, outdoor, from_temp, False
@@ -451,6 +477,93 @@ class EvChargeController:
             await self._pre_on(target)   # confirmed (and repeated if needed) in the next cycles
         elif local >= start and self._pre_woken_for == ready:
             await self._try("button", "press", E_WAKE)  # no link yet: keep trying to reach the car
+
+    def pre_estimate(self) -> tuple[float, float | None, float | None]:
+        """Minutes to a warm cabin if started now, the start temperature and the outside temperature."""
+        outdoor = self._outdoor()
+        # the cabin value is only fresh while the car is awake; asleep it is about the outside temperature
+        cabin = self._float(E_CABIN) if self._state(E_ASLEEP) == "off" else None
+        from_temp = cabin if cabin is not None else outdoor
+        mins = preheat_minutes(from_temp, float(self.s["pre_target"]), self.s["pre_per_k"],
+                               outdoor is not None and outdoor < 0)
+        return mins, from_temp, outdoor
+
+    def at_home(self) -> bool:
+        """Car at home (in BLE reach of the house), also while it sleeps."""
+        state = self._state(E_HOME)
+        if state == "not_home":
+            return False
+        if state == "home":
+            return not self.departing()
+        # tracker unknown (e.g. right after a restart): BLE link or the Wall Connector sees the car
+        return self._state(E_LINK) == "on" or self._state(E_WC_CAR) == "on"
+
+    def _note_departure_signs(self, eid, old, new) -> None:
+        if eid == E_PRESENT and new == "on" and old != "on":
+            self._entered_at = dt_util.utcnow()
+        elif eid == E_WC_CAR and old == "on" and new == "off":
+            self._unplugged_at = dt_util.utcnow()
+
+    def departing(self) -> bool:
+        """BLE link lost shortly after someone got in or unplugged: driving away (before the tracker sees it)."""
+        if self._state(E_LINK) != "off":
+            return False
+        now = dt_util.utcnow()
+        return any(t is not None and now - t < DEPART_WINDOW for t in (self._entered_at, self._unplugged_at))
+
+    async def async_preheat_now(self, on: bool) -> bool:
+        """Dashboard button: start a preheat now (confirmed and repeated by the minute cycle) or stop it.
+
+        Only at home: away the car is out of BLE reach and must not be heated from here. False = refused."""
+        local = dt_util.as_local(dt_util.utcnow())
+        if on:
+            if self._pre_started:
+                return True
+            if not self.at_home():
+                _LOGGER.info("Tesla preheat now refused: car not at home")
+                return False
+            mins, from_temp, outdoor = self.pre_estimate()
+            self._pre_started, self._pre_outdoor, self._pre_from, self._pre_learned = local, outdoor, from_temp, False
+            self._pre_on_at, self._pre_tries, self._pre_alerted, self._pre_extras = None, 1, False, False
+            self._pre_manual, self._pre_mins = True, mins
+            self._pre_until = local + PRE_NOW_REACH   # until then the car must take it, then warm-up from there
+            self.pre_status = "startet"
+            _LOGGER.info("Tesla preheat now: about %.0f min from %s °C", mins, from_temp)
+            self._changed()
+            self.hass.async_create_task(self._pre_kick())
+        elif self._pre_started:
+            self.pre_status = "wird gestoppt"
+            self._changed()
+            self.hass.async_create_task(self._pre_stop())
+        return True
+
+    async def _pre_kick(self) -> None:
+        if self._state(E_LINK) != "on":
+            self.pre_status = "startet, wartet auf Verbindung"
+            await self._try("button", "press", E_WAKE)
+        else:
+            await self._pre_on(float(self.s["pre_target"]))
+        self._changed()
+
+    async def _pre_stop(self) -> None:
+        if self._state(E_LINK) != "on":
+            await self._try("button", "press", E_WAKE)
+        await self._pre_off(True)
+        self.pre_status = "gestoppt"
+        self._changed()
+
+    def pre_now_view(self) -> dict:
+        """For the dashboard button: running or not, how long it takes, warm at."""
+        mins, from_temp, _ = self.pre_estimate()
+        running = self._pre_started is not None
+        warm = None
+        if running:
+            mins = self._pre_mins or mins
+            warm = (self._pre_until if self._pre_on_at or not self._pre_manual
+                    else dt_util.as_local(dt_util.utcnow()) + timedelta(minutes=mins))
+        return {"laeuft": running, "zuhause": self.at_home(), "manuell": running and self._pre_manual, "bestaetigt": self._pre_on_at is not None,
+                "minuten": round(mins), "von": from_temp, "ziel": float(self.s["pre_target"]),
+                "innen": self._float(E_CABIN), "warm_um": warm.isoformat() if warm else None}
 
     async def _pre_on(self, target: float) -> None:
         await self._try("climate", "set_hvac_mode", E_CLIMATE, hvac_mode="heat_cool")
@@ -538,6 +651,7 @@ class EvChargeController:
             "ladestand_quelle": self.soc_source, "waechter": self.watch_status,
             "referenz_tage": 28, "referenz_preise": len(self.reference),
             "vorklima": {"status": self.pre_status, **self.pre_next},
+            "vorheizen_jetzt": self.pre_now_view(),
         }
 
 

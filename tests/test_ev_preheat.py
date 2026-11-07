@@ -142,3 +142,90 @@ def test_manual_off_after_confirmation_is_left_alone():
     _run(c, DAY.replace(minute=36), DAY.replace(minute=45))
     assert c._pre_started is None
     assert _count(hass, "climate", "set_hvac_mode", hvac_mode="heat_cool") == 1
+
+
+def _now(c, local):
+    """Press "Jetzt vorheizen" at local time and run the background command."""
+    evc.dt_util.utcnow = lambda: local.astimezone(timezone.utc)
+    tasks = []
+    c.hass.async_create_task = lambda coro: tasks.append(coro)
+    c._changed = lambda: None
+    asyncio.run(c.async_preheat_now(True))
+    for t in tasks:
+        asyncio.run(t)
+
+
+def test_preheat_now_starts_shows_duration_and_switches_off_after_hold():
+    hass = Hass()
+    c = _ctrl(hass)
+    t0 = datetime(2026, 11, 7, 14, 0, tzinfo=TZ)   # Saturday, no schedule
+    _now(c, t0)
+    assert _count(hass, "climate", "set_hvac_mode", hvac_mode="heat_cool") == 1
+    view = c.pre_now_view()
+    assert view["laeuft"] and view["manuell"] and view["minuten"] >= 3
+    st = _run(c, t0.replace(minute=1), t0.replace(minute=45))
+    assert st["14:05"] == "läuft"
+    warm = c._pre_until
+    assert warm == t0.replace(minute=1) + timedelta(minutes=c._pre_mins)   # from the confirmation on
+    assert c._pre_started is None and st["14:45"] == "geplant"   # back to the next scheduled day
+    assert _count(hass, "climate", "set_hvac_mode", hvac_mode="off") == 1
+
+
+def test_preheat_now_runs_even_with_the_schedule_switched_off():
+    hass = Hass()
+    c = _ctrl(hass)
+    c.s["pre_on"] = False
+    t0 = datetime(2026, 11, 7, 14, 0, tzinfo=TZ)
+    _now(c, t0)
+    st = _run(c, t0.replace(minute=1), t0.replace(minute=5))
+    assert st["14:05"] == "läuft"
+
+
+def test_preheat_now_refused_when_car_is_away():
+    hass = Hass()
+    hass.st[evc.E_HOME] = "not_home"
+    c = _ctrl(hass)
+    t0 = datetime(2026, 11, 7, 14, 0, tzinfo=TZ)
+    _now(c, t0)
+    assert c._pre_started is None and hass.calls == []
+    assert c.pre_now_view()["zuhause"] is False
+
+
+def test_asleep_at_home_counts_as_home():
+    hass = Hass()
+    hass.st.update({evc.E_HOME: "home", evc.E_LINK: "off", evc.E_ASLEEP: "on"})
+    c = _ctrl(hass)
+    assert c.at_home()
+    hass.st[evc.E_HOME] = "unavailable"       # tracker unknown after a restart: link / Wall Connector decide
+    assert not c.at_home()
+    hass.st[evc.E_WC_CAR] = "on"
+    assert c.at_home()
+
+
+def test_driving_away_is_seen_before_the_tracker():
+    """Fr 06.11.: unplugged 06:47:23, driver in 06:47:24, BLE link off 06:47:52, tracker "not_home" only 06:51:53."""
+    hass = Hass()
+    hass.st.update({evc.E_HOME: "home", evc.E_LINK: "on"})
+    c = _ctrl(hass)
+    at = lambda h, m, s=0: setattr(evc.dt_util, "utcnow",
+                                   lambda: datetime(2026, 11, 6, h, m, s, tzinfo=TZ).astimezone(timezone.utc))
+    at(6, 47, 23)
+    c._note_departure_signs(evc.E_WC_CAR, "on", "off")
+    assert c.at_home()                         # unplugged, but still connected: may stay
+    at(6, 48)
+    hass.st[evc.E_LINK] = "off"
+    assert not c.at_home()                     # unplugged and out of BLE reach: driving away
+    at(6, 58)
+    hass.st[evc.E_LINK] = "on"                 # (would be "not_home" by then; here: link back = home)
+    assert c.at_home()
+
+
+def test_reconnect_blips_at_home_are_not_a_departure():
+    """ESP reconnect: link off for 30 s and user_present unavailable -> off; nobody got in."""
+    hass = Hass()
+    hass.st.update({evc.E_HOME: "home", evc.E_LINK: "off"})
+    c = _ctrl(hass)
+    c._note_departure_signs(evc.E_PRESENT, "unavailable", "off")
+    assert c.at_home()
+    c._note_departure_signs(evc.E_PRESENT, "off", "on")   # someone got in, then the link is lost
+    assert not c.at_home()

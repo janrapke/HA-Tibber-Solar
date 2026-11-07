@@ -9,6 +9,7 @@ from homeassistant.components.select import SelectEntity
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.components.time import TimeEntity
+from homeassistant.exceptions import HomeAssistantError
 import homeassistant.util.dt as dt_util
 
 from .const import DOMAIN
@@ -27,7 +28,8 @@ def build(platform: str, coordinator, entry_id: str) -> list:
         return [EvSwitch(ev, entry_id, "active", "Ladesteuerung aktiv", "mdi:ev-station"),
                 EvSwitch(ev, entry_id, "now_on", "Sofortladen", "mdi:lightning-bolt"),
                 EvSwitch(ev, entry_id, "travel_on", "Reise aktiv", "mdi:map-marker-path"),
-                EvSwitch(ev, entry_id, "pre_on", "Vorklimatisierung", "mdi:car-defrost-front")] + [
+                EvSwitch(ev, entry_id, "pre_on", "Vorklimatisierung", "mdi:car-defrost-front"),
+                EvPreheatNowSwitch(ev, entry_id)] + [
                 EvSwitch(ev, entry_id, f"pre_{d}_on", f"Vorklima {n}", "mdi:calendar-check")
                 for d, n in zip(WEEKDAY_KEYS, DAY_NAMES)]
     if platform == "number":
@@ -115,6 +117,25 @@ class EvSwitch(_EvEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs) -> None:
         await self.ev.async_set(self.key, False)
+
+
+class EvPreheatNowSwitch(_EvEntity, SwitchEntity):
+    """Dashboard button "Jetzt vorheizen": on = a preheat is running (also a scheduled one), off stops it."""
+    _attr_icon = "mdi:car-defrost-front"
+
+    def __init__(self, ev, entry_id):
+        super().__init__(ev, entry_id, "pre_now", "Jetzt vorheizen")
+
+    @property
+    def is_on(self) -> bool:
+        return self.ev._pre_started is not None
+
+    async def async_turn_on(self, **kwargs) -> None:
+        if not await self.ev.async_preheat_now(True):
+            raise HomeAssistantError("Das Auto ist nicht zuhause – Vorheizen geht nur in Reichweite der Wallbox.")
+
+    async def async_turn_off(self, **kwargs) -> None:
+        await self.ev.async_preheat_now(False)
 
 
 class EvNumber(_EvEntity, NumberEntity):

@@ -1,0 +1,82 @@
+# Startseite (dashboard-home, Ansicht Home): Knopf "Jetzt vorheizen" direkt unter der Tesla-Kachel.
+# Liegt im vertical-stack der Tesla-Kachel an zweiter Stelle (vor den Menü-Chips).
+# Antippen startet bzw. stoppt (switch.tesla_laden_jetzt_vorheizen der Integration).
+# Nur zuhause (device_tracker.tesla_748947_location, BLE, auch wenn das Auto schläft); unterwegs grau,
+# ein Antippen meldet dann "nicht zuhause".
+# Daten: sensor.tesla_laden_ladeplan -> vorheizen_jetzt {laeuft, manuell, bestaetigt, minuten, von, ziel, innen, warm_um}
+type: custom:button-card
+entity: switch.tesla_laden_jetzt_vorheizen
+triggers_update: [sensor.tesla_laden_ladeplan, device_tracker.tesla_748947_location]
+show_icon: false
+show_name: false
+show_state: false
+tap_action:
+  action: toggle
+  haptic: medium
+styles:
+  card:
+    - padding: 12px 14px
+    - border-radius: 16px
+  grid:
+    - grid-template-areas: '"main"'
+    - grid-template-columns: 1fr
+  custom_fields:
+    main:
+      - justify-self: stretch
+      - text-align: left
+      - white-space: normal
+      - overflow: visible
+custom_fields:
+  main: |
+    [[[
+    const v = (states['sensor.tesla_laden_ladeplan'] || {attributes: {}}).attributes.vorheizen_jetzt || {};
+    const pre = (states['sensor.tesla_laden_ladeplan'] || {attributes: {}}).attributes.vorklima || {};
+    const run = entity && entity.state === 'on';
+    const o = '244,81,30';   // deep-orange, like the "läuft" chip of the preheating menu
+    const fmt = (x) => x == null ? '?' : (Math.round(x * 10) / 10).toString().replace('.', ',');
+    const hm = (d) => `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+    const pill = (t, ic, solid) => `<div style="display:flex;align-items:center;gap:4px;padding:7px 14px;border-radius:18px;
+       font-weight:600;font-size:14px;${solid ? `background:rgb(${o});color:#fff` : `border:1px solid rgba(${o},.6);color:rgb(${o})`}">
+       <ha-icon icon="${ic}" style="--mdc-icon-size:18px"></ha-icon>${t}</div>`;
+    let big, sub, right, box = '', anim = '', ic = `rgb(${o})`, icbg = `rgba(${o},.15)`;
+    if (!run && v.zuhause === false) {
+      // away (BLE tracker "not_home"): nothing to start, the integration refuses it anyway
+      big = 'Auto nicht zuhause';
+      sub = 'Vorheizen geht nur in Reichweite der Wallbox';
+      right = '<ha-icon icon="mdi:map-marker-off-outline" style="--mdc-icon-size:22px;color:var(--disabled-text-color,#9e9e9e)"></ha-icon>';
+      ic = 'var(--disabled-text-color,#9e9e9e)';
+      icbg = 'var(--secondary-background-color,rgba(0,0,0,.06))';
+      box = 'opacity:.75';
+    } else if (!run) {
+      big = 'Jetzt vorheizen';
+      sub = `warm in ca. <b>${v.minuten ?? '?'} min</b> · ${fmt(v.von)} → ${fmt(v.ziel)} °C`;
+      right = pill('Start', 'mdi:play', true);
+      box = 'background:transparent';
+    } else {
+      const warm = v.warm_um ? new Date(v.warm_um) : null;
+      const left = warm ? Math.max(0, Math.round((warm - Date.now()) / 60000)) : null;
+      if (!v.bestaetigt) {
+        big = 'Startet …';
+        sub = String(pre.status || '').includes('Verbindung') ? 'Auto wird geweckt' : `Befehl gesendet · ca. ${v.minuten} min`;
+      } else if (left > 0) {
+        big = `noch ${left} min`;
+        sub = `warm um <b>${hm(warm)}</b> · innen ${fmt(v.innen)} → ${fmt(v.ziel)} °C`;
+      } else {
+        big = 'Warm';
+        sub = `innen ${fmt(v.innen)} °C · bleibt noch etwas an`;
+      }
+      right = pill('Stopp', 'mdi:stop', false);
+      box = `background:rgba(${o},.14);border:1px solid rgba(${o},.45);border-radius:12px;padding:8px 10px;margin:-4px -6px`;
+      anim = 'animation:prepulse 1.6s ease-in-out infinite';
+    }
+    return `<style>@keyframes prepulse{0%,100%{opacity:1}50%{opacity:.35}}</style>
+    <div style="display:flex;align-items:center;gap:12px;${box}">
+      <div style="width:42px;height:42px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+        background:${icbg};flex:none">
+        <ha-icon icon="mdi:car-defrost-front" style="--mdc-icon-size:26px;color:${ic};${anim}"></ha-icon></div>
+      <div style="flex:1;min-width:0">
+        <div style="font-size:${run ? 22 : 17}px;font-weight:700;line-height:1.15;${run ? `color:rgb(${o})` : ''}">${big}</div>
+        <div style="font-size:12px;color:var(--secondary-text-color)">${sub}</div>
+      </div>${right}
+    </div>`;
+    ]]]
