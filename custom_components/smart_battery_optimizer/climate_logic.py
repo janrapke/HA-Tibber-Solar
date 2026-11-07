@@ -19,8 +19,10 @@ from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timedelta
 
 try:
+    from .climate_power import wanted_distance, wanted_power
     from .thermal_model import break_even_price, oil_cost_per_kwh_heat
 except ImportError:  # loaded standalone by the tests
+    from climate_power import wanted_distance, wanted_power
     from thermal_model import break_even_price, oil_cost_per_kwh_heat
 
 MODE_AUTO = "auto"
@@ -31,9 +33,8 @@ MODES = [MODE_AUTO, MODE_MANUAL_ON, MODE_MANUAL_OFF, MODE_WARMUP]
 WARMUP_K = 0.5
 WARMUP_MAX = timedelta(hours=2)
 
-FAN_NORMAL = "silent"
+FAN_NORMAL = "auto"  # 07.11.2026: the unit slows the fan itself near the target; silent caps the compressor
 FAN_BOOST = "medium"
-FAN_FOLLOW_ME = "auto"  # Follow Me: the unit itself slows the fan near the target (silent also caps the compressor)
 
 SAFETY_MIN_ROOM = 17.0
 COOL_OUTDOOR = 18.0  # above: cool instead of heat (manual / surplus)
@@ -47,6 +48,7 @@ LOCK_AFTER_OFF = timedelta(hours=1)
 REPLACE_MIN = timedelta(hours=2)
 REPLACE_END_K = 0.03  # EUR/kWh above the limit (2 ct until 06.11.2026): end replacing at once, the 2 h hold is for small swings only
 CMD_INTERVAL = timedelta(minutes=5)
+REG_INTERVAL = timedelta(minutes=2)  # power regulation via the own sensor: the unit reacts within 1-2 min
 FAN_INTERVAL = timedelta(minutes=15)
 SURPLUS_CURTAIL_WH = 300.0
 SURPLUS_SOC_HYST = 5.0
@@ -61,6 +63,8 @@ I_MAX = 2.0
 CORR_MAX = 3.0  # P + I together
 PAUSE_ABOVE_K = 0.5  # replace mode: throttle above target + this (smallest stage overheats in mild weather)
 SP_MIN, SP_MAX = 16.0, 30.0
+STOP_ABOVE_K = 0.3  # power regulation: room this much above the target -> unit pauses by itself
+RESUME_BELOW_K = 0.1  # ... until it is this much below again
 
 
 @dataclass
@@ -101,7 +105,15 @@ class Inputs:
     curtailed_wh_2h: float = 0.0
     grid_charging: bool = False
     free_w: float = 0.0  # power that would go to the grid unpaid (balcony), smoothed
-    follow_me: bool = False  # the remote sends the room temperature (Follow Me): setpoint = real target
+    # the unit's own values (power regulation, climate_power.py); device None -> old offset regulation
+    device: float | None = None  # own sensor T1 (reads ~4 K above the room)
+    power_w: float = 0.0
+    freq_hz: float = 0.0
+    run_min: float = 0.0  # minutes since the compressor started
+    coil_in: float | None = None
+    d_hold: float = 1.6  # learned per outdoor temperature
+    p_hold: float = 800.0
+    d_restart: float = 1.3
     efficiency: float = 3.5  # thermal model at current outdoor temperature
     offset_heat: float = 5.0
     offset_cool: float = 0.0
@@ -126,6 +138,7 @@ class State:
     setpoint_sent: datetime | None = None
     fan: str | None = None
     fan_changed: datetime | None = None
+    reg_stopped: bool = False  # power regulation: room above the target, unit pauses by itself
 
     def to_dict(self) -> dict:
         return {k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in asdict(self).items()}
@@ -161,6 +174,9 @@ class Decision:
     break_even: float | None = None
     cost_ac: float | None = None  # EUR per kWh heat
     cost_oil: float | None = None
+    p_want: float | None = None  # power regulation: wanted W, wanted distance own sensor - setpoint
+    d_want: float | None = None
+    reg_step: str | None = None
 
 
 def is_night(now: datetime) -> bool:
@@ -449,28 +465,42 @@ def _apply(i: Inputs, st: State, d: Decision, dt_h: float, force: bool = False,
             st.integral = max(-I_MAX, min(I_MAX, st.integral + KI * (d.target_room - i.room) * dt_h))
         p_part = KP * (d.target_room - i.room) if i.room is not None else 0.0
         corr = max(-CORR_MAX, min(CORR_MAX, p_part + st.integral))
-        if i.follow_me and d.hvac == "heat":
-            # 06.11.2026: with the remote's temperature the unit regulates by itself (down to ~27 Hz / 600 W);
-            # the old offset (+9 K) only drove it to full power. Fewer commands: each one ends Follow Me
-            # until the remote sends again (max. 3 min).
+        interval = CMD_INTERVAL
+        regulate = d.hvac == "heat" and i.device is not None and i.room is not None and d.mode != "aufwaermen"
+        if regulate:
+            # 07.11.2026: the unit integrates by itself; we choose the distance own sensor - setpoint
             st.integral = 0.0
-            sp = max(SP_MIN, min(SP_MAX, _round_half(d.target_room - (1.0 if throttle else 0.0))))
+            interval = REG_INTERVAL
+            if i.room >= d.target_room + STOP_ABOVE_K:
+                st.reg_stopped = True
+            elif i.room <= d.target_room - RESUME_BELOW_K:
+                st.reg_stopped = False
+            cold = i.room < d.target_room - BOOST_BELOW_TARGET_K
+            p_want = wanted_power(i.room, d.target_room, i.p_hold, st.reg_stopped or throttle, cold,
+                                  i.free_w if st.solar_active else 0.0)
+            dist, step = wanted_distance(p_want, i.power_w, i.freq_hz, i.run_min, i.d_hold, i.d_restart)
+            d.p_want, d.d_want, d.reg_step = round(p_want), (None if dist is None else round(dist, 2)), step
+            if dist is None and st.setpoint is not None:
+                sp = st.setpoint
+            else:
+                sp = max(SP_MIN, min(SP_MAX, _round_half(i.device - (dist if dist is not None else i.d_hold))))
         else:
+            st.reg_stopped = False
             sp = max(SP_MIN, min(SP_MAX, _round_half(d.target_room if throttle else d.target_room + offset + corr)))
         if d.mode == "aufwaermen":
             sp = SP_MAX
         d.setpoint = sp
-        due = st.setpoint_sent is None or now - st.setpoint_sent >= CMD_INTERVAL
+        due = st.setpoint_sent is None or now - st.setpoint_sent >= interval
         if d.send_hvac or (sp != st.setpoint and due):
             d.send_setpoint = True
             st.setpoint = sp
             st.setpoint_sent = now
         else:
             d.setpoint = st.setpoint if st.setpoint is not None else sp
-        fan = FAN_FOLLOW_ME if (i.follow_me and d.hvac == "heat") else FAN_NORMAL
+        fan = FAN_NORMAL
         cheap = i.price is not None and i.price < i.settings.boost_price
         cold = d.hvac == "heat" and i.room is not None and i.room < d.target_room - BOOST_BELOW_TARGET_K
-        if (st.surplus_active or cheap or cold or d.mode == "aufwaermen") and fan != FAN_FOLLOW_ME:
+        if st.surplus_active or cheap or cold or d.mode == "aufwaermen":
             fan = FAN_BOOST
         fan_due = st.fan_changed is None or now - st.fan_changed >= FAN_INTERVAL
         if d.send_hvac or (fan != st.fan and fan_due):
@@ -486,6 +516,7 @@ def _apply(i: Inputs, st: State, d: Decision, dt_h: float, force: bool = False,
         st.integral = 0.0
         st.setpoint = None
         st.fan = None
+        st.reg_stopped = False
     st.climate_on = bool(d.climate_on)
     st.hvac = d.hvac if d.climate_on else "off"
     st.reason_mode = d.mode

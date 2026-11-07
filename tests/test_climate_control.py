@@ -59,6 +59,7 @@ def _load(name):
 _stub_ha()
 _load("const")
 _load("thermal_model")
+_load("climate_power")
 _load("climate_logic")
 cc = _load("climate_control")
 

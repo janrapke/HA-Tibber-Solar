@@ -16,6 +16,7 @@ def _load(name):
 
 
 _load("thermal_model")
+_load("climate_power")
 cl = _load("climate_logic")
 
 NOON = datetime(2026, 11, 3, 12, 0)
@@ -330,19 +331,56 @@ def test_replace_early_end_needs_three_cents():
     assert d.mode != "ersatz" and d.radiators
 
 
-def test_follow_me_sets_the_real_target_and_auto_fan():
+def _reg(**kw):
+    base = dict(replace_switch=True, price=0.20, in_living=True, offset_heat=9.0,
+                device=25.0, power_w=950.0, freq_hz=45.0, run_min=10.0, p_hold=800.0, d_hold=1.6, d_restart=1.3)
+    base.update(kw)
+    return inp(**base)
+
+
+def test_power_regulation_holds_with_the_learned_distance():
     st = cl.State()
-    i = dict(replace_switch=True, price=0.20, in_living=True, offset_heat=9.0, follow_me=True)
-    d = cl.decide(inp(room=18.0, **i), st)  # cold: no offset, no boost fan
-    assert d.mode == "ersatz" and d.setpoint == 21.0 and d.fan == cl.FAN_FOLLOW_ME
+    d = cl.decide(_reg(room=20.8), st)  # wants 800 + 0.2 K * 800 = 960 W, runs 950 W -> hold
+    assert d.mode == "ersatz" and d.reg_step == "halten" and d.p_want == 960
+    assert d.setpoint == 23.5 and d.fan == cl.FAN_NORMAL  # 25.0 - 1.6 = 23.4 -> 23.5
+
+
+def test_power_regulation_more_power_means_less_distance():
+    d = cl.decide(_reg(room=20.5, power_w=600.0), cl.State())  # wants 1200 W, has 600 -> distance 1.6 - 1.2
+    assert d.reg_step == "mehr Leistung" and d.d_want == 0.4 and d.setpoint == 24.5
+    d = cl.decide(_reg(room=21.1, power_w=1400.0), cl.State())  # wants 720 W, has 1400 -> distance up
+    assert d.reg_step == "weniger Leistung" and d.d_want == 2.96
+
+
+def test_power_regulation_pauses_above_target_with_hysteresis():
+    st = cl.State()
     t = NOON
-    for _ in range(8):  # the integral must not creep in either
-        t += 15 * M
-        d = cl.decide(inp(now=t, room=20.0, **i), st)
-    assert d.setpoint == 21.0 and not d.send_setpoint
-    # above target + 0.5: one degree lower, the unit throttles by itself
-    d = cl.decide(inp(now=t + 15 * M, room=21.6, **i), st)
-    assert d.mode == "ersatz_pause" and d.setpoint == 20.0
-    # without Follow Me the old offset regulation stays
+    d = cl.decide(_reg(now=t, room=21.35), st)
+    assert d.reg_step == "Pause" and d.setpoint == 20.5 and st.reg_stopped  # 25 - 4.5, the unit stops itself
+    d = cl.decide(_reg(now=t + 3 * M, room=20.95, freq_hz=0.0, power_w=3.0), st)
+    assert d.reg_step == "Pause"  # still paused until 0.1 K below the target
+    d = cl.decide(_reg(now=t + 6 * M, room=20.85, freq_hz=0.0, power_w=3.0), st)
+    assert d.reg_step == "Anlauf" and d.setpoint == 24.0  # 25 - (1.3 - 0.3)
+    assert d.climate_on and d.hvac == "heat" and not d.send_hvac  # no off/on commands, no 1 h lock
+
+
+def test_power_regulation_leaves_the_start_program_alone_and_limits_commands():
+    st = cl.State()
+    d = cl.decide(_reg(room=20.8), st)
+    sp = d.setpoint
+    d = cl.decide(_reg(now=NOON + M, room=20.8, run_min=1.0, device=27.0), st)
+    assert d.reg_step == "Startprogramm" and d.setpoint == sp and not d.send_setpoint
+    d = cl.decide(_reg(now=NOON + 2 * M, room=20.8, device=27.0), st)
+    assert d.setpoint == 25.5 and d.send_setpoint  # 2 min passed
+
+
+def test_cold_room_asks_for_full_power_and_warmup_keeps_maximum():
+    d = cl.decide(_reg(room=19.0, power_w=600.0), cl.State())
+    assert d.p_want == 1600 and d.fan == cl.FAN_BOOST
+    d = cl.decide(_reg(mode=cl.MODE_WARMUP, room=19.0), cl.State())
+    assert d.setpoint == cl.SP_MAX
+
+
+def test_without_own_sensor_the_old_offset_regulation_stays():
     d = cl.decide(inp(room=20.0, replace_switch=True, price=0.20, in_living=True, offset_heat=9.0), cl.State())
-    assert d.setpoint == 30.0 and d.fan == cl.FAN_NORMAL
+    assert d.setpoint == 30.0 and d.p_want is None

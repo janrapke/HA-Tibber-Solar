@@ -41,8 +41,7 @@ def build(platform: str, coordinator, entry_id: str) -> list:
     if platform == "switch":
         return [AcControlActiveSwitch(ctl, entry_id), AcFlagSwitch(ctl, entry_id, "replace_switch", "Heizung ersetzen",
                                                                    "mdi:radiator-off"),
-                AcFlagSwitch(ctl, entry_id, "surplus_switch", "Überschuss nutzen", "mdi:solar-power"),
-                AcFlagSwitch(ctl, entry_id, "follow_me_switch", "Follow Me (Fernbedienung misst)", "mdi:remote")]
+                AcFlagSwitch(ctl, entry_id, "surplus_switch", "Überschuss nutzen", "mdi:solar-power")]
     if platform == "number":
         return [AcSettingNumber(ctl, entry_id, *n) for n in NUMBERS]
     if platform == "sensor":
@@ -205,7 +204,7 @@ class AcLearnedSensor(_AcEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
-        return self.ctl.model.summary()
+        return {**self.ctl.model.summary(), "leistungsregler": self.ctl.power.summary()}
 
 
 class AcCounterSensor(_AcEntity, SensorEntity):

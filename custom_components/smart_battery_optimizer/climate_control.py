@@ -24,6 +24,7 @@ from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.storage import Store
 
 try:
+    from .climate_power import PowerLearner
     from .climate_logic import CMD_INTERVAL, FAN_INTERVAL, MODE_AUTO, MODE_MANUAL_OFF, MODE_MANUAL_ON, MODE_WARMUP, MODES, Decision, Inputs, Settings, State, WARMUP_MAX, decide
     from .const import (
         AC_DEFAULTS, AC_RADIATOR_VALVES, AC_RETRIGGER_AUTOMATIONS, CONF_AC_DEVICE_ID, CONF_AC_ENTITY, CONF_AC_HEATING_AUTOMATIONS,
@@ -32,6 +33,7 @@ try:
     )
     from .thermal_model import NIGHT_END_H, OIL_KWH_PER_L, Sample, ThermalModel, compare_openings, day_heat_demand, night_cooling
 except ImportError:  # loaded standalone by the tests
+    from climate_power import PowerLearner
     from climate_logic import CMD_INTERVAL, FAN_INTERVAL, MODE_AUTO, MODE_MANUAL_OFF, MODE_MANUAL_ON, MODE_WARMUP, MODES, Decision, Inputs, Settings, State, WARMUP_MAX, decide
     from const import (
         AC_DEFAULTS, AC_RADIATOR_VALVES, AC_RETRIGGER_AUTOMATIONS, CONF_AC_DEVICE_ID, CONF_AC_ENTITY, CONF_AC_HEATING_AUTOMATIONS,
@@ -166,6 +168,7 @@ class ClimateController:
         self.entry_id = entry_id
         self.cfg = {k: (config.get(k) or v) for k, v in AC_DEFAULTS.items()}
         self.model = ThermalModel()
+        self.power = PowerLearner()  # unit behaviour per outdoor temperature (power regulation)
         self.state = State()
         self.settings = Settings()
         self.mode = MODE_AUTO
@@ -173,7 +176,6 @@ class ClimateController:
         self.control_active = False  # off = observe only
         self.replace_switch = True  # heat with the AC whenever it is cheaper than oil
         self.surplus_switch = False
-        self.follow_me_switch = False  # the Midea remote lies in the room with Follow Me on
         self.manual_external = False  # manuell_an came from the remote: leave the AC alone
         self.radiators_taken = False  # we switched the radiators off and owe them back
         self.saved_bt_targets: dict = {}  # BT target temperatures before the handover
@@ -236,7 +238,7 @@ class ClimateController:
             "control_active": self.control_active,
             "replace_switch": self.replace_switch,
             "surplus_switch": self.surplus_switch,
-            "follow_me_switch": self.follow_me_switch,
+            "power": self.power.to_dict(),
             "manual_external": self.manual_external,
             "radiators_taken": self.radiators_taken,
             "saved_bt_targets": self.saved_bt_targets,
@@ -254,7 +256,7 @@ class ClimateController:
         self.control_active = bool(d.get("control_active", False))
         self.replace_switch = bool(d.get("replace_switch", True))
         self.surplus_switch = bool(d.get("surplus_switch", False))
-        self.follow_me_switch = bool(d.get("follow_me_switch", False))
+        self.power.load_dict(d.get("power"))
         self.manual_external = bool(d.get("manual_external", False))
         self.radiators_taken = bool(d.get("radiators_taken", False))
         self.saved_bt_targets = dict(d.get("saved_bt_targets") or {})
@@ -292,7 +294,7 @@ class ClimateController:
         self._changed()
 
     def set_switch(self, name: str, on: bool) -> None:
-        if name in ("replace_switch", "surplus_switch", "follow_me_switch"):
+        if name in ("replace_switch", "surplus_switch"):
             setattr(self, name, bool(on))
             self._save()
             self._changed()
@@ -305,6 +307,7 @@ class ClimateController:
 
     def reset_learning(self) -> None:
         self.model.reset()
+        self.power.reset()
         self._save()
         self._changed()
 
@@ -443,6 +446,7 @@ class ClimateController:
         power = _num(attrs.get("compressor_power"))
         freq = _num(attrs.get("compressor_frequency"))
         device = plausible_temp(attrs.get("indoor_temperature"))
+        coil_in = _num(attrs.get("indoor_coil_temperature"), None)
 
         primary = plausible_temp(self._float(self.cfg[CONF_AC_ROOM_SENSOR], now, ROOM_MAX_AGE))
         fallback = plausible_temp(self._float(self.cfg[CONF_AC_ROOM_FALLBACK], now, ROOM_MAX_AGE))
@@ -509,7 +513,9 @@ class ClimateController:
         inputs = Inputs(
             now=now, mode=self.mode, app_enabled=ext.get("app_enabled", True),
             replace_switch=self.replace_switch, surplus_switch=self.surplus_switch,
-            follow_me=self.follow_me_switch,
+            device=device, power_w=power, freq_hz=freq, run_min=run_min, coil_in=coil_in,
+            d_hold=self.power.d_hold(outdoor), p_hold=self.power.p_hold(outdoor),
+            d_restart=self.power.d_restart(outdoor),
             room=room, outdoor=outdoor, price=price, price_ahead=ext.get("price_ahead"),
             home=self._on(self.cfg[CONF_AC_PRESENCE_HOME], True),
             in_living=self._on(self.cfg[CONF_AC_PRESENCE_LIVING], False),
@@ -520,6 +526,9 @@ class ClimateController:
             settings=s,
         )
         d = decide(inputs, self.state)
+        if ac_ok:
+            self.power.observe(now, outdoor, device, _num(attrs.get("temperature"), None), freq, power, run_min,
+                               coil_in, ac_hvac == "heat", room, d.target_room)
         if self.mode == MODE_WARMUP:
             self._warmup_since = self._warmup_since or now
             warm = room is not None and d.mode == "aufwaermen" and room >= d.target_room
@@ -553,7 +562,19 @@ class ClimateController:
             "zieltemperatur_raum": d.target_room,
             "grenzpreis": d.break_even,
             "balkon_frei_w": inputs.free_w,
-            "follow_me": self.follow_me_switch,
+            "regler_leistung_soll_w": d.p_want,
+            "regler_abstand_soll_k": d.d_want,
+            "regler_abstand_ist_k": (round(device - _num(attrs.get("temperature")), 2)
+                                     if device is not None and _num(attrs.get("temperature"), None) is not None else None),
+            "regler_schritt": d.reg_step,
+            "regler_halte_abstand_k": round(inputs.d_hold, 2),
+            "regler_halteleistung_w": round(inputs.p_hold),
+            "regler_neustart_abstand_k": round(inputs.d_restart, 2),
+            "regler_pause": self.state.reg_stopped,
+            "waermetauscher_innen": coil_in,
+            "waermetauscher_aussen": _num(attrs.get("outdoor_coil_temperature"), None),
+            "aussen_geraet": _num(attrs.get("outdoor_ambient_temperature"), None),
+            "kompressor_laufzeit_min": round(run_min, 1),
             "kosten_klima_kwh_waerme": d.cost_ac,
             "kosten_oel_kwh_waerme": d.cost_oil,
             "effizienz": round(efficiency, 2),
