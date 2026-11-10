@@ -21,8 +21,13 @@
 # Heizungsrohre im Estrich wärmen das Bad ohnehin; eine 21-°C-Stufe kam erst nachts an (01.11.2026).
 #
 # Vorheizen: Start = 06:00 minus (21 °C - Badtemperatur) / gelernte Aufheizrate + 10 min Puffer,
-# frühestens 03:00. Jeder Morgen misst die echte Rate (Start bis 20,8 °C) und mischt sie
+# frühestens 04:00. Jeder Morgen misst die echte Rate (Start bis 20,8 °C) und mischt sie
 # zu 30 % in input_number.bad_aufheizrate.
+# Frühestens 04:00, weil der Direktkreis am Kessel Mo–Fr erst ab 04:00 heizt (vorher ECO, Heizkörper
+# kalt). Bis 10.11.2026 war es 03:00: das Bad kühlte 03:00–04:20 noch um ~0,2 K ab, dadurch wurde die
+# Rate zu niedrig gelernt (0,36 K/h statt echt ~0,6 K/h ab 04:20, gemessen 05., 06. und 10.11.).
+# 21 °C um 06:00 sind so nicht erreichbar (Bad 19,7–20,0 °C um 06:00, 20,2–20,4 °C um 07:00).
+# Das ginge nur mit einem früheren Fenster am Kessel (DK Mo–Fr ab ~02:30) – Entscheidung des Besitzers.
 # Duschen = Luftfeuchte steigt in 15 min um mindestens 8 Prozentpunkte
 # (gemessen: 61,9 -> 72,7 % am 28.10. 07:27, 60,1 -> 79,7 % am 29.10. 21:07).
 
@@ -156,7 +161,7 @@ automation:
         minutes: "/1"
     conditions:
       - condition: time
-        after: "03:00:00"
+        after: "04:00:00"  # boiler direct circuit heats from 04:00 on weekdays
         before: "06:00:00"
         weekday: [mon, tue, wed, thu, fri]
       - condition: state

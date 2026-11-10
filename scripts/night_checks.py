@@ -28,15 +28,18 @@ except Exception:  # noqa: BLE001  (Windows without tzdata)
 GRID = timedelta(minutes=5)
 NIGHT = ("23:40", "07:00")  # living area night phase (ha_packages/heizung_wohnbereich.yaml)
 TV = "media_player.lg_webos_tv_up75009lf"
-# kitchen radiator permanently off since 03.11.2026 (BT Küche disabled, head climate.kuche at 1 °C)
-LIVING_BTS = {"Wohnzimmer": "climate.bt_wohnzimmer_bt_wohnzimmer", "Esszimmer": "climate.bt_esszimmer_bt_esszimmer"}
-KITCHEN_VALVE = "climate.kuche"
+# kitchen radiator was off 03.-06.11.2026; since 06.11.2026 it heats with the living area again
+# (BT Küche, automation "Heizung Küche" with the same night rules as living and dining room)
+LIVING_BTS = {"Wohnzimmer": "climate.bt_wohnzimmer_bt_wohnzimmer", "Esszimmer": "climate.bt_esszimmer_bt_esszimmer",
+              "Küche": "climate.bt_kuche_bt_kuche"}
+KITCHEN_OFF_FLAG = "automation.heizung_kuche_dauerhaft_aus_halten"  # should stay off while the kitchen heats
 # room: (Better Thermostats, valve heads, room sensor, threshold slug) - same as the home tiles
 ROOMS = {
     "Bad": (["climate.bt_bad"], ["climate.fritz_smart_thermo_302_1"], "sensor.h5179_f06f_temperature", "badezimmer"),
     "Flur": (["climate.bt_flur_bt_flur"], ["climate.heizung_flur"], "sensor.temperatursensor_flur_temperatur", "flur"),
     "Wohnzimmer": (["climate.bt_wohnzimmer_bt_wohnzimmer", "climate.bt_esszimmer_bt_esszimmer"],
                    ["climate.wohnzimmer", "climate.esszimmer"], "sensor.wohnzimmer_temperatur", "wohnzimmer"),
+    "Küche": (["climate.bt_kuche_bt_kuche"], ["climate.kuche"], "sensor.temperatursensor_kuche_temperatur", "kuche"),
     "Schlafzimmer": (["climate.bt_schlafzimmer_bt_schlafzimmer"], ["climate.produktion_2"],
                      "sensor.temperature_schalfzimmer_temperatur", "schlafzimmer"),
     "Gästezimmer": (["climate.bt_gastezimmer_bt_gastezimmer"], ["climate.produktion_4"],
@@ -134,10 +137,10 @@ def check_living(start, end):
         if bad:
             issues.append({"raum": name, "punkte_5min": len(bad), "erste": bad[:3]})
     tv_night = sum(1 for t in grid(start, end) if in_night(t) and (r := at(h[TV], t)) and r[1] == "on") * 5
-    kv = history([KITCHEN_VALVE], start, end)[KITCHEN_VALVE]
-    kitchen = sorted({num(r[2].get("temperature")) for r in kv if num(r[2].get("temperature")) is not None})
+    flag = history([KITCHEN_OFF_FLAG], start, end)[KITCHEN_OFF_FLAG]
+    kitchen_off_min = sum(1 for t in grid(start, end) if (r := at(flag, t)) and r[1] == "on") * 5
     return {"verstoesse_nacht": issues, "fernseher_nachts_min": tv_night, "max_soll_06_07": max_early,
-            "kueche_ventil_sollwerte": kitchen}  # must stay [1.0]: kitchen radiator is off for good
+            "kueche_dauerhaft_aus_min": kitchen_off_min}  # should be 0: kitchen heats with the living area
 
 
 def check_bath(start, end):
