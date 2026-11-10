@@ -83,6 +83,37 @@ def test_load_model_trims_outliers():
     assert abs(lm.profile_value(40) - 400.0) < 1
 
 
+def _full_day(lm, day, w):
+    for q in range(96):
+        lm.record(day, q, w)
+
+
+def test_load_model_follows_a_level_drop_within_two_days():
+    # 04.11.2026: house load fell from ~16.5 to ~10 kWh/day, the 14-day mean lagged a week
+    lm = load_model.LoadModel()
+    d0 = datetime(2026, 10, 28).date()
+    for i in range(7):
+        _full_day(lm, d0 + timedelta(days=i), 690.0)   # ~16.6 kWh
+    assert lm.level_factor() == 1.0
+    for i in range(7, 9):
+        _full_day(lm, d0 + timedelta(days=i), 420.0)   # ~10 kWh
+    day_kwh = sum(lm.predict(datetime(2026, 11, 6, q // 4, q % 4 * 15)) for q in range(96)) / 4000
+    assert 9.5 < day_kwh < 12.0  # 14-day mean alone said 16.6
+
+
+def test_load_model_level_needs_enough_days_and_is_clamped():
+    lm = load_model.LoadModel()
+    d0 = datetime(2026, 10, 1).date()
+    for i in range(3):
+        _full_day(lm, d0 + timedelta(days=i), 500.0)
+    _full_day(lm, d0 + timedelta(days=3), 5000.0)
+    assert lm.level_factor() <= 1.0 + 0.75 * 0.4 + 1e-9  # one huge day moves it at most +30 %
+    lm2 = load_model.LoadModel()
+    for i in range(3):
+        _full_day(lm2, d0 + timedelta(days=i), 100.0 if i == 2 else 500.0)
+    assert lm2.level_factor() == 1.0  # only 3 complete days
+
+
 def test_no_unprofitable_grid_charge_from_rounding():
     # real case 2026-10-26: charging at 0.30-0.39 for an evening at <= 0.47 with
     # 80 % charger x 90 % discharge efficiency never pays off (0.37 / 0.72 = 0.51)

@@ -1528,6 +1528,7 @@ class SmartBatteryOptimizerCoordinator(DataUpdateCoordinator):
             "plan_savings_eur": round(self.plan.baseline_cost_eur - self.plan.cost_eur, 2),
             "model": self.solar_model.quality(),
             "load_days": self.load_model.days_known(),
+            "load_level_factor": round(self.load_model.level_factor(), 3),
             "bootstrapped": self._bootstrapped,
             "plan_summary": getattr(self, "plan_summary", {}),
         }
