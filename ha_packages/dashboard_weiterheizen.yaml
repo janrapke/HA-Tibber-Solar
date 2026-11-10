@@ -1,4 +1,4 @@
-# Startseite (dashboard-home, Ansicht Home): kleiner Knopf "Weiterheizen" direkt unter der Personen-Karte.
+# Startseite (dashboard-home, Ansicht Home): kleiner Knopf "Temperatur halten" direkt unter der Personen-Karte.
 # Liegt mit der Personen-Karte in einem vertical-stack (an zweiter Stelle).
 # Antippen schaltet input_boolean.heizung_weiterheizen (ha_packages/heizung_wohnbereich.yaml):
 # der Wohnbereich heizt, als wäre jemand da – für "nur kurz weg" und zum Vorheizen auf dem Heimweg.
@@ -41,7 +41,7 @@ custom_fields:
       <ha-icon icon="${on ? 'mdi:home-thermometer' : 'mdi:home-thermometer-outline'}"
         style="--mdc-icon-size:20px;color:${on ? `rgb(${o})` : 'var(--secondary-text-color)'}"></ha-icon>
       <div style="flex:1;min-width:0;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-        <span style="font-size:13px;font-weight:600;${on ? `color:rgb(${o})` : ''}">Weiterheizen</span>
+        <span style="font-size:13px;font-weight:600;${on ? `color:rgb(${o})` : ''}">Temperatur halten</span>
         <span style="font-size:11px;color:var(--secondary-text-color)"> · ${sub}</span></div>
       <div style="font-size:12px;font-weight:600;padding:3px 10px;border-radius:12px;
         ${on ? `border:1px solid rgba(${o},.6);color:rgb(${o})` : `background:rgb(${o});color:#fff`}">${on ? 'Aus' : 'An'}</div>
