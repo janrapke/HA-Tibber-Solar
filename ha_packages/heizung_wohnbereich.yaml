@@ -45,8 +45,76 @@
 #   mehreren Tagen im Schnitt unter 20,5 °C, als ERSTEN Schritt vorschlagen, den Küchen-Heizkörper
 #   wieder mitlaufen zu lassen (der Besitzer meint, die Küche bringt mehr); erst danach Raumsoll
 #   Tag am Kessel 21 -> 22 °C. Nur vorschlagen, nicht selbst ändern.
+#
+# Weiterheizen (Wunsch des Besitzers 10.11.2026): input_boolean.heizung_weiterheizen, per Knopf auf
+# der Startseite unter den Personen oder per Alexa ("Alexa, schalte Weiterheizen ein").
+#   Für "nur kurz weg" (Temperatur halten statt absenken) und zum Vorheizen auf dem Heimweg.
+#   An = Wohnbereich (Wohnzimmer, Esszimmer, Küche, Flur folgt) heizt, als wäre jemand im
+#   Wohnzimmer – außer in der Nachtphase 23:40–07:00, dort gelten wie sonst die Nachtwerte.
+#   Geht von selbst aus: nach 3 h (timer.heizung_weiterheizen) oder 30 min nachdem jemand
+#   heimgekommen ist (dann übernimmt die normale Anwesenheit).
+
+input_boolean:
+  heizung_weiterheizen:
+    name: "Weiterheizen"
+    icon: mdi:home-thermometer
+
+timer:
+  heizung_weiterheizen:
+    name: "Weiterheizen Restzeit"
+    duration: "03:00:00"
+    icon: mdi:timer-sand
 
 automation:
+  - id: heizung_weiterheizen_timer
+    alias: "Weiterheizen: Timer starten und stoppen"
+    mode: queued
+    triggers:
+      - trigger: state
+        entity_id: input_boolean.heizung_weiterheizen
+        to: "on"
+        id: "an"
+      - trigger: state
+        entity_id: input_boolean.heizung_weiterheizen
+        to: "off"
+        id: "aus"
+      - trigger: event
+        event_type: timer.finished
+        event_data:
+          entity_id: timer.heizung_weiterheizen
+        id: "abgelaufen"
+    actions:
+      - choose:
+          - conditions: [{condition: trigger, id: "an"}]
+            sequence:
+              - action: timer.start
+                target: {entity_id: timer.heizung_weiterheizen}
+          - conditions: [{condition: trigger, id: "aus"}]
+            sequence:
+              - action: timer.cancel
+                target: {entity_id: timer.heizung_weiterheizen}
+          - conditions: [{condition: trigger, id: "abgelaufen"}]
+            sequence:
+              - action: input_boolean.turn_off
+                target: {entity_id: input_boolean.heizung_weiterheizen}
+
+  - id: heizung_weiterheizen_heimgekommen
+    alias: "Weiterheizen: aus, wenn jemand heimgekommen ist"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: input_boolean.anwesnedheit_irgendjemand
+        from: "off"
+        to: "on"
+        for: "00:30:00"
+    conditions:
+      - condition: state
+        entity_id: input_boolean.heizung_weiterheizen
+        state: "on"
+    actions:
+      - action: input_boolean.turn_off
+        target: {entity_id: input_boolean.heizung_weiterheizen}
+
   # Flur läuft mit dem Wohnzimmer mit, immer 1 K darunter (Wunsch des Besitzers 06.11.2026).
   # Wird von der Klima-Steuerung der Integration mit den anderen Heiz-Automationen pausiert.
   - id: heizung_flur_folgt_wohnzimmer
@@ -86,15 +154,19 @@ template:
           {% set tv = is_state('media_player.lg_webos_tv_up75009lf', 'on') %}
           {% set t = now().strftime('%H:%M') %}
           {% set night = t >= '23:40' or t < '07:00' %}
-          {{ tv or (is_state('input_boolean.anwesnedheit_irgendjemand', 'on') and not night
-                    and is_state('input_boolean.anwesenheit_wohnbereich', 'on')) }}
+          {% set weiter = is_state('input_boolean.heizung_weiterheizen', 'on') %}
+          {{ tv or (weiter and not night)
+             or (is_state('input_boolean.anwesnedheit_irgendjemand', 'on') and not night
+                 and is_state('input_boolean.anwesenheit_wohnbereich', 'on')) }}
         attributes:
           fernseher: "{{ is_state('media_player.lg_webos_tv_up75009lf', 'on') }}"
+          weiterheizen: "{{ is_state('input_boolean.heizung_weiterheizen', 'on') }}"
           nachtphase: "{% set t = now().strftime('%H:%M') %}{{ t >= '23:40' or t < '07:00' }}"
       - name: "Heizung jemand da"
         unique_id: heizung_jemand_da
         icon: mdi:home-account
-        # niemand zuhause, aber der Fernseher läuft (z. B. Gäste) -> trotzdem heizen
+        # niemand zuhause, aber der Fernseher läuft (z. B. Gäste) oder "Weiterheizen" ist an -> trotzdem heizen
         state: >
           {{ is_state('input_boolean.anwesnedheit_irgendjemand', 'on')
-             or is_state('media_player.lg_webos_tv_up75009lf', 'on') }}
+             or is_state('media_player.lg_webos_tv_up75009lf', 'on')
+             or is_state('input_boolean.heizung_weiterheizen', 'on') }}

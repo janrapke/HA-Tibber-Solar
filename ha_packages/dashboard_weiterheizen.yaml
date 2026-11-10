@@ -1,0 +1,49 @@
+# Startseite (dashboard-home, Ansicht Home): kleiner Knopf "Weiterheizen" direkt unter der Personen-Karte.
+# Liegt mit der Personen-Karte in einem vertical-stack (an zweiter Stelle).
+# Antippen schaltet input_boolean.heizung_weiterheizen (ha_packages/heizung_wohnbereich.yaml):
+# der Wohnbereich heizt, als wäre jemand da – für "nur kurz weg" und zum Vorheizen auf dem Heimweg.
+# Geht nach 3 h (timer.heizung_weiterheizen) oder 30 min nach dem Heimkommen von selbst aus.
+type: custom:button-card
+entity: input_boolean.heizung_weiterheizen
+triggers_update: [timer.heizung_weiterheizen, binary_sensor.heizung_wohnbereich_aktiv]
+show_icon: false
+show_name: false
+show_state: false
+tap_action:
+  action: toggle
+  haptic: light
+styles:
+  card:
+    - padding: 6px 12px
+    - border-radius: 14px
+  grid:
+    - grid-template-areas: '"main"'
+    - grid-template-columns: 1fr
+  custom_fields:
+    main:
+      - justify-self: stretch
+      - text-align: left
+      - white-space: normal
+custom_fields:
+  main: |
+    [[[
+    const on = entity && entity.state === 'on';
+    const o = '244,81,30';
+    const t = states['timer.heizung_weiterheizen'];
+    let rest = '';
+    if (on && t && t.attributes.finishes_at) {
+      const m = Math.max(0, Math.round((Date.parse(t.attributes.finishes_at) - Date.now()) / 60000));
+      rest = m >= 60 ? `noch ${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')} h` : `noch ${m} min`;
+    }
+    const night = (states['binary_sensor.heizung_wohnbereich_aktiv'] || {attributes: {}}).attributes.nachtphase;
+    const sub = on ? (night ? 'nachts gelten die Nachtwerte' : rest) : 'Wohnbereich warm halten';
+    return `<div style="display:flex;align-items:center;gap:10px">
+      <ha-icon icon="${on ? 'mdi:home-thermometer' : 'mdi:home-thermometer-outline'}"
+        style="--mdc-icon-size:20px;color:${on ? `rgb(${o})` : 'var(--secondary-text-color)'}"></ha-icon>
+      <div style="flex:1;min-width:0;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+        <span style="font-size:13px;font-weight:600;${on ? `color:rgb(${o})` : ''}">Weiterheizen</span>
+        <span style="font-size:11px;color:var(--secondary-text-color)"> · ${sub}</span></div>
+      <div style="font-size:12px;font-weight:600;padding:3px 10px;border-radius:12px;
+        ${on ? `border:1px solid rgba(${o},.6);color:rgb(${o})` : `background:rgb(${o});color:#fff`}">${on ? 'Aus' : 'An'}</div>
+    </div>`;
+    ]]]
