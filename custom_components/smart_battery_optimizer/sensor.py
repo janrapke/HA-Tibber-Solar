@@ -480,6 +480,7 @@ class LearningStatusSensor(CoordinatorEntity, SensorEntity):
             "v2_modell_gestartet": data.get("bootstrapped", False),
             "v2_solar_modell": model,
             "v2_verbrauch_tage": data.get("load_days", 0),
+            "v2_verbrauch_niveau": data.get("load_level_factor"),  # profile level vs. last two days
             "v2_plan_ersparnis_eur": data.get("plan_savings_eur"),
             "solar_qualität_%": coverage["solar_quality_pct"],
             "verbrauch_qualität_%": coverage["consumption_quality_pct"],
