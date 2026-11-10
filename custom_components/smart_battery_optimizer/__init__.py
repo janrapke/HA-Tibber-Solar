@@ -15,6 +15,7 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[str] = ["sensor", "binary_sensor", "switch", "number", "button", "select", "text", "time", "datetime"]
 
 from .coordinator import SmartBatteryOptimizerCoordinator
+from .log_monitor import get_monitor
 
 _WWW = pathlib.Path(__file__).parent / "www"
 _CARD_FILES = [
@@ -109,6 +110,7 @@ async def _ensure_lovelace_resources(hass: HomeAssistant) -> None:
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Smart Battery Optimizer from a config entry."""
     hass.data.setdefault(DOMAIN, {})
+    get_monitor()  # collect warnings/errors from the start for the log sensor
 
     # Register static paths on first setup (survives entry reloads)
     if not hass.data[DOMAIN].get("_paths_registered"):

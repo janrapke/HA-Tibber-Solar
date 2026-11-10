@@ -12,6 +12,7 @@ from .price_forecast_entities import build as build_price_forecast
 from .ev_entities import build as build_ev
 from .const import DOMAIN
 from .coordinator import SmartBatteryOptimizerCoordinator
+from .log_monitor import get_monitor
 
 PLAN_ATTRIBUTE_KEYS = ("hour", "ts", "price", "solar_wh", "consumption_wh", "battery_pct_end", "planned_action")
 
@@ -48,6 +49,7 @@ async def async_setup_entry(
         *build_oil("sensor", coordinator, entry.entry_id),
         *build_price_forecast("sensor", coordinator, entry.entry_id),
         *build_ev("sensor", coordinator, entry.entry_id),
+        LogProblemsSensor(entry.entry_id),
     ]
 
     app_entities = coordinator.appliance_entities.get('sensor', [])
@@ -681,3 +683,36 @@ class DayRunningForecastSensor(CoordinatorEntity, SensorEntity):
     @property
     def extra_state_attributes(self):
         return dict(getattr(self.coordinator, "day_running", None) or {})
+
+
+class LogProblemsSensor(SensorEntity):
+    """Warnings and errors of the integration (and Tesla Fleet) in the last 24 hours.
+
+    HA 2026.10 answers 404 on GET /api/error_log, so the nightly agent reads this sensor instead.
+    """
+
+    _attr_has_entity_name = True
+    _attr_icon = "mdi:alert-circle-outline"
+    _attr_native_unit_of_measurement = "Meldungen"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, entry_id):
+        self._monitor = get_monitor()
+        self._attr_unique_id = f"{entry_id}_log_problems"
+        self._attr_name = "Protokoll Warnungen und Fehler 24 h"
+        self._attr_device_info = {"identifiers": {(DOMAIN, entry_id)}, "name": "Smart Battery Optimizer",
+                                  "manufacturer": "Custom"}
+        self._summary: dict = {}
+
+    async def async_update(self) -> None:
+        self._summary = self._monitor.summary()
+
+    @property
+    def native_value(self):
+        s = self._summary or self._monitor.summary()
+        return s["fehler_24h"] + s["warnungen_24h"]
+
+    @property
+    def extra_state_attributes(self):
+        return self._summary or self._monitor.summary()
