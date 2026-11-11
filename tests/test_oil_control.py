@@ -21,9 +21,18 @@ class Coordinator:
         return "sensor.dtu"
 
 
-def make():
+async def _job(fn, *a):
+    return fn(*a)
+
+
+def make(exhaust=None):
     hass = tcc.Hass()
-    mon = oc.OilMonitor(hass, "e1", {"tibber_consumption_sensor": GRID}, Coordinator())
+    hass.config = types.SimpleNamespace(path=lambda name: str(Path(__file__).parent / "data" / "no_such_dir" / name))
+    hass.async_add_executor_job = _job
+    cfg = {"tibber_consumption_sensor": GRID}
+    if exhaust:
+        cfg["oil_exhaust_sensor"] = exhaust
+    mon = oc.OilMonitor(hass, "e1", cfg, Coordinator())
     asyncio.run(mon.async_start())
     return hass, mon
 
@@ -34,7 +43,7 @@ def event(eid, value, t):
 
 
 def test_recorded_run_counts_oil():
-    hass, mon = make()
+    hass, mon = make(exhaust=EXHAUST)   # old exhaust pipe detection, still works when configured
     last_c = None
     with open(Path(__file__).parent / "data" / "burner_2026-10-27.csv") as f:
         for r in csv.DictReader(f):
@@ -49,6 +58,45 @@ def test_recorded_run_counts_oil():
     assert day.starts == 1 and 5.6 <= day.burner_min <= 6.6
     assert abs(day.oil_l - day.burner_min / 60 * 2.0) < 1e-9
     assert mon.runs_today(datetime(2026, 10, 27, 23, 50, tzinfo=LOC))[0]["quelle"] == "strom"
+
+
+def test_theta_burner_sensor_counts_runs_and_mutes_exhaust():
+    hass, mon = make(exhaust=EXHAUST)
+    burner = "binary_sensor.heizung_theta_brenner"
+    t0 = datetime(2026, 11, 12, 6, 0, 0, tzinfo=LOC)
+    hass.states[burner] = tcc.St("off", ts=t0)
+    # grid load: 300 W, burner step +200 W at 06:00:05 (Theta 20 s later), drop at 06:07:05 (Theta 40 s later)
+    for s in range(0, 600, 5):
+        t = t0 + timedelta(seconds=s)
+        w = 500 if 5 <= s < 425 else 300
+        mon._on_change(event(GRID, w, t))
+        if s == 25:
+            hass.states[burner] = tcc.St("on", ts=t)
+            mon._on_change(event(burner, "on", t))
+        if s == 465:
+            hass.states[burner] = tcc.St("off", ts=t)
+            mon._on_change(event(burner, "off", t))
+        mon._on_change(event(EXHAUST, 40 + (30 if 30 <= s < 500 else 0), t))
+    day = mon.days["2026-11-12"]
+    assert day.starts == 1
+    assert 6.7 <= day.burner_min <= 7.1   # 7.0 min from the load steps; the late Theta frames alone would give 7.3
+    assert mon.runs_today(t0)[0]["quelle"] == "theta"
+
+
+def test_missed_runs_are_imported_once(tmp_path):
+    import json
+    hass = tcc.Hass()
+    hass.config = types.SimpleNamespace(path=lambda name: str(tmp_path / name))
+    hass.async_add_executor_job = _job
+    t = datetime(2026, 11, 11, 20, 44, 37, tzinfo=LOC)
+    runs = [{"start": t.isoformat(), "end": (t + timedelta(minutes=6)).isoformat(), "source": "theta"},
+            {"start": (t + timedelta(minutes=2)).isoformat(), "end": (t + timedelta(minutes=4)).isoformat()}]
+    (tmp_path / oc.IMPORT_FILE).write_text(json.dumps({"runs": runs}), encoding="utf-8")
+    mon = oc.OilMonitor(hass, "e1", {"tibber_consumption_sensor": GRID}, Coordinator())
+    asyncio.run(mon.async_start())
+    day = mon.days["2026-11-11"]
+    assert day.starts == 1 and abs(day.burner_min - 6.0) < 1e-6      # the overlapping second run is skipped
+    assert not (tmp_path / oc.IMPORT_FILE).exists() and (tmp_path / (oc.IMPORT_FILE + ".done")).exists()
 
 
 def test_tank_reading_usable_and_calibration():

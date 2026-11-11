@@ -142,11 +142,14 @@ AC_RETRIGGER_AUTOMATIONS = ["automation.heizung_wohnzimmer"]
 
 # Oil heating monitor (oil_control.py)
 CONF_OIL_EXHAUST_SENSOR = "oil_exhaust_sensor"
+CONF_OIL_BURNER_SENSOR = "oil_burner_sensor"  # burner on/off read from the Theta debug port (ESP)
 CONF_OIL_ROOMS = "oil_room_sensors"  # sensor -> m², area-weighted house indoor temperature
 CONF_OIL_WINDOW = "oil_window_sensor"
 CONF_OIL_ZIP = "oil_price_zip"  # postcode for the heizoel24 price query
 OIL_DEFAULTS = {
-    CONF_OIL_EXHAUST_SENSOR: "sensor.heizung_abgasrohr_temperatur",
+    # exhaust pipe sensor removed 11.11.2026 (the Theta reports the burner); set it in the config only to use it again
+    CONF_OIL_EXHAUST_SENSOR: None,
+    CONF_OIL_BURNER_SENSOR: "binary_sensor.heizung_theta_brenner",
     CONF_OIL_ROOMS: {
         "sensor.wohnzimmer_temperatur": 37.4,  # living + dining room (open)
         "sensor.temperatursensor_kuche_temperatur": 9.2,

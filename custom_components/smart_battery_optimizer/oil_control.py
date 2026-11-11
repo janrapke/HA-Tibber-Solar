@@ -1,7 +1,8 @@
 """Oil heating monitor: burner runs, oil counter, tank level, heating days, reach forecast.
 
-Listens to the grid meter, the inverter output and the exhaust pipe sensor on every
-state change (seconds), so burner starts/stops are timed from the load steps.
+Burner runs come from the Theta controller (ESP on its debug port, on/off within ~30 s);
+the load steps of the grid meter sharpen both edges to the second. The old exhaust pipe
+detection is still there, but only used when an exhaust sensor is configured.
 Everything else runs once a minute from the coordinator.
 """
 from __future__ import annotations
@@ -15,13 +16,13 @@ from homeassistant.helpers.storage import Store
 
 try:
     from .const import (
-        CONF_OIL_EXHAUST_SENSOR, CONF_OIL_ROOMS, CONF_OIL_WINDOW, CONF_OIL_ZIP, CONF_TIBBER_CONSUMPTION_SENSOR,
+        CONF_OIL_BURNER_SENSOR, CONF_OIL_EXHAUST_SENSOR, CONF_OIL_ROOMS, CONF_OIL_WINDOW, CONF_OIL_ZIP, CONF_TIBBER_CONSUMPTION_SENSOR,
         CONF_TIBBER_EXPORT_SENSOR, DOMAIN, OIL_DEFAULTS,
     )
     from .oil_model import HEIZOEL24_URL, BurnerDetector, HeatDay, Run, Tank, degree_hours, fit, order_litres, parse_heizoel24, reach
 except ImportError:  # loaded standalone by the tests
     from const import (
-        CONF_OIL_EXHAUST_SENSOR, CONF_OIL_ROOMS, CONF_OIL_WINDOW, CONF_OIL_ZIP, CONF_TIBBER_CONSUMPTION_SENSOR,
+        CONF_OIL_BURNER_SENSOR, CONF_OIL_EXHAUST_SENSOR, CONF_OIL_ROOMS, CONF_OIL_WINDOW, CONF_OIL_ZIP, CONF_TIBBER_CONSUMPTION_SENSOR,
         CONF_TIBBER_EXPORT_SENSOR, DOMAIN, OIL_DEFAULTS,
     )
     from oil_model import HEIZOEL24_URL, BurnerDetector, HeatDay, Run, Tank, degree_hours, fit, order_litres, parse_heizoel24, reach
@@ -35,6 +36,8 @@ KEEP_DAYS = 800
 REACH_EVERY = timedelta(hours=1)
 PRICE_EVERY = timedelta(hours=6)
 PRICE_RETRY = timedelta(minutes=30)
+THETA_EDGE_SEARCH = timedelta(seconds=60)  # the Theta frame lags the real edge by up to ~30 s
+IMPORT_FILE = "smart_battery_optimizer_oil_import.json"  # one-time run import in the config dir
 CALIBRATE_MIN_L = 60.0       # counted litres needed between two tank readings to calibrate
 UNAVAILABLE = ("unknown", "unavailable", "", None)
 
@@ -73,6 +76,7 @@ class OilMonitor:
         self._last_minute: datetime | None = None
         self.price: dict = {}                 # last heizoel24 answer
         self._next_price: datetime | None = None
+        self._theta_start: datetime | None = None   # burner start as seen by the Theta
 
     # ------------------------------------------------------------ lifecycle
     async def async_start(self) -> None:
@@ -81,8 +85,47 @@ class OilMonitor:
             self.load_dict(await self._store.async_load() or {})
         except Exception:  # noqa: BLE001
             _LOGGER.exception("Loading oil data failed; starting with defaults")
-        ids = [e for e in (self.grid_id, self.export_id, self._dtu_id(), self.cfg[CONF_OIL_EXHAUST_SENSOR]) if e]
+        ids = [e for e in (self.grid_id, self.export_id, self._dtu_id(), self.cfg[CONF_OIL_EXHAUST_SENSOR],
+                           self.cfg[CONF_OIL_BURNER_SENSOR]) if e]
         self._unsub = async_track_state_change_event(self.hass, ids, self._on_change)
+        await self._import_runs()
+        st = self.hass.states.get(self.cfg[CONF_OIL_BURNER_SENSOR]) if self.cfg[CONF_OIL_BURNER_SENSOR] else None
+        if st is not None and st.state == "on":
+            self._theta_start = st.last_changed   # restarted during a run
+
+    async def _import_runs(self) -> None:
+        """Runs the monitor missed (e.g. while the sensors changed) from <config>/IMPORT_FILE:
+        {"runs": [{"start": iso, "end": iso, "source": "..."}]}. Runs that overlap a counted one are skipped;
+        the file is renamed to *.done afterwards so it is read only once."""
+        import json
+        import os
+
+        path = self.hass.config.path(IMPORT_FILE)
+
+        def read():
+            if not os.path.exists(path):
+                return None
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            os.replace(path, path + ".done")
+            return data
+
+        try:
+            data = await self.hass.async_add_executor_job(read)
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("Oil run import failed")
+            return
+        if not data:
+            return
+        added = 0
+        for r in data.get("runs") or []:
+            run = Run(datetime.fromisoformat(r["start"]), datetime.fromisoformat(r["end"]), None, r.get("source", "import"))
+            if run.end <= run.start or any(o.start < run.end and run.start < o.end for o in self.runs):
+                continue
+            self._add_run(run)
+            added += 1
+        self.runs.sort(key=lambda x: x.start)
+        _LOGGER.info("Imported %d missed burner runs", added)
 
     async def async_stop(self) -> None:
         if self._unsub:
@@ -136,21 +179,44 @@ class OilMonitor:
         ac = getattr(self.coordinator, "climate", None)
         return ac.power_w() if ac is not None else 0.0
 
+    def _theta_ok(self) -> bool:
+        st = self.hass.states.get(self.cfg[CONF_OIL_BURNER_SENSOR]) if self.cfg[CONF_OIL_BURNER_SENSOR] else None
+        return st is not None and st.state in ("on", "off")
+
+    def _theta_edge(self, t: datetime, up: bool) -> datetime:
+        """Exact time of a Theta burner edge: the matching load step shortly before, else the Theta time."""
+        step = self.detector.find_step(t - THETA_EDGE_SEARCH, t, up=up)
+        return step[0] if step else t
+
+    def _on_burner(self, state: str, t: datetime) -> None:
+        if state == "on" and self._theta_start is None:
+            self._theta_start = self._theta_edge(t, up=True)
+        elif state == "off" and self._theta_start is not None:
+            start, self._theta_start = self._theta_start, None
+            end = self._theta_edge(t, up=False)
+            if end - start >= timedelta(seconds=45):
+                self._add_run(Run(start, end, None, "theta"))
+
     @callback
     def _on_change(self, event) -> None:
         st = event.data.get("new_state")
         if st is None or st.state in UNAVAILABLE:
             return
+        eid = event.data.get("entity_id")
+        if eid == self.cfg[CONF_OIL_BURNER_SENSOR]:
+            self._on_burner(st.state, st.last_updated)
+            return
         try:
             val = float(st.state)
         except (TypeError, ValueError):
             return
-        eid = event.data.get("entity_id")
         t = st.last_updated
         self._vals[eid] = val
         run = None
         if eid == self.cfg[CONF_OIL_EXHAUST_SENSOR]:
             run = self.detector.feed_exhaust(t, val)
+            if self._theta_ok():
+                run = None   # the Theta counts the runs, the exhaust is only the fallback
         elif self.grid_id in self._vals:
             # house load without the AC: grid import - export + inverter output
             load = (self._vals[self.grid_id] - self._vals.get(self.export_id, 0.0)
@@ -256,6 +322,8 @@ class OilMonitor:
                  "quelle": r.source} for r in self.runs if r.start.date() == day]
 
     def burner_on(self) -> bool:
+        if self._theta_ok():
+            return self.hass.states.get(self.cfg[CONF_OIL_BURNER_SENSOR]).state == "on"
         return self.detector.running
 
     def _update_forecast(self, now: datetime) -> None:

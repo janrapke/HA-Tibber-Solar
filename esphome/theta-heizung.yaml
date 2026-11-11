@@ -1,0 +1,560 @@
+# ============================================================
+# Heizung Theta – ESP32 an der EBV Theta N 2B (Ölkessel intercal Euroline E-18)
+# ============================================================
+#
+# Anschlüsse (ESP32-DevKit 30 Pin, diymore, ESP32-WROOM-32):
+#   GND     -> Theta Klemme 23 (GND, blaue Leiste)
+#   GPIO27  -> Theta Debug-Port Pin 3 (unten, 3. von links) ÜBER 2,7 kΩ (Pin 3 sendet mit 5 V)
+#   GPIO25  -> Theta Klemme 30 (VE1) – künstlicher Außenfühler 2 (DAC). Erst anklemmen, wenn
+#              HYDRAULIK 08 noch AUS ist; die Theta ignoriert VE1 dann.
+#   GPIO4   -> DS18B20 Vorlauf      (rot 3V3, schwarz GND, gelb GPIO)
+#   GPIO16  -> DS18B20 Rücklauf
+#   GPIO17  -> DS18B20 Speicher-Ladeleitung
+#   GPIO18  -> DS18B20 Abgasrohr
+#   Jeder Fühler hat einen eigenen Pin mit internem Pull-up. Zeigen sie 85 °C oder fallen aus,
+#   kommt ein 4,7-kΩ-Widerstand zwischen GPIO und 3V3.
+#
+# Debug-Port-Protokoll nach github.com/phiresky/ebv-theta-to-mqtt (gebaut für Theta N 23B):
+#   9600 Baud, Rahmen = 21 0a 0a | typ1 typ2 00 len | Nutzdaten (len Bytes) | CRC-16 Kermit (LE)
+#   über Präfix + Kopf + Nutzdaten. Dekodiert sind dort u. a. Brenner an/aus, Betriebsart
+#   (0 aus / 1 Heizen / 2 Warmwasser), Kessel-, Außen- und Warmwassertemperatur, Brennerstunden.
+#   Ob die N 2B dieselben Typen sendet, zeigen erst die echten Daten: die Rohdaten-Sensoren
+#   unten legen die wichtigsten Rahmen als Hex in HA ab, damit sich weitere Werte (z. B. „Außen 2“)
+#   nachträglich finden lassen.
+#
+# Außenfühler-Emulation: GPIO25 ist nach dem Start hochohmig (= Fühler offen, Theta ignoriert ihn,
+# solange HYDRAULIK 08 = AUS). Erst der Schalter „Außenfühler-Emulation“ legt die DAC-Spannung an.
+# Ohne HA-Verbindung schaltet das ESP die Emulation nach 10 min ab, ein Neustart startet immer „aus“.
+
+substitutions:
+  name: theta-heizung
+  friendly_name: Heizung Theta
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: esp32dev
+  framework:
+    type: arduino
+
+logger:
+  level: DEBUG
+
+api:
+  encryption:
+    key: !secret theta_api_key
+
+ota:
+  - platform: esphome
+    password: !secret theta_ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "Theta-Heizung Fallback"
+    password: !secret theta_ap_password
+
+captive_portal:
+
+status_led:
+  pin: GPIO2
+
+# ---------------- Theta Debug-Port (nur lesen) ----------------
+uart:
+  id: theta_uart
+  rx_pin:
+    number: GPIO27
+    inverted: false
+  baud_rate: 9600
+  rx_buffer_size: 1024
+
+globals:
+  - id: api_lost_min
+    type: int
+    restore_value: no
+    initial_value: "0"
+  - id: frames_ok
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+  - id: last_frame_ms
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+  - id: emu_t
+    type: float
+    restore_value: no
+    initial_value: "7.0"
+  - id: ziel_prev
+    type: float
+    restore_value: no
+    initial_value: "0.0"
+  - id: frames_crc_err
+    type: uint32_t
+    restore_value: no
+    initial_value: "0"
+
+interval:
+  # Rahmen aus dem Empfangspuffer lesen, prüfen und auswerten
+  - interval: 100ms
+    then:
+      - lambda: |-
+          static std::vector<uint8_t> buf;
+          static std::map<uint16_t, std::string> last_hex;
+          static std::map<uint16_t, uint32_t> last_pub;
+          static std::map<uint16_t, uint32_t> type_count;
+          static std::map<uint16_t, std::string> last_payload;
+          static std::map<uint16_t, std::vector<uint8_t>> prev_bytes;
+          static std::string changes;
+          static uint32_t last_changes = 0;
+
+          while (id(theta_uart).available()) {
+            uint8_t b;
+            if (!id(theta_uart).read_byte(&b)) break;
+            buf.push_back(b);
+          }
+
+          if (buf.size() > 2048) buf.erase(buf.begin(), buf.end() - 512);
+
+          auto kermit = [](const uint8_t *d, size_t n) -> uint16_t {
+            uint16_t c = 0;
+            for (size_t i = 0; i < n; i++) {
+              c ^= d[i];
+              for (int k = 0; k < 8; k++) c = (c & 1) ? (c >> 1) ^ 0x8408 : (c >> 1);
+            }
+            return c;
+          };
+          auto to_hex = [](const uint8_t *d, size_t n) -> std::string {
+            static const char *hx = "0123456789abcdef";
+            std::string s;
+            for (size_t i = 0; i < n; i++) { s += hx[d[i] >> 4]; s += hx[d[i] & 0xf]; }
+            return s;
+          };
+          auto pub_f = [](sensor::Sensor *s, float v) {
+            if (std::isnan(s->state) || std::fabs(s->state - v) >= 0.05f) s->publish_state(v);
+          };
+
+          size_t p = 0;
+          while (true) {
+            // Präfix 21 0a 0a suchen
+            size_t start = SIZE_MAX;
+            for (size_t i = p; i + 2 < buf.size(); i++) {
+              if (buf[i] == 0x21 && buf[i + 1] == 0x0a && buf[i + 2] == 0x0a) { start = i; break; }
+            }
+            if (start == SIZE_MAX) {
+              // nichts gefunden: alles bis auf die letzten 2 Bytes verwerfen
+              if (buf.size() > 2) { buf.erase(buf.begin(), buf.end() - 2); }
+              break;
+            }
+            if (start + 7 > buf.size()) { buf.erase(buf.begin(), buf.begin() + start); break; }
+            uint8_t len = buf[start + 6];
+            size_t total = 7 + (size_t) len + 2;
+            if (start + total > buf.size()) { buf.erase(buf.begin(), buf.begin() + start); break; }
+
+            const uint8_t *f = &buf[start];
+            uint16_t crc_calc = kermit(f, 7 + len);
+            uint16_t crc_frame = f[7 + len] | (f[8 + len] << 8);
+            if (crc_calc != crc_frame || f[5] != 0x00) {
+              id(frames_crc_err)++;
+              p = start + 1;   // falscher Treffer, weitersuchen
+              continue;
+            }
+            id(frames_ok)++;
+            id(last_frame_ms) = millis();
+
+            uint8_t t1 = f[3], t2 = f[4];
+            uint16_t typ = (t1 << 8) | t2;
+            const uint8_t *pl = f + 7;
+            type_count[typ]++;
+
+            auto u16 = [&](int o) -> uint16_t { return pl[o] | (pl[o + 1] << 8); };
+            auto i16 = [&](int o) -> int16_t { return (int16_t) u16(o); };
+            auto u32 = [&](int o) -> uint32_t {
+              return pl[o] | (pl[o + 1] << 8) | (pl[o + 2] << 16) | ((uint32_t) pl[o + 3] << 24);
+            };
+
+            // ---- bekannte Werte (Typen aus dem GitHub-Projekt) ----
+            if (t1 == 0x1c && len >= 2) pub_f(id(theta_aussen), i16(0) / 10.0f);
+            if (t1 == 0x1d && len >= 2) pub_f(id(theta_kessel), u16(0) / 10.0f);
+            if (t1 == 0x1f && len >= 2) pub_f(id(theta_warmwasser), u16(0) / 10.0f);
+            if (t1 == 0x22 && len >= 2) pub_f(id(theta_aussen2), i16(0) / 10.0f);  // VE1 = emulator (found 11.11.2026)
+            if (typ == 0x0a05 && len >= 4) pub_f(id(theta_brennerstunden), u32(0) / 3600.0f);
+            if (typ == 0x0b05 && len >= 4) pub_f(id(theta_brennerstarts), (float) u32(0));
+            if (typ == 0xc201 && len > 10) {
+              bool on = pl[10] != 0;
+              if (!id(theta_brenner).has_state() || id(theta_brenner).state != on) id(theta_brenner).publish_state(on);
+            }
+            // bd01 (found 11.11.2026): @8 Kessel-Soll, @22 Kessel-Ist, @28 Außen 1, @30 Außen 2 (0x8000 = invalid)
+            if (typ == 0xbd01 && len >= 10) pub_f(id(theta_kessel_soll), u16(8) / 10.0f);
+            // relay channels (relay test 11.11.2026): byte 2 = 01 on, ff off; sent about every 27 s
+            if (typ == 0x2802 && len > 2) {
+              bool on = pl[2] == 0x01;
+              if (!id(theta_hkp).has_state() || id(theta_hkp).state != on) id(theta_hkp).publish_state(on);
+            }
+            if (typ == 0x2702 && len > 2) {
+              bool on = pl[2] == 0x01;
+              if (!id(theta_slp).has_state() || id(theta_slp).state != on) id(theta_slp).publish_state(on);
+            }
+
+            // ---- Rohdaten: bei Änderung ins Log, ausgewählte Typen höchstens alle 30 s nach HA ----
+            std::string hex = to_hex(pl, len);
+            // change recorder: every byte that changed, collected per second (for finding relay/pump bits)
+            {
+              auto &old = prev_bytes[typ];
+              if (old.size() == len) {
+                for (int o = 0; o < len; o++) if (old[o] != pl[o]) {
+                  char tmp[24]; snprintf(tmp, sizeof(tmp), "%04x@%d:%02x>%02x ", typ, o, old[o], pl[o]);
+                  if (changes.size() < 230) changes += tmp;
+                }
+              }
+              old.assign(pl, pl + len);
+            }
+            last_payload[typ] = hex;
+            if (last_hex[typ] != hex) {
+              last_hex[typ] = hex;
+              ESP_LOGD("theta", "%02x%02x len=%u: %s", t1, t2, len, hex.c_str());
+              uint32_t now = millis();
+              text_sensor::TextSensor *ts = nullptr;
+              if (typ == 0xbd01) ts = id(theta_raw_bd01);
+              else if (typ == 0xa901) ts = id(theta_raw_a901);
+              else if (typ == 0xc201) ts = id(theta_raw_c201);
+              else if (t1 == 0x1c) ts = id(theta_raw_1c);
+              if (ts != nullptr && now - last_pub[typ] > 30000) {
+                last_pub[typ] = now;
+                ts->publish_state(hex.substr(0, 250));
+              }
+            }
+
+            buf.erase(buf.begin(), buf.begin() + start + total);
+            p = 0;
+          }
+
+          if (millis() - last_changes > 1000) {
+            last_changes = millis();
+            if (!changes.empty()) { id(theta_changes).publish_state(changes); changes.clear(); }
+          }
+
+          // all frame types one after another into HA history (one every 2 s) for offline decoding
+          {
+            static uint32_t last_dump = 0;
+            static uint16_t next_typ = 0;
+            if (millis() - last_dump > 2000 && !last_payload.empty()) {
+              last_dump = millis();
+              auto it = last_payload.lower_bound(next_typ);
+              if (it == last_payload.end()) it = last_payload.begin();
+              char hd[8]; snprintf(hd, sizeof(hd), "%04x:", it->first);
+              id(theta_dump).publish_state(std::string(hd) + it->second.substr(0, 240));
+              next_typ = it->first + 1;
+            }
+          }
+
+          // Übersicht der gesehenen Rahmentypen, alle 60 s
+          static uint32_t last_types = 0;
+          if (millis() - last_types > 60000) {
+            last_types = millis();
+            std::string s;
+            for (auto &kv : type_count) {
+              char tmp[16];
+              snprintf(tmp, sizeof(tmp), "%04x:%u ", kv.first, (unsigned) kv.second);
+              s += tmp;
+            }
+            if (s.empty()) s = "keine Rahmen";
+            if (s.size() > 250) s = s.substr(0, 250);
+            id(theta_typen).publish_state(s);
+            id(theta_frames_ok).publish_state(id(frames_ok));
+            id(theta_frames_err).publish_state(id(frames_crc_err));
+          }
+
+  # Sicherheit: ohne HA-Verbindung nach 10 min das Ziel löschen (= echte Außentemperatur durchreichen)
+  - interval: 60s
+    then:
+      - if:
+          condition:
+            api.connected:
+          then:
+            - lambda: id(api_lost_min) = 0;
+          else:
+            - lambda: |-
+                id(api_lost_min)++;
+                if (id(api_lost_min) >= 10 && id(soll_ziel).state > 0) {
+                  ESP_LOGW("theta", "Keine HA-Verbindung seit 10 min – Soll-Ziel gelöscht, echte Außentemperatur");
+                  id(soll_ziel).make_call().set_value(0).perform();
+                }
+
+  # Regelung: ohne Ziel echte Außentemperatur (Fühler 1) durchreichen, mit Ziel das Kessel-Soll der Theta nachführen
+  - interval: 10s
+    then:
+      - lambda: |-
+          if (!id(af_aktiv).state) return;
+          float real = id(theta_aussen).state;
+          bool fresh = id(last_frame_ms) != 0 && millis() - id(last_frame_ms) < 120000;
+          if (!fresh || std::isnan(real)) {
+            // no data from the Theta: drop the output -> error 16-1 -> the Theta uses its real sensor
+            id(af_out).turn_off();
+            return;
+          }
+          float ziel = id(soll_ziel).state;
+          float soll = id(theta_kessel_soll).state;
+          float t = id(emu_t);
+          if (std::isnan(ziel) || ziel <= 0) {
+            t = real;
+          } else if (id(ziel_prev) <= 0 || std::isnan(soll)) {
+            // new target: start from the real temperature; far below target -> push hard so the
+            // Theta's averaged outdoor value follows quickly (11.11.2026: -48 °C gave Soll 65 within 30 s)
+            t = (!std::isnan(soll) && soll < ziel - 3) ? -48.0f : real;
+          } else if (id(theta_slp).state) {
+            // hot water charging: the Theta sets its own Soll, hold the emulation
+          } else if (soll < 1) {
+            // reduced mode (night, ECO): Soll 0 -> leave the emulation where it is
+          } else {
+            // integral control: about 0.57 K Soll per K emulated, step every 10 s
+            t += 0.4f * (soll - ziel);
+          }
+          if (t < -48) t = -48;
+          if (t > 40) t = 40;
+          id(ziel_prev) = std::isnan(ziel) ? 0 : ziel;
+          id(emu_t) = t;
+          if (std::isnan(id(emu_sensor).state) || std::fabs(id(emu_sensor).state - t) >= 0.1f) id(emu_sensor).publish_state(t);
+          id(af_apply).execute();
+
+# ---------------- Außenfühler-Emulation (Klemme 30) ----------------
+output:
+  # GPIO25 -> Theta terminal 30 (VE1 as outdoor sensor 2). The DAC works unloaded (1.3 V), but its output
+  # impedance is too high: the Theta pull-up lifts it to 3.7 V (11.11.2026). Push-pull PWM holds the line;
+  # the Theta input has to average it. Value 0..255 = 0..3.3 V mean voltage.
+  - platform: ledc
+    id: af_out
+    pin: GPIO25
+    frequency: 20000 Hz
+
+number:
+  - platform: template
+    id: soll_ziel
+    name: "Kessel-Soll Ziel"
+    icon: mdi:target
+    unit_of_measurement: "°C"
+    min_value: 0
+    max_value: 75
+    step: 0.5
+    mode: box
+    initial_value: 0
+    optimistic: true
+    # after a reboot always 0 = the Theta works with the real outdoor temperature
+    restore_value: false
+
+script:
+  # emulated temperature (global emu_t) -> PWM duty (0..255). Measured 11.11.2026 against Info "Außen 2";
+  # below -48 °C the Theta stays at -51, near 0 V it reports a short (error 16-1 -> falls back to the real sensor).
+  - id: af_apply
+    then:
+      - lambda: |-
+          static const float D[] = {54, 58, 62, 66, 70, 82, 100};
+          static const float T[] = {-48.0f, -39.4f, -31.0f, -23.3f, -15.4f, 7.5f, 40.0f};
+          const int n = 7;
+          float t = id(emu_t);
+          float d;
+          if (t <= T[0]) d = D[0];
+          else if (t >= T[n - 1]) d = D[n - 1];
+          else {
+            int i = 0;
+            while (t > T[i + 1]) i++;
+            d = D[i] + (D[i + 1] - D[i]) * (t - T[i]) / (T[i + 1] - T[i]);
+          }
+          id(af_out).set_level(d / 255.0f);
+
+switch:
+  - platform: template
+    id: af_aktiv
+    name: "Außenfühler-Emulation"
+    icon: mdi:thermometer-auto
+    optimistic: true
+    # keeps its state over a reboot; without HA it switches off after 10 min (interval below)
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action:
+      - script.execute: af_apply
+    turn_off_action:
+      - lambda: id(af_out).turn_off();
+
+# ---------------- Rohrfühler DS18B20 (je ein Pin, interner Pull-up) ----------------
+one_wire:
+  - platform: gpio
+    id: ow_vorlauf
+    pin:
+      number: GPIO4
+      mode:
+        input: true
+        output: true
+        open_drain: true
+        pullup: true
+  - platform: gpio
+    id: ow_ruecklauf
+    pin:
+      number: GPIO16
+      mode:
+        input: true
+        output: true
+        open_drain: true
+        pullup: true
+  - platform: gpio
+    id: ow_ladeleitung
+    pin:
+      number: GPIO17
+      mode:
+        input: true
+        output: true
+        open_drain: true
+        pullup: true
+  - platform: gpio
+    id: ow_abgas
+    pin:
+      number: GPIO18
+      mode:
+        input: true
+        output: true
+        open_drain: true
+        pullup: true
+
+sensor:
+  - platform: dallas_temp
+    one_wire_id: ow_vorlauf
+    name: "Vorlauf"
+    update_interval: 10s
+  - platform: dallas_temp
+    one_wire_id: ow_ruecklauf
+    name: "Rücklauf"
+    update_interval: 10s
+  - platform: dallas_temp
+    one_wire_id: ow_ladeleitung
+    name: "Speicher-Ladeleitung"
+    update_interval: 10s
+  - platform: dallas_temp
+    one_wire_id: ow_abgas
+    name: "Speicher-Rücklauf"
+    update_interval: 10s
+
+  # Werte aus der Theta (Debug-Port)
+  - platform: template
+    id: theta_kessel
+    name: "Kessel"
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: emu_sensor
+    name: "Emulierte Außentemperatur"
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    icon: mdi:thermometer-auto
+  - platform: template
+    id: theta_kessel_soll
+    name: "Kessel Soll"
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    icon: mdi:target
+  - platform: template
+    id: theta_aussen2
+    name: "Außen 2 (Emulator)"
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: theta_aussen
+    name: "Außen (Theta)"
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: theta_warmwasser
+    name: "Warmwasser"
+    unit_of_measurement: "°C"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+  - platform: template
+    id: theta_brennerstunden
+    name: "Brenner Betriebsstunden"
+    unit_of_measurement: "h"
+    device_class: duration
+    state_class: total_increasing
+    accuracy_decimals: 2
+  - platform: template
+    id: theta_brennerstarts
+    name: "Brenner Starts"
+    state_class: total_increasing
+    accuracy_decimals: 0
+  - platform: template
+    id: theta_frames_ok
+    name: "Debug-Port Rahmen OK"
+    state_class: total_increasing
+    accuracy_decimals: 0
+    entity_category: diagnostic
+  - platform: template
+    id: theta_frames_err
+    name: "Debug-Port Rahmen fehlerhaft"
+    state_class: total_increasing
+    accuracy_decimals: 0
+    entity_category: diagnostic
+
+  - platform: wifi_signal
+    name: "WLAN Signal"
+    update_interval: 60s
+    entity_category: diagnostic
+  - platform: uptime
+    name: "Laufzeit"
+    entity_category: diagnostic
+
+binary_sensor:
+  - platform: template
+    id: theta_brenner
+    name: "Brenner"
+    device_class: running
+  - platform: template
+    id: theta_hkp
+    name: "Heizkreispumpe"
+    device_class: running
+    icon: mdi:pump
+  - platform: template
+    id: theta_slp
+    name: "Speicherladepumpe"
+    device_class: running
+    icon: mdi:pump
+
+text_sensor:
+  - platform: template
+    id: theta_typen
+    name: "Debug-Port Rahmentypen"
+    entity_category: diagnostic
+  - platform: template
+    id: theta_changes
+    name: "Debug-Port Änderungen"
+    entity_category: diagnostic
+  - platform: template
+    id: theta_dump
+    name: "Debug-Port Rahmen-Dump"
+    entity_category: diagnostic
+  - platform: template
+    id: theta_raw_bd01
+    name: "Rohdaten bd01"
+    entity_category: diagnostic
+  - platform: template
+    id: theta_raw_a901
+    name: "Rohdaten a901"
+    entity_category: diagnostic
+  - platform: template
+    id: theta_raw_c201
+    name: "Rohdaten c201"
+    entity_category: diagnostic
+  - platform: template
+    id: theta_raw_1c
+    name: "Rohdaten Außentemperatur"
+    entity_category: diagnostic

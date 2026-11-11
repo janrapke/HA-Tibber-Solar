@@ -1,0 +1,206 @@
+# ============================================================
+# Package: Heizung Kessel – Kessel-Soll über das ESP an der Theta (Boost)
+# ============================================================
+#
+# Einbinden in configuration.yaml:
+#   homeassistant:
+#     packages:
+#       heizung_kessel: !include ha_packages/heizung_kessel.yaml
+#
+# Technik (11.11.2026): ESP "Heizung Theta" (esphome/theta-heizung.yaml) emuliert an Klemme 30 den
+# Außenfühler 2 (DK 10 = 2). number.heizung_theta_kessel_soll_ziel = 0 -> das ESP reicht die echte
+# Außentemperatur durch, die Theta regelt wie immer. Ziel > 0 -> das ESP regelt die Emulation, bis das
+# Kessel-Soll der Theta (sensor.heizung_theta_kessel_soll) dem Ziel entspricht. Ohne HA löscht das ESP
+# das Ziel nach 10 min selbst; nach einem Neustart steht es auf 0.
+# Test 11.11.2026: Soll 65 °C stabil ±0,2 K, Brennerläufe 5–7 min statt 2–3 min, Kessel 58–77 °C
+# (Schaltdifferenz WEZ 08 = 12 K). Höchstes erreichbares Soll mit Heizkurve 1,10: ~65 °C.
+#
+# Boost (Absprache mit dem Besitzer 12.11.2026):
+#   Start: der Fernseher läuft (Präsenzmelder allein zählt nicht), Wohnzimmer mindestens 1,5 K unter dem
+#     Soll von BT Wohnzimmer, die Theta ist in ihrer Heizzeit (Kessel-Soll > 0 ohne Ziel; nachts ECO = Soll 0)
+#     und die Klima heizt weder jetzt noch in den nächsten 15 min (sensor.klima_wohnzimmer_entscheidung,
+#     Attribute klima_heizt / klima_heizt_in_15_min) – dann heizt die Klima den Raum schneller auf.
+#     Gilt jederzeit in der Heizzeit, also auch morgens nach dem Nachtbetrieb.
+#   Ende: Wohnzimmer erreicht Soll - 0,5 K, oder der Fernseher ist 30 min am Stück aus (kurz raus
+#     beendet nichts), oder die Klima übernimmt das Heizen, oder nach 2 h, oder um 23:00.
+#   Boost-Temperatur 62 °C (65 °C ließ den Kessel nach dem Abschalten auf 77 °C nachlaufen).
+#   Bad-Vorheizen (heizung_bad.yaml) fährt ebenfalls mit Boost-Temperatur, solange es läuft und
+#     input_boolean.kessel_boost_bad an ist; die Lernautomatik passt den Startzeitpunkt selbst an.
+#   Einstellungen ohne "initial": HA behält nach einem Neustart den zuletzt eingestellten Wert.
+#   Kein Alexa-Schalter: dafür gibt es die Klimaanlage ("mir ist kalt").
+
+input_boolean:
+  kessel_boost:
+    name: "Kessel-Boost"
+    icon: mdi:fire-alert
+  kessel_boost_bad:
+    name: "Kessel-Boost beim Bad-Vorheizen"
+    icon: mdi:shower-head
+
+input_number:
+  kessel_boost_temperatur:
+    name: "Kessel-Boost Temperatur"
+    min: 50
+    max: 65
+    step: 1
+    unit_of_measurement: "°C"
+    icon: mdi:thermometer-high
+  kessel_boost_ende_abstand:
+    name: "Kessel-Boost Ende unter Soll"
+    min: 0
+    max: 1.5
+    step: 0.1
+    unit_of_measurement: "K"
+    icon: mdi:thermometer-minus
+
+timer:
+  kessel_boost:
+    name: "Kessel-Boost Restzeit"
+    duration: "02:00:00"
+    icon: mdi:timer-sand
+
+template:
+  - sensor:
+      - name: "Kessel-Soll Vorgabe"
+        unique_id: kessel_soll_vorgabe
+        unit_of_measurement: "°C"
+        icon: mdi:target
+        # 0 = keine Vorgabe, die Theta regelt selbst
+        state: >
+          {% set boost = is_state('input_boolean.kessel_boost', 'on') %}
+          {% set bad = is_state('input_boolean.bad_vorheizen', 'on') and is_state('input_boolean.kessel_boost_bad', 'on') %}
+          {{ states('input_number.kessel_boost_temperatur') | float(62) if boost or bad else 0 }}
+        attributes:
+          grund: >
+            {% if is_state('input_boolean.kessel_boost', 'on') %}Boost Wohnbereich
+            {% elif is_state('input_boolean.bad_vorheizen', 'on') and is_state('input_boolean.kessel_boost_bad', 'on') %}Bad vorheizen
+            {% else %}Theta regelt selbst{% endif %}
+
+automation:
+  - id: kessel_boost_start
+    alias: "Kessel-Boost: starten"
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: media_player.lg_webos_tv_up75009lf
+        to: "on"
+      - trigger: time_pattern
+        minutes: "/2"
+    conditions:
+      - condition: state
+        entity_id: input_boolean.kessel_boost
+        state: "off"
+      - condition: state
+        entity_id: media_player.lg_webos_tv_up75009lf
+        state: "on"
+      - condition: template
+        # the AC heats now or in the next 15 min -> it warms the room faster, no oil boost
+        value_template: >
+          {{ not state_attr('sensor.klima_wohnzimmer_entscheidung', 'klima_heizt')
+             and not state_attr('sensor.klima_wohnzimmer_entscheidung', 'klima_heizt_in_15_min') }}
+      - condition: template
+        value_template: >
+          {% set raum = states('sensor.wohnzimmer_temperatur') | float(99) %}
+          {% set soll = state_attr('climate.bt_wohnzimmer_bt_wohnzimmer', 'temperature') | float(0) %}
+          {{ soll > 0 and raum <= soll - 1.5 }}
+      - condition: template
+        # heating time of the Theta: without a target its Soll is > 0 (night ECO = 0)
+        value_template: >
+          {{ states('number.heizung_theta_kessel_soll_ziel') | float(0) == 0
+             and states('sensor.heizung_theta_kessel_soll') | float(0) > 0 }}
+      - condition: time
+        after: "05:00:00"
+        before: "23:00:00"
+    actions:
+      - action: input_boolean.turn_on
+        target: {entity_id: input_boolean.kessel_boost}
+
+  - id: kessel_boost_ende
+    alias: "Kessel-Boost: beenden"
+    mode: single
+    triggers:
+      - trigger: template
+        value_template: >
+          {% set raum = states('sensor.wohnzimmer_temperatur') | float(0) %}
+          {% set soll = state_attr('climate.bt_wohnzimmer_bt_wohnzimmer', 'temperature') | float(0) %}
+          {{ raum >= soll - states('input_number.kessel_boost_ende_abstand') | float(0.5) }}
+        id: "warm"
+      - trigger: state
+        entity_id: media_player.lg_webos_tv_up75009lf
+        from: "on"
+        for: "00:30:00"
+        id: "fernseher_aus"
+      - trigger: template
+        value_template: "{{ state_attr('sensor.klima_wohnzimmer_entscheidung', 'klima_heizt') == true }}"
+        id: "klima"
+      - trigger: event
+        event_type: timer.finished
+        event_data:
+          entity_id: timer.kessel_boost
+        id: "zeit"
+      - trigger: time
+        at: "23:00:00"
+        id: "nacht"
+    conditions:
+      - condition: state
+        entity_id: input_boolean.kessel_boost
+        state: "on"
+    actions:
+      - action: input_boolean.turn_off
+        target: {entity_id: input_boolean.kessel_boost}
+      - action: logbook.log
+        data:
+          name: "Kessel-Boost"
+          message: "beendet ({{ trigger.id }})"
+          entity_id: input_boolean.kessel_boost
+
+  - id: kessel_boost_timer
+    alias: "Kessel-Boost: Timer"
+    mode: queued
+    triggers:
+      - trigger: state
+        entity_id: input_boolean.kessel_boost
+    actions:
+      - if:
+          - condition: state
+            entity_id: input_boolean.kessel_boost
+            state: "on"
+        then:
+          - action: timer.start
+            target: {entity_id: timer.kessel_boost}
+        else:
+          - action: timer.cancel
+            target: {entity_id: timer.kessel_boost}
+
+  # Vorgabe ans ESP geben: bei jeder Änderung immer (12.11.2026: Boost an und 2 s später aus – der Abgleich
+  # sah beim ESP noch die alte 0, schickte nichts, und das ESP blieb auf 63 °C stehen), sobald das ESP wieder
+  # erreichbar ist, und jede Minute als Abgleich, falls ein Befehl im schwachen WLAN verloren ging.
+  - id: kessel_soll_vorgabe_senden
+    alias: "Kessel-Soll Vorgabe ans ESP"
+    mode: queued
+    max: 5
+    triggers:
+      - trigger: state
+        entity_id: sensor.kessel_soll_vorgabe
+        id: "aenderung"
+      - trigger: state
+        entity_id: number.heizung_theta_kessel_soll_ziel
+        from: "unavailable"
+        id: "wieder_da"
+      - trigger: time_pattern
+        minutes: "/1"
+        id: "abgleich"
+      - trigger: homeassistant
+        event: start
+        id: "start"
+    conditions:
+      - condition: template
+        value_template: >
+          {{ has_value('number.heizung_theta_kessel_soll_ziel')
+             and (trigger.id in ['aenderung', 'wieder_da', 'start']
+                  or states('number.heizung_theta_kessel_soll_ziel') | float(-1) != states('sensor.kessel_soll_vorgabe') | float(0)) }}
+    actions:
+      - action: number.set_value
+        target: {entity_id: number.heizung_theta_kessel_soll_ziel}
+        data:
+          value: "{{ states('sensor.kessel_soll_vorgabe') | float(0) }}"

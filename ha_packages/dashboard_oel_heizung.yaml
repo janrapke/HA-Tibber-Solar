@@ -152,7 +152,8 @@ sections:
         show_state: false
         triggers_update:
           - binary_sensor.olheizung_brenner_lauft
-          - sensor.heizung_abgasrohr_temperatur
+          - sensor.heizung_theta_kessel
+          - sensor.heizung_theta_kessel_soll
           - sensor.olheizung_ol_heute
           - sensor.olheizung_ol_monat
           - sensor.olheizung_brennerstarts_heute
@@ -169,7 +170,8 @@ sections:
               const f = (v, d) => { const x = n(v); return x === null ? '–' : x.toLocaleString('de-DE', {minimumFractionDigits: d, maximumFractionDigits: d}); };
               const on = states['binary_sensor.olheizung_brenner_lauft']?.state === 'on';
               const col = on ? '#f97316' : '#9ca3af';
-              const gas = n(states['sensor.heizung_abgasrohr_temperatur']?.state);
+              const kessel = n(states['sensor.heizung_theta_kessel']?.state);
+              const ksoll = n(states['sensor.heizung_theta_kessel_soll']?.state);
               const lh = n(states['sensor.olheizung_ol_heute']?.state), lm = n(states['sensor.olheizung_ol_monat']?.state);
               const starts = n(states['sensor.olheizung_brennerstarts_heute']?.state);
               const mins = n(entity.state);
@@ -192,8 +194,8 @@ sections:
                     <div style="font-size:12px;color:var(--secondary-text-color);text-transform:uppercase;letter-spacing:.06em">Ölbrenner</div>
                     <div style="font-size:18px;font-weight:700">${on ? 'Brenner läuft' : 'Brenner aus'}</div></div>
                   <div style="text-align:right">
-                    <div style="font-size:30px;font-weight:300;line-height:1">${f(gas, 0)}<span style="font-size:15px;vertical-align:top">°C</span></div>
-                    <div style="font-size:11px;color:var(--secondary-text-color)">Abgasrohr</div></div>
+                    <div style="font-size:30px;font-weight:300;line-height:1">${f(kessel, 0)}<span style="font-size:15px;vertical-align:top">°C</span></div>
+                    <div style="font-size:11px;color:var(--secondary-text-color)">Kessel · Soll ${ksoll ? f(ksoll, 0) + ' °C' : 'aus'}</div></div>
                 </div>
                 <div style="font-size:11px;color:var(--secondary-text-color);margin:16px 0 4px">Laufzeiten heute</div>
                 <div style="position:relative;height:22px;border-radius:6px;background:rgba(127,127,127,.12);overflow:hidden">${segs}
@@ -212,20 +214,33 @@ sections:
       - type: custom:apexcharts-card
         grid_options: {columns: full}
         graph_span: 24h
-        header: {show: true, title: Abgasrohr 24 h, show_states: true, colorize_states: true}
+        header: {show: true, title: Kessel 24 h, show_states: true, colorize_states: true}
         apex_config:
-          chart: {height: 160, toolbar: {show: false}}
+          chart: {height: 180, toolbar: {show: false}}
           grid: {strokeDashArray: 4}
-          legend: {show: false}
+          legend: {show: true, position: bottom}
         series:
-          - entity: sensor.heizung_abgasrohr_temperatur
-            name: Abgasrohr
+          - entity: sensor.heizung_theta_kessel
+            name: Kessel
             color: '#f97316'
             type: area
             opacity: 0.2
             stroke_width: 2
+            float_precision: 1
+            group_by: {func: avg, duration: 2min}
+          - entity: sensor.heizung_theta_kessel_soll
+            name: Soll
+            color: '#8b5cf6'
+            stroke_width: 2
+            curve: stepline
             float_precision: 0
-            group_by: {func: max, duration: 5min}
+            group_by: {func: last, duration: 2min}
+          - entity: sensor.heizung_theta_warmwasser
+            name: Warmwasser
+            color: '#0ea5e9'
+            stroke_width: 1.5
+            float_precision: 1
+            group_by: {func: avg, duration: 5min}
 
       - type: heading
         heading: Heiztage
@@ -366,3 +381,150 @@ sections:
         stat_types: [mean]
         chart_type: line
         hide_legend: true
+
+  # ══════════════════════════════════════════════════════════
+  # KESSEL & STEUERUNG (ESP am Debug-Port der Theta, Außenfühler-2-Emulation an Klemme 30)
+  # ══════════════════════════════════════════════════════════
+  - type: grid
+    cards:
+      - type: heading
+        heading: Kessel & Steuerung
+        icon: mdi:water-boiler
+        badges:
+          - type: entity
+            entity: input_boolean.kessel_boost
+            name: Boost
+            show_icon: true
+            show_state: false
+            show_name: true
+            color: red
+            visibility:
+              - condition: state
+                entity: input_boolean.kessel_boost
+                state: 'on'
+
+      - type: custom:button-card
+        entity: sensor.heizung_theta_kessel
+        grid_options: {columns: full}
+        show_name: false
+        show_icon: false
+        show_state: false
+        triggers_update:
+          - sensor.heizung_theta_kessel_soll
+          - sensor.kessel_soll_vorgabe
+          - sensor.heizung_theta_warmwasser
+          - sensor.heizung_theta_aussen_theta
+          - sensor.heizung_theta_emulierte_aussentemperatur
+          - binary_sensor.heizung_theta_brenner
+          - binary_sensor.heizung_theta_heizkreispumpe
+          - binary_sensor.heizung_theta_speicherladepumpe
+          - sensor.heizung_theta_vorlauf
+          - sensor.heizung_theta_rucklauf
+          - sensor.heizung_theta_speicher_ladeleitung
+          - sensor.heizung_theta_speicher_rucklauf
+          - sensor.heizung_theta_brenner_starts
+          - sensor.heizung_theta_brenner_betriebsstunden
+        tap_action: {action: more-info}
+        styles:
+          card: [{padding: 0}, {border-radius: 18px}, {overflow: hidden}]
+          grid: [{grid-template-areas: '"c"'}, {grid-template-columns: 1fr}]
+          custom_fields:
+            c: [{white-space: normal}, {text-align: left}, {width: 100%}]
+        custom_fields:
+          c: |
+            [[[
+              const st = (e) => states[e]?.state;
+              const n = (v) => { const x = parseFloat(v); return isNaN(x) ? null : x; };
+              const f = (v, d) => { const x = n(v); return x === null ? '–' : x.toLocaleString('de-DE', {minimumFractionDigits: d, maximumFractionDigits: d}); };
+              const on = (e) => st(e) === 'on';
+              const soll = n(st('sensor.heizung_theta_kessel_soll'));
+              const vorg = n(st('sensor.kessel_soll_vorgabe'));
+              const grund = states['sensor.kessel_soll_vorgabe']?.attributes?.grund || '';
+              const boost = vorg > 0;
+              const col = boost ? '#ef4444' : (on('binary_sensor.heizung_theta_brenner') ? '#f97316' : '#64748b');
+              const tile = (icon, v, lab, c) => `<div style="padding:10px;border-radius:14px;background:rgba(127,127,127,.08)">
+                  <ha-icon icon="${icon}" style="--mdc-icon-size:18px;color:${c}"></ha-icon>
+                  <div style="font-size:17px;font-weight:600;margin-top:2px;white-space:nowrap">${v}</div>
+                  <div style="font-size:11px;color:var(--secondary-text-color)">${lab}</div></div>`;
+              const chip = (e, icon, lab) => { const a = on(e); return `<span style="display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:999px;font-size:12px;background:${a ? '#22c55e26' : 'rgba(127,127,127,.12)'};color:${a ? '#16a34a' : 'var(--secondary-text-color)'}"><ha-icon icon="${icon}" style="--mdc-icon-size:15px"></ha-icon>${lab}</span>`; };
+              const pipe = (e, lab) => `<div style="display:flex;justify-content:space-between;font-size:13px;padding:3px 0"><span style="color:var(--secondary-text-color)">${lab}</span><b>${n(st(e)) === null ? '–' : f(st(e), 1) + ' °C'}</b></div>`;
+              return `
+              <div style="padding:18px;background:linear-gradient(135deg, ${col}26 0%, transparent 60%)">
+                <div style="display:flex;align-items:center;gap:12px">
+                  <div style="width:44px;height:44px;border-radius:14px;display:flex;align-items:center;justify-content:center;background:${col}2e">
+                    <ha-icon icon="${boost ? 'mdi:fire-alert' : 'mdi:water-boiler'}" style="--mdc-icon-size:26px;color:${col}"></ha-icon></div>
+                  <div style="flex:1">
+                    <div style="font-size:12px;color:var(--secondary-text-color);text-transform:uppercase;letter-spacing:.06em">Kessel-Soll</div>
+                    <div style="font-size:18px;font-weight:700">${boost ? 'Vorgabe ' + f(vorg, 0) + ' °C' : 'Theta regelt selbst'}</div>
+                    <div style="font-size:11px;color:var(--secondary-text-color)">${boost ? grund : 'nach Heizkurve und Außentemperatur'}</div></div>
+                  <div style="text-align:right">
+                    <div style="font-size:30px;font-weight:300;line-height:1">${soll ? f(soll, 0) : 'aus'}<span style="font-size:15px;vertical-align:top">${soll ? '°C' : ''}</span></div>
+                    <div style="font-size:11px;color:var(--secondary-text-color)">Soll der Theta</div></div>
+                </div>
+                <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px">
+                  ${chip('binary_sensor.heizung_theta_brenner', 'mdi:fire', 'Brenner')}
+                  ${chip('binary_sensor.heizung_theta_heizkreispumpe', 'mdi:radiator', 'Heizkreispumpe')}
+                  ${chip('binary_sensor.heizung_theta_speicherladepumpe', 'mdi:water-pump', 'Ladepumpe')}
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:14px">
+                  ${tile('mdi:thermometer', f(st('sensor.heizung_theta_kessel'), 1) + '°', 'Kessel', '#f97316')}
+                  ${tile('mdi:water-thermometer', f(st('sensor.heizung_theta_warmwasser'), 1) + '°', 'Warmwasser', '#0ea5e9')}
+                  ${tile('mdi:sun-thermometer', f(st('sensor.heizung_theta_aussen_theta'), 1) + '°', 'Außen', '#10b981')}
+                  ${tile('mdi:thermometer-auto', f(st('sensor.heizung_theta_emulierte_aussentemperatur'), 1) + '°', 'an Theta', '#8b5cf6')}
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 18px;margin-top:14px">
+                  ${pipe('sensor.heizung_theta_vorlauf', 'Vorlauf')}
+                  ${pipe('sensor.heizung_theta_speicher_ladeleitung', 'Ladeleitung')}
+                  ${pipe('sensor.heizung_theta_rucklauf', 'Rücklauf')}
+                  ${pipe('sensor.heizung_theta_speicher_rucklauf', 'Speicher-Rücklauf')}
+                </div>
+                <div style="font-size:11px;color:var(--secondary-text-color);margin-top:12px">
+                  Zähler der Theta: ${f(st('sensor.heizung_theta_brenner_starts'), 0)} Starts · ${f(st('sensor.heizung_theta_brenner_betriebsstunden'), 0)} h</div>
+              </div>`;
+            ]]]
+
+      - type: heading
+        heading: Boost
+        heading_style: subtitle
+      - type: tile
+        entity: input_boolean.kessel_boost
+        name: Boost
+        icon: mdi:fire-alert
+        color: red
+        grid_options: {columns: 6, rows: 1}
+        tap_action: {action: toggle}
+      - type: tile
+        entity: timer.kessel_boost
+        name: Restzeit
+        icon: mdi:timer-sand
+        color: red
+        grid_options: {columns: 6, rows: 1}
+      - &boostnum
+        type: tile
+        entity: input_number.kessel_boost_temperatur
+        name: Temperatur
+        icon: mdi:thermometer-high
+        color: deep-orange
+        grid_options: {columns: 6, rows: 2}
+        features_position: bottom
+        features:
+          - {type: numeric-input, style: buttons}
+      - <<: *boostnum
+        entity: input_number.kessel_boost_ende_abstand
+        name: Ende unter Soll
+        icon: mdi:thermometer-minus
+        color: amber
+      - type: tile
+        entity: input_boolean.kessel_boost_bad
+        name: Bad-Vorheizen
+        icon: mdi:shower-head
+        color: blue
+        grid_options: {columns: 6, rows: 1}
+        tap_action: {action: toggle}
+      - type: tile
+        entity: switch.heizung_theta_aussenfuhler_emulation
+        name: Steuerung
+        icon: mdi:thermometer-auto
+        color: purple
+        grid_options: {columns: 6, rows: 1}
+        tap_action: {action: more-info}

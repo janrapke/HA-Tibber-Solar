@@ -16,6 +16,8 @@ Rules for the commands:
 from __future__ import annotations
 
 from collections import deque
+import copy
+from dataclasses import replace as dc_replace
 from datetime import datetime, timedelta
 import logging
 
@@ -539,6 +541,7 @@ class ClimateController:
                 inputs.mode = MODE_AUTO
                 d = decide(inputs, self.state)
         self.decision = d
+        heats_soon = self._heats_in(inputs, ext, timedelta(minutes=15))
 
         await self._check_valves(now)
 
@@ -555,6 +558,9 @@ class ClimateController:
             "steuerung_aktiv": self.control_active,
             "betriebsmodus": self.mode,
             "klima_soll_an": d.climate_on,
+            # for the oil boost (ha_packages/heizung_kessel.yaml): no boost while the AC heats or is about to
+            "klima_heizt": bool(d.climate_on and d.hvac == "heat"),
+            "klima_heizt_in_15_min": heats_soon,
             "hvac": d.hvac,
             "sollwert": d.setpoint,
             "luefter": d.fan,
@@ -594,6 +600,18 @@ class ClimateController:
         }
         self._changed()
         return d
+
+    def _heats_in(self, inputs: Inputs, ext: dict, ahead: timedelta) -> bool:
+        """Would the automatic decision heat with the AC a little later (prices of then, same room)?"""
+        try:
+            later = dc_replace(inputs, now=inputs.now + ahead,
+                               price=ext.get("price_in_15") if ext.get("price_in_15") is not None else inputs.price,
+                               price_ahead=ext.get("price_ahead_in_15"))
+            d = decide(later, copy.deepcopy(self.state))
+            return bool(d.climate_on and d.hvac == "heat")
+        except Exception:  # noqa: BLE001 - only a hint for the boost
+            _LOGGER.debug("AC look-ahead failed", exc_info=True)
+            return False
 
     # ------------------------------------------------------------ executing
     async def _execute(self, now: datetime, d: Decision, ac_hvac: str | None, attrs: dict) -> None:
