@@ -34,7 +34,7 @@
 #   - Brenner geht aus -> "abkuehlen": Vorgabe 0, die Theta regelt normal, der Kessel kühlt wie sonst ab.
 #   - Die Theta schaltet von selbst wieder ein -> "aufheizen": Vorgabe wieder hoch, der Lauf geht bis zur
 #     Ausschalttemperatur weiter. Bis der Raum warm ist.
-#   Ausschalttemperatur Wohnbereich 65 °C (input_number.kessel_boost_temperatur), Bad 55 °C
+#   Ausschalttemperatur Wohnbereich 60 °C (input_number.kessel_boost_temperatur), Bad 55 °C
 #     (input_number.kessel_bad_ausschalttemperatur, mit Nachlauf ~60 °C).
 #
 # Außentemperatur (12.11.2026): der Außenfühler der Theta misst ~4 K zu warm (7 °C bei 3 °C laut
