@@ -469,8 +469,8 @@ sections:
                 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:14px">
                   ${tile('mdi:thermometer', f(st('sensor.heizung_theta_kessel'), 1) + '°', 'Kessel', '#f97316')}
                   ${tile('mdi:water-thermometer', f(st('sensor.heizung_theta_warmwasser'), 1) + '°', 'Warmwasser', '#0ea5e9')}
-                  ${tile('mdi:sun-thermometer', f(st('sensor.heizung_theta_aussen_theta'), 1) + '°', 'Außen', '#10b981')}
-                  ${tile('mdi:thermometer-auto', f(st('sensor.heizung_theta_emulierte_aussentemperatur'), 1) + '°', 'an Theta', '#8b5cf6')}
+                  ${tile('mdi:sun-thermometer', f(st('sensor.heizung_theta_aussen_theta'), 1) + '°', 'Fühler Theta', '#10b981')}
+                  ${tile('mdi:thermometer-auto', f(st('sensor.heizung_theta_emulierte_aussentemperatur'), 1) + '°', 'an Theta (Wetter)', '#8b5cf6')}
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 18px;margin-top:14px">
                   ${pipe('sensor.heizung_theta_vorlauf', 'Vorlauf')}
@@ -502,7 +502,7 @@ sections:
       - &boostnum
         type: tile
         entity: input_number.kessel_boost_temperatur
-        name: Temperatur
+        name: Aus bei (Wohnbereich)
         icon: mdi:thermometer-high
         color: deep-orange
         grid_options: {columns: 6, rows: 2}
@@ -510,10 +510,22 @@ sections:
         features:
           - {type: numeric-input, style: buttons}
       - <<: *boostnum
+        entity: input_number.kessel_bad_ausschalttemperatur
+        name: Aus bei (Bad)
+        icon: mdi:shower-head
+        color: blue
+      - <<: *boostnum
         entity: input_number.kessel_boost_ende_abstand
         name: Ende unter Soll
         icon: mdi:thermometer-minus
         color: amber
+      - type: tile
+        entity: input_select.kessel_block_phase
+        name: Block-Phase
+        icon: mdi:sine-wave
+        color: deep-orange
+        grid_options: {columns: 6, rows: 1}
+        tap_action: {action: more-info}
       - type: tile
         entity: input_boolean.kessel_boost_bad
         name: Bad-Vorheizen

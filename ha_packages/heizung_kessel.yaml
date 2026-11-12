@@ -23,9 +23,24 @@
 #     Gilt jederzeit in der Heizzeit, also auch morgens nach dem Nachtbetrieb.
 #   Ende: Wohnzimmer erreicht Soll - 0,5 K, oder der Fernseher ist 30 min am Stück aus (kurz raus
 #     beendet nichts), oder die Klima übernimmt das Heizen, oder nach 2 h, oder um 23:00.
-#   Boost-Temperatur 62 °C (65 °C ließ den Kessel nach dem Abschalten auf 77 °C nachlaufen).
-#   Bad-Vorheizen (heizung_bad.yaml) fährt ebenfalls mit Boost-Temperatur, solange es läuft und
+#   Bad-Vorheizen (heizung_bad.yaml) nutzt dieselbe Block-Logik, solange es läuft und
 #     input_boolean.kessel_boost_bad an ist; die Lernautomatik passt den Startzeitpunkt selbst an.
+#
+# Block statt Dauer-Boost (Wunsch des Besitzers 12.11.2026, nach 1,41 L statt ~0,5–1 L am Morgen: 63 °C
+#   Dauer-Soll beim Bad-Vorheizen hielt den Kessel bei 63–81 °C, nur der kleine Bad-Heizkörper nahm ab):
+#   input_select.kessel_block_phase
+#   - "aufheizen": Vorgabe = Ausschalttemperatur - 6 K (WEZ 08 = 12 K Schaltdifferenz, die Theta schaltet
+#     bei Soll + 6 K ab). Ein langer Lauf bis zur Ausschalttemperatur; der Kessel läuft danach ~5 K nach.
+#   - Brenner geht aus -> "abkuehlen": Vorgabe 0, die Theta regelt normal, der Kessel kühlt wie sonst ab.
+#   - Die Theta schaltet von selbst wieder ein -> "aufheizen": Vorgabe wieder hoch, der Lauf geht bis zur
+#     Ausschalttemperatur weiter. Bis der Raum warm ist.
+#   Ausschalttemperatur Wohnbereich 65 °C (input_number.kessel_boost_temperatur), Bad 55 °C
+#     (input_number.kessel_bad_ausschalttemperatur, mit Nachlauf ~60 °C).
+#
+# Außentemperatur (12.11.2026): der Außenfühler der Theta misst ~4 K zu warm (7 °C bei 3 °C laut
+#   Wetterdienst und Tesla). HA schickt dem ESP jede Minute sensor.openweathermap_temperature
+#   (number.heizung_theta_aussentemperatur_referenz); das ESP reicht ihn statt des Fühlers durch und nimmt
+#   nach 30 min ohne Wert wieder den Fühler. Erwartung: Soll ~46–47 statt 44 °C bei 3 °C draußen.
 #   Einstellungen ohne "initial": HA behält nach einem Neustart den zuletzt eingestellten Wert.
 #   Kein Alexa-Schalter: dafür gibt es die Klimaanlage ("mir ist kalt").
 
@@ -39,12 +54,19 @@ input_boolean:
 
 input_number:
   kessel_boost_temperatur:
-    name: "Kessel-Boost Temperatur"
+    name: "Kessel-Boost Ausschalttemperatur"
     min: 50
-    max: 65
+    max: 70
     step: 1
     unit_of_measurement: "°C"
     icon: mdi:thermometer-high
+  kessel_bad_ausschalttemperatur:
+    name: "Kessel Bad-Vorheizen Ausschalttemperatur"
+    min: 45
+    max: 70
+    step: 1
+    unit_of_measurement: "°C"
+    icon: mdi:shower-head
   kessel_boost_ende_abstand:
     name: "Kessel-Boost Ende unter Soll"
     min: 0
@@ -52,6 +74,12 @@ input_number:
     step: 0.1
     unit_of_measurement: "K"
     icon: mdi:thermometer-minus
+
+input_select:
+  kessel_block_phase:
+    name: "Kessel Block-Phase"
+    options: ["aus", "aufheizen", "abkuehlen"]
+    icon: mdi:sine-wave
 
 timer:
   kessel_boost:
@@ -66,17 +94,85 @@ template:
         unit_of_measurement: "°C"
         icon: mdi:target
         # 0 = keine Vorgabe, die Theta regelt selbst
+        # Soll = Ausschalttemperatur - 6 K (half of the 12 K switching difference WEZ 08), only while "aufheizen"
         state: >
           {% set boost = is_state('input_boolean.kessel_boost', 'on') %}
           {% set bad = is_state('input_boolean.bad_vorheizen', 'on') and is_state('input_boolean.kessel_boost_bad', 'on') %}
-          {{ states('input_number.kessel_boost_temperatur') | float(62) if boost or bad else 0 }}
+          {% set aus = [states('input_number.kessel_boost_temperatur') | float(65) if boost else 0,
+                        states('input_number.kessel_bad_ausschalttemperatur') | float(55) if bad else 0] | max %}
+          {{ (aus - 6) if (boost or bad) and is_state('input_select.kessel_block_phase', 'aufheizen') else 0 }}
         attributes:
           grund: >
-            {% if is_state('input_boolean.kessel_boost', 'on') %}Boost Wohnbereich
-            {% elif is_state('input_boolean.bad_vorheizen', 'on') and is_state('input_boolean.kessel_boost_bad', 'on') %}Bad vorheizen
+            {% set ph = 'Aufheizen' if is_state('input_select.kessel_block_phase', 'aufheizen') else 'Abkühlen bis zum nächsten Start' %}
+            {% if is_state('input_boolean.kessel_boost', 'on') %}Boost Wohnbereich: {{ ph }}
+            {% elif is_state('input_boolean.bad_vorheizen', 'on') and is_state('input_boolean.kessel_boost_bad', 'on') %}Bad vorheizen: {{ ph }}
             {% else %}Theta regelt selbst{% endif %}
 
 automation:
+  # Block-Phasen: aufheizen bis zur Ausschalttemperatur, dann normal abkühlen, beim nächsten Start wieder hoch
+  - id: kessel_block_phase
+    alias: "Kessel-Block: Phase"
+    mode: queued
+    max: 5
+    triggers:
+      - trigger: state
+        entity_id: [input_boolean.kessel_boost, input_boolean.bad_vorheizen, input_boolean.kessel_boost_bad]
+        id: "block"
+      - trigger: state
+        entity_id: binary_sensor.heizung_theta_brenner
+        from: "on"
+        to: "off"
+        id: "brenner_aus"
+      - trigger: state
+        entity_id: binary_sensor.heizung_theta_brenner
+        from: "off"
+        to: "on"
+        id: "brenner_an"
+    variables:
+      aktiv: >
+        {{ is_state('input_boolean.kessel_boost', 'on')
+           or (is_state('input_boolean.bad_vorheizen', 'on') and is_state('input_boolean.kessel_boost_bad', 'on')) }}
+      phase: "{{ states('input_select.kessel_block_phase') }}"
+      neu: >
+        {% if not aktiv %}aus
+        {% elif phase == 'aus' %}aufheizen
+        {% elif trigger.id == 'brenner_aus' and phase == 'aufheizen' %}abkuehlen
+        {% elif trigger.id == 'brenner_an' and phase == 'abkuehlen' %}aufheizen
+        {% else %}{{ phase }}{% endif %}
+    conditions:
+      - condition: template
+        value_template: "{{ neu != phase }}"
+    actions:
+      - action: input_select.select_option
+        target: {entity_id: input_select.kessel_block_phase}
+        data:
+          option: "{{ neu }}"
+
+  # Außentemperatur vom Wetterdienst ans ESP (der Fühler der Theta misst ~4 K zu warm)
+  - id: kessel_aussentemperatur_senden
+    alias: "Kessel: Außentemperatur ans ESP"
+    mode: queued
+    max: 3
+    triggers:
+      - trigger: state
+        entity_id: sensor.openweathermap_temperature
+      - trigger: state
+        entity_id: number.heizung_theta_aussentemperatur_referenz
+        from: "unavailable"
+      - trigger: time_pattern
+        minutes: "/1"
+    conditions:
+      - condition: template
+        value_template: >
+          {{ has_value('number.heizung_theta_aussentemperatur_referenz')
+             and states('sensor.openweathermap_temperature') | is_number
+             and -35 < states('sensor.openweathermap_temperature') | float < 40 }}
+    actions:
+      - action: number.set_value
+        target: {entity_id: number.heizung_theta_aussentemperatur_referenz}
+        data:
+          value: "{{ states('sensor.openweathermap_temperature') | float | round(1) }}"
+
   - id: kessel_boost_start
     alias: "Kessel-Boost: starten"
     mode: single
