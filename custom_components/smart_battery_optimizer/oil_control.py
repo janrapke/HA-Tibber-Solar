@@ -29,6 +29,12 @@ except ImportError:  # loaded standalone by the tests
 
 _LOGGER = logging.getLogger(__name__)
 
+try:
+    from homeassistant.util.dt import as_local as _as_local
+except ImportError:  # tests without the full Home Assistant package
+    def _as_local(t: datetime) -> datetime:
+        return t.astimezone()
+
 STORE_VERSION = 1
 SAVE_DELAY_S = 60
 KEEP_RUNS_DAYS = 60
@@ -241,6 +247,8 @@ class OilMonitor:
         self._changed()
 
     def _day(self, t: datetime) -> HeatDay:
+        if t.tzinfo is not None:
+            t = _as_local(t)   # local day, also for runs with UTC state times
         key = t.date().isoformat()
         if key not in self.days:
             self.days[key] = HeatDay(key)
@@ -316,10 +324,13 @@ class OilMonitor:
         return sum(d.oil_l for k, d in self.days.items() if k.startswith(prefix))
 
     def runs_today(self, now: datetime) -> list[dict]:
+        # runs are stored with the time zone of their source (state times are UTC): show them in local time
+        tz = now.tzinfo
+        loc = lambda t: t.astimezone(tz) if tz is not None and t.tzinfo is not None else t  # noqa: E731
         day = now.date()
-        return [{"start": r.start.strftime("%H:%M:%S"), "ende": r.end.strftime("%H:%M:%S"),
+        return [{"start": loc(r.start).strftime("%H:%M:%S"), "ende": loc(r.end).strftime("%H:%M:%S"),
                  "minuten": round(r.minutes, 1), "liter": round(r.minutes / 60 * self.settings.flow_l_h, 2),
-                 "quelle": r.source} for r in self.runs if r.start.date() == day]
+                 "quelle": r.source} for r in self.runs if loc(r.start).date() == day]
 
     def burner_on(self) -> bool:
         if self._theta_ok():
