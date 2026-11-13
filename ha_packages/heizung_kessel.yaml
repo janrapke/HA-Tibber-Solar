@@ -25,6 +25,7 @@
 #     beendet nichts), oder die Klima übernimmt das Heizen, oder nach 2 h, oder um 23:00.
 #   Bad-Vorheizen (heizung_bad.yaml) nutzt dieselbe Block-Logik, solange es läuft und
 #     input_boolean.kessel_boost_bad an ist; die Lernautomatik passt den Startzeitpunkt selbst an.
+#   Dusch-Boost ("Alexa, ich will duschen", timer.bad_dusch_boost) ebenso, mit demselben Schalter (13.11.2026).
 #
 # Block statt Dauer-Boost (Wunsch des Besitzers 12.11.2026, nach 1,41 L statt ~0,5–1 L am Morgen: 63 °C
 #   Dauer-Soll beim Bad-Vorheizen hielt den Kessel bei 63–81 °C, nur der kleine Bad-Heizkörper nahm ab):
@@ -97,7 +98,8 @@ template:
         # Soll = Ausschalttemperatur - 6 K (half of the 12 K switching difference WEZ 08), only while "aufheizen"
         state: >
           {% set boost = is_state('input_boolean.kessel_boost', 'on') %}
-          {% set bad = is_state('input_boolean.bad_vorheizen', 'on') and is_state('input_boolean.kessel_boost_bad', 'on') %}
+          {% set bad = (is_state('input_boolean.bad_vorheizen', 'on') or is_state('timer.bad_dusch_boost', 'active'))
+                       and is_state('input_boolean.kessel_boost_bad', 'on') %}
           {% set aus = [states('input_number.kessel_boost_temperatur') | float(65) if boost else 0,
                         states('input_number.kessel_bad_ausschalttemperatur') | float(55) if bad else 0] | max %}
           {{ (aus - 6) if (boost or bad) and is_state('input_select.kessel_block_phase', 'aufheizen') else 0 }}
@@ -106,6 +108,7 @@ template:
             {% set ph = 'Aufheizen' if is_state('input_select.kessel_block_phase', 'aufheizen') else 'Abkühlen bis zum nächsten Start' %}
             {% if is_state('input_boolean.kessel_boost', 'on') %}Boost Wohnbereich: {{ ph }}
             {% elif is_state('input_boolean.bad_vorheizen', 'on') and is_state('input_boolean.kessel_boost_bad', 'on') %}Bad vorheizen: {{ ph }}
+            {% elif is_state('timer.bad_dusch_boost', 'active') and is_state('input_boolean.kessel_boost_bad', 'on') %}Dusch-Boost: {{ ph }}
             {% else %}Theta regelt selbst{% endif %}
 
 automation:
@@ -116,7 +119,7 @@ automation:
     max: 5
     triggers:
       - trigger: state
-        entity_id: [input_boolean.kessel_boost, input_boolean.bad_vorheizen, input_boolean.kessel_boost_bad]
+        entity_id: [input_boolean.kessel_boost, input_boolean.bad_vorheizen, input_boolean.kessel_boost_bad, timer.bad_dusch_boost]
         id: "block"
       - trigger: state
         entity_id: binary_sensor.heizung_theta_brenner
@@ -131,7 +134,8 @@ automation:
     variables:
       aktiv: >
         {{ is_state('input_boolean.kessel_boost', 'on')
-           or (is_state('input_boolean.bad_vorheizen', 'on') and is_state('input_boolean.kessel_boost_bad', 'on')) }}
+           or ((is_state('input_boolean.bad_vorheizen', 'on') or is_state('timer.bad_dusch_boost', 'active'))
+               and is_state('input_boolean.kessel_boost_bad', 'on')) }}
       phase: "{{ states('input_select.kessel_block_phase') }}"
       neu: >
         {% if not aktiv %}aus
